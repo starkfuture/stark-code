@@ -8,9 +8,9 @@ import {
   connectionRouteLabel,
   connectionRoutes,
   isLearned,
-} from "@t3tools/client-runtime/connection";
-import { type EnvironmentId, sessionGrantsScope } from "@t3tools/contracts";
-import { AUTH_SCOPE_OPTIONS } from "@t3tools/shared/authScopeOptions";
+} from "@starkfuture/client-runtime/connection";
+import { type EnvironmentId, sessionGrantsScope } from "@starkfuture/contracts";
+import { AUTH_SCOPE_OPTIONS } from "@starkfuture/shared/authScopeOptions";
 import { AsyncResult } from "effect/reactivity";
 import * as Option from "effect/Option";
 import { useState } from "react";
@@ -145,7 +145,7 @@ export function EnvironmentRoutesSection({
             onPress={() => setEditing((value) => !value)}
             className="px-2 py-1 active:opacity-70"
           >
-            <Text className="text-sm font-t3-medium text-foreground android:text-primary-text">
+            <Text className="text-sm font-stark-medium text-foreground android:text-primary-text">
               {editing ? "Done" : "Edit"}
             </Text>
           </Pressable>

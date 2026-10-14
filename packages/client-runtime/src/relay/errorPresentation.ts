@@ -1,5 +1,8 @@
-import type { DpopFailureReason } from "@t3tools/contracts";
-import type { RelayEnvironmentStatusResponse, RelayProtectedError } from "@t3tools/contracts/relay";
+import type { DpopFailureReason } from "@starkfuture/contracts";
+import type {
+  RelayEnvironmentStatusResponse,
+  RelayProtectedError,
+} from "@starkfuture/contracts/relay";
 
 export const DPOP_CLOCK_HINT =
   "Hint: Check that automatic date and time is enabled on both devices, then try again.";
@@ -44,7 +47,7 @@ export function relayProtectedErrorMessage(error: RelayProtectedError): string {
         return "Relay has no active link for this environment. The environment server may not have re-established its link yet.";
       }
       if (error.reason === "managed_endpoint_allocation_not_ready") {
-        return "The environment's T3 Connect tunnel is still being set up.";
+        return "The environment's Stark Connect tunnel is still being set up.";
       }
       return error.reason
         ? `Relay rejected the environment connection request (${error.reason}).`
@@ -72,7 +75,7 @@ export function relayProtectedErrorMessage(error: RelayProtectedError): string {
 // coming back, which clears this reason. While it is still reported, the host
 // is either still off or running a build too old to do that.
 export const RELAY_TUNNEL_RELEASED_MESSAGE =
-  "Offline for a while, so its T3 Connect tunnel was removed. Start T3 Code on that computer and update it to the latest version to reconnect.";
+  "Offline for a while, so its Stark Connect tunnel was removed. Start Stark Code on that computer and update it to the latest version to reconnect.";
 
 /** User-facing text for an offline status, or null when the relay gave no known reason. */
 export function relayOfflineReasonMessage(

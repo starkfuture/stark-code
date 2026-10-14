@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
+import type { DesktopBridge, DesktopUpdateState } from "@starkfuture/contracts";
 import { Atom } from "effect/reactivity";
 import { TriangleAlertIcon } from "lucide-react";
 import {

@@ -1,5 +1,5 @@
-import { AuthStandardClientScopes, EnvironmentId, type ServerConfig } from "@t3tools/contracts";
-import { RelayClientTracer } from "@t3tools/shared/relayTracing";
+import { AuthStandardClientScopes, EnvironmentId, type ServerConfig } from "@starkfuture/contracts";
+import { RelayClientTracer } from "@starkfuture/shared/relayTracing";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -93,7 +93,7 @@ const LAN_ROUTE: ConnectionRoute = {
     }),
   ),
 };
-// LAN first, T3 Connect as the fallback.
+// LAN first, Stark Connect as the fallback.
 const LAN_THEN_RELAY_ENTRY: ConnectionCatalogEntry = {
   target: LAN_ROUTE.target,
   profile: LAN_ROUTE.profile,
@@ -1493,7 +1493,7 @@ describe("EnvironmentSupervisor", () => {
         const pathname = new URL(request.url).pathname;
         httpPaths.push(pathname);
         switch (pathname) {
-          case "/.well-known/t3/environment":
+          case "/.well-known/stark-code/environment":
             return Promise.resolve(
               Response.json({
                 environmentId: TARGET.environmentId,
@@ -1530,7 +1530,7 @@ describe("EnvironmentSupervisor", () => {
                   policy: "loopback-browser",
                   bootstrapMethods: ["one-time-token"],
                   sessionMethods: ["dpop-access-token"],
-                  sessionCookieName: "t3_session_test",
+                  sessionCookieName: "stark_session_test",
                 },
                 scopes: AuthStandardClientScopes,
               }),
@@ -1712,7 +1712,7 @@ describe("EnvironmentSupervisor", () => {
 });
 
 describe("EnvironmentSupervisor routes", () => {
-  it.effect("skips a silent LAN route and connects over T3 Connect", () =>
+  it.effect("skips a silent LAN route and connects over Stark Connect", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
         checkRoute: (route) =>
@@ -1773,7 +1773,7 @@ describe("EnvironmentSupervisor routes", () => {
         const harness = yield* makeHarness({
           checkRoute: () => Effect.succeed("answered"),
           prepare: (_attempt, target) => Effect.succeed(preparedFor(target)),
-          // The LAN session fails 50 seconds into its snapshot; T3 Connect needs 40.
+          // The LAN session fails 50 seconds into its snapshot; Stark Connect needs 40.
           ready: (attempt) =>
             attempt === 1
               ? Effect.sleep("50 seconds").pipe(Effect.andThen(Effect.fail(transient())))
@@ -1798,15 +1798,15 @@ describe("EnvironmentSupervisor routes", () => {
       }).pipe(Effect.provide(TestClock.layer())),
   );
 
-  it.effect("still tries a silent LAN route after the T3 Connect route fails", () =>
+  it.effect("still tries a silent LAN route after the Stark Connect route fails", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
         checkRoute: (route) =>
           Effect.succeed(route.target._tag === "BearerConnectionTarget" ? "silent" : "unchecked"),
-        // Signed out of T3 Connect; the LAN is up but its check timed out.
+        // Signed out of Stark Connect; the LAN is up but its check timed out.
         prepare: (_attempt, target) =>
           target._tag === "RelayConnectionTarget"
-            ? Effect.fail(blocked("Sign in to T3 Connect."))
+            ? Effect.fail(blocked("Sign in to Stark Connect."))
             : Effect.succeed(preparedFor(target)),
       });
       const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_RELAY_ENTRY, {
@@ -1826,7 +1826,7 @@ describe("EnvironmentSupervisor routes", () => {
         checkRoute: () => Effect.succeed("answered"),
         prepare: (_attempt, target) =>
           target._tag === "RelayConnectionTarget"
-            ? Effect.fail(blocked("Sign in to T3 Connect."))
+            ? Effect.fail(blocked("Sign in to Stark Connect."))
             : Effect.fail(transient("LAN socket refused.")),
       });
       const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_RELAY_ENTRY, {
@@ -1936,7 +1936,7 @@ describe("EnvironmentSupervisor routes", () => {
       );
       yield* Ref.set(lanAnswers, true);
       yield* TestClock.adjust("60 seconds");
-      // The switch lands back on T3 Connect.
+      // The switch lands back on Stark Connect.
       yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 2,
@@ -2021,7 +2021,7 @@ describe("EnvironmentSupervisor routes", () => {
     }),
   );
 
-  it.effect("keeps a LAN session when the T3 Connect account changes", () =>
+  it.effect("keeps a LAN session when the Stark Connect account changes", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
         checkRoute: () => Effect.succeed("answered"),
@@ -2043,7 +2043,7 @@ describe("EnvironmentSupervisor routes", () => {
     }),
   );
 
-  it.effect("learns the LAN address over T3 Connect and moves to it", () =>
+  it.effect("learns the LAN address over Stark Connect and moves to it", () =>
     Effect.gen(function* () {
       const relayEntry: ConnectionCatalogEntry = {
         target: RELAY_TARGET,
@@ -2090,7 +2090,7 @@ describe("EnvironmentSupervisor routes", () => {
           }),
       }).pipe(Effect.provide(harness.dependencies));
 
-      // Connected over T3 Connect, the server reports its LAN address; the
+      // Connected over Stark Connect, the server reports its LAN address; the
       // learned route ranks first, answers, and the session moves to it.
       yield* awaitState(
         supervisor.state,

@@ -18,7 +18,7 @@ import {
   type ProviderInteractionMode,
   type ProviderOptionSelection,
   type RuntimeMode,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import * as Schema from "effect/Schema";
 import { useEffect } from "react";
 import { Atom } from "effect/reactivity";
@@ -31,9 +31,9 @@ import {
   formatComposerContextReference,
   sanitizeComposerContextLabel,
   replaceComposerContextReferences,
-} from "@t3tools/shared/composerContextReferences";
-import { imageMimeType } from "@t3tools/shared/image";
-import { videoMimeType } from "@t3tools/shared/video";
+} from "@starkfuture/shared/composerContextReferences";
+import { imageMimeType } from "@starkfuture/shared/image";
+import { videoMimeType } from "@starkfuture/shared/video";
 import { DraftComposerAttachmentSchema } from "../lib/composer-image-schema";
 import {
   composerAttachmentFileReferenceKey,

@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@starkfuture/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
@@ -433,14 +433,14 @@ describe("ConnectionCatalogDocument", () => {
     expect(catalogRoutes(withRelay, ENVIRONMENT_ID)).toEqual([BEARER_TARGET, RELAY_TARGET]);
     expect(withRelay.credentials).toHaveLength(1);
 
-    // Dropping the bearer route forgets its credential; T3 Connect keeps its token.
+    // Dropping the bearer route forgets its credential; Stark Connect keeps its token.
     const relayOnly = setRoutesInCatalog(withRelay, ENVIRONMENT_ID, [RELAY_TARGET]);
     expect(relayOnly.targets).toEqual([RELAY_TARGET]);
     expect(relayOnly.profiles).toEqual([]);
     expect(relayOnly.credentials).toEqual([]);
     expect(relayOnly.remoteDpopTokens).toEqual([REMOTE_TOKEN]);
 
-    // Dropping T3 Connect forgets its token; the bearer route keeps its records.
+    // Dropping Stark Connect forgets its token; the bearer route keeps its records.
     const bearerOnly = setRoutesInCatalog(withRelay, ENVIRONMENT_ID, [BEARER_TARGET]);
     expect(bearerOnly.credentials).toHaveLength(1);
     expect(bearerOnly.remoteDpopTokens).toEqual([]);

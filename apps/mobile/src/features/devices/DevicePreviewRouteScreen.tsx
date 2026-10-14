@@ -2,9 +2,9 @@ import {
   deviceToolVersionLabels,
   deviceToolUpdateOwnership,
   deviceToolUpdatePolicy,
-} from "@t3tools/client-runtime/state/device";
+} from "@starkfuture/client-runtime/state/device";
 import { useIsFocused, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@starkfuture/contracts";
 import * as Cause from "effect/Cause";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as Haptics from "expo-haptics";
@@ -313,7 +313,7 @@ function DevicePreviewScreen({
                 icon="xmark"
                 onPress={onClose}
               />
-              <AppText numberOfLines={1} className="flex-1 text-center font-t3-medium text-base">
+              <AppText numberOfLines={1} className="flex-1 text-center font-stark-medium text-base">
                 {preview?.name ?? "Devices"}
               </AppText>
               <ControlPill

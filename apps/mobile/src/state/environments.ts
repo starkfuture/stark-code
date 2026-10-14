@@ -3,8 +3,8 @@ import {
   connectionCatalogDisplayUrl,
   hasRelayRoute,
   type EnvironmentPresentation as BaseEnvironmentPresentation,
-} from "@t3tools/client-runtime/connection";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from "@starkfuture/client-runtime/connection";
+import type { EnvironmentId } from "@starkfuture/contracts";
 import { useMemo } from "react";
 
 import { environmentCatalog } from "../connection/catalog";

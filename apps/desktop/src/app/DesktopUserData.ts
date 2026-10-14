@@ -1,4 +1,4 @@
-import { BRAND } from "@t3tools/shared/branding";
+import { BRAND } from "@starkfuture/shared/branding";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -32,7 +32,7 @@ export class DesktopUserDataInitializationError extends Schema.TaggedError<Deskt
   }
 }
 
-/** Select Electron's profile independently of the server's T3 home. */
+/** Select Electron's profile independently of the server's Stark home. */
 export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPath")(
   function* (input: {
     readonly appDataDirectory: string;

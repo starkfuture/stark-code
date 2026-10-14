@@ -1,4 +1,8 @@
-import { ProjectId, type PullRequestStack, type ThreadPullRequestLink } from "@t3tools/contracts";
+import {
+  ProjectId,
+  type PullRequestStack,
+  type ThreadPullRequestLink,
+} from "@starkfuture/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   pullRequestStackMerge,

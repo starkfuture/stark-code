@@ -43,7 +43,7 @@ it.effect.each(["stark-code", "Stark Code (Alpha)"])(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-v2-profile-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "stark-v2-profile-" });
       const source = path.join(directory, sourceName);
       const destination = path.join(directory, "stark-code-v2");
       const state = '{"os_crypt":{"encrypted_key":"test-encrypted-key"}}';

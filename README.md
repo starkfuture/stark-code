@@ -1,6 +1,6 @@
 # Stark Code
 
-Stark Future’s Mac coding workspace, built on the open-source T3 Code foundation. Run Codex and Claude with graphical conversations, native agent shells, terminals, diff review, and Git worktrees for parallel tasks.
+Stark Future’s Mac coding workspace. Run Codex and Claude with graphical conversations, native agent shells, terminals, diff review, and Git worktrees for parallel tasks.
 
 ## Start the Mac app
 
@@ -11,7 +11,7 @@ nvm use 24
 npm run dev:desktop -- --home-dir "$PWD/.stark-code"
 ```
 
-The launcher keeps development data and the Electron profile inside the checkout. Telemetry and upstream hosted sign-in/relay services are disabled. New agents require approvals by default. Automatic upstream updates are disabled for this fork.
+The launcher keeps development data and the Electron profile inside the checkout. The app has no usage reporting or hosted sign-in/relay services. New agents require approvals by default. The app is built and updated locally.
 
 For a fresh checkout, install the pinned dependencies before starting:
 
@@ -37,8 +37,8 @@ Native shell mode is advertised by the Stark server. Older remote servers need a
 - `packages/contracts`: shared API and event schemas.
 - `packages/client-runtime`: shared client state and commands.
 
-Upstream package names, protocols, and source filenames are preserved. `stark.brand.json` holds the Stark identity. The application identifier is `com.starkfuture.starkcode`.
+`stark.brand.json` holds the application identity. The application identifier is `com.starkfuture.starkcode`.
 
-## Upstream and license
+## Licenses
 
-Based on [T3 Code](https://github.com/pingdotgg/t3code), retained as the `upstream` Git remote. The original MIT license and third-party attribution are preserved. This checkout has not been published to GitHub or npm.
+The required source copyright and third-party license notices are included in `LICENSE` and the in-app open source licenses screen.

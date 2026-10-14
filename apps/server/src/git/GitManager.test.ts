@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@starkfuture/contracts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -31,7 +31,7 @@ import type {
   GitManagerServiceError,
   GitPreparePullRequestThreadInput,
   ModelSelection,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 
 import {
   DEFAULT_SERVER_SETTINGS,
@@ -43,13 +43,13 @@ import {
   SourceControlProviderError as SourceControlProviderFailure,
   TextGenerationError,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import * as DateTime from "effect/DateTime";
-import { decodeGitHubPullRequestListJson } from "@t3tools/source-control-github/server/gitHubPullRequests";
-import * as GitHubChangeRequestTemplate from "@t3tools/source-control-github/server/gitHubChangeRequestTemplate";
-import * as GitLabCli from "@t3tools/source-control-gitlab/server/GitLabCli";
-import type * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
-import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
+import { decodeGitHubPullRequestListJson } from "@starkfuture/source-control-github/server/gitHubPullRequests";
+import * as GitHubChangeRequestTemplate from "@starkfuture/source-control-github/server/gitHubChangeRequestTemplate";
+import * as GitLabCli from "@starkfuture/source-control-gitlab/server/GitLabCli";
+import type * as SourceControlHost from "@starkfuture/source-control-core/server/SourceControlHost";
+import * as TestSourceControlHost from "@starkfuture/source-control-testing/TestSourceControlHost";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -58,13 +58,13 @@ import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
-import * as ForgejoSourceControlProvider from "@t3tools/source-control-forgejo/server/ForgejoSourceControlProvider";
-import * as GitLabSourceControlProvider from "@t3tools/source-control-gitlab/server/GitLabSourceControlProvider";
+import * as ForgejoSourceControlProvider from "@starkfuture/source-control-forgejo/server/ForgejoSourceControlProvider";
+import * as GitLabSourceControlProvider from "@starkfuture/source-control-gitlab/server/GitLabSourceControlProvider";
 import {
   ForgejoPullRequestSchema,
   toForgejoChangeRequest,
-} from "@t3tools/source-control-forgejo/server/forgejoPullRequests";
-import type { SourceControlProvider } from "@t3tools/source-control-core/server/SourceControlProvider";
+} from "@starkfuture/source-control-forgejo/server/forgejoPullRequests";
+import type { SourceControlProvider } from "@starkfuture/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -290,7 +290,7 @@ function createBareRemote(): Effect.Effect<
   FileSystem.FileSystem | Scope.Scope | GitVcsDriver.GitVcsDriver
 > {
   return Effect.gen(function* () {
-    const remoteDir = yield* makeTempDir("t3code-git-remote-");
+    const remoteDir = yield* makeTempDir("starkcode-git-remote-");
     yield* runGit(remoteDir, ["init", "--bare"]);
     return remoteDir;
   });
@@ -461,7 +461,7 @@ function createGitHubProviderWithFakeGh(scenario: FakeGhScenario = {}): {
     if (args[0] === "pr" && args[1] === "create") {
       return Effect.succeed(
         fakeGhOutput(
-          (scenario.createdPrUrl ?? "https://github.com/pingdotgg/codething-mvp/pull/101") + "\n",
+          (scenario.createdPrUrl ?? "https://github.com/example/codething-mvp/pull/101") + "\n",
         ),
       );
     }
@@ -470,7 +470,7 @@ function createGitHubProviderWithFakeGh(scenario: FakeGhScenario = {}): {
       const pullRequest: FakePullRequest = scenario.pullRequest ?? {
         number: 101,
         title: "Pull request",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/101",
+        url: "https://github.com/example/codething-mvp/pull/101",
         baseRefName: "main",
         headRefName: "feature/pull-request",
         state: "open",
@@ -749,7 +749,7 @@ function makeManager(input?: {
   );
   const textGeneration = createTextGeneration(input?.textGeneration);
   const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
-    prefix: "t3-git-manager-test-",
+    prefix: "stark-git-manager-test-",
   });
 
   const layerServerSettings = ServerSettings.ServerSettingsService.layerTest(input?.serverSettings);
@@ -874,7 +874,7 @@ function makeManager(input?: {
 const asThreadId = (threadId: string) => threadId as ThreadId;
 
 const layerGitManagerTest = GitVcsDriver.layer.pipe(
-  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-git-manager-test-" })),
+  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "stark-git-manager-test-" })),
   Layer.provideMerge(VcsProcess.layer),
   Layer.provideMerge(NodeServices.layer),
 );
@@ -882,7 +882,7 @@ const layerGitManagerTest = GitVcsDriver.layer.pipe(
 it.layer(layerGitManagerTest)("GitManager", (it) => {
   it.effect("passive worktree status streams do not start remote refreshes", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-passive-vcs-");
+      const repoDir = yield* makeTempDir("starkcode-passive-vcs-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -996,7 +996,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status includes draft PR metadata when branch already has a draft PR", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-open-pr"]);
       const remoteDir = yield* createBareRemote();
@@ -1010,7 +1010,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 13,
                 title: "Existing PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/13",
+                url: "https://github.com/example/codething-mvp/pull/13",
                 baseRefName: "main",
                 headRefName: "feature/status-open-pr",
                 isDraft: true,
@@ -1028,7 +1028,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(status.pr).toEqual({
         number: 13,
         title: "Existing PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/13",
+        url: "https://github.com/example/codething-mvp/pull/13",
         baseRef: "main",
         headRef: "feature/status-open-pr",
         state: "open",
@@ -1040,7 +1040,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status trims PR metadata returned by gh before publishing it", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-trimmed-pr"]);
       const remoteDir = yield* createBareRemote();
@@ -1054,7 +1054,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 14,
                 title: "  Existing PR title  \n",
-                url: " https://github.com/pingdotgg/codething-mvp/pull/14 ",
+                url: " https://github.com/example/codething-mvp/pull/14 ",
                 baseRefName: " main ",
                 headRefName: "\tfeature/status-trimmed-pr\t",
               },
@@ -1068,7 +1068,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(status.pr).toEqual({
         number: 14,
         title: "Existing PR title",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/14",
+        url: "https://github.com/example/codething-mvp/pull/14",
         baseRef: "main",
         headRef: "feature/status-trimmed-pr",
         state: "open",
@@ -1079,7 +1079,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status ignores invalid gh pr list entries and keeps valid ones", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-valid-pr-entry"]);
       const remoteDir = yield* createBareRemote();
@@ -1093,14 +1093,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 0,
                 title: "invalid",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/0",
+                url: "https://github.com/example/codething-mvp/pull/0",
                 baseRefName: "main",
                 headRefName: "feature/invalid",
               },
               {
                 number: 15,
                 title: "  Valid PR title  ",
-                url: " https://github.com/pingdotgg/codething-mvp/pull/15 ",
+                url: " https://github.com/example/codething-mvp/pull/15 ",
                 baseRefName: " main ",
                 headRefName: "\tfeature/status-valid-pr-entry\t",
                 headRepository: {
@@ -1120,7 +1120,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(status.pr).toEqual({
         number: 15,
         title: "Valid PR title",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/15",
+        url: "https://github.com/example/codething-mvp/pull/15",
         baseRef: "main",
         headRef: "feature/status-valid-pr-entry",
         state: "open",
@@ -1131,7 +1131,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status preserves lowercase merged and closed PR states from gh json", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-lowercase-state"]);
       const remoteDir = yield* createBareRemote();
@@ -1145,7 +1145,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 16,
                 title: "Closed PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/16",
+                url: "https://github.com/example/codething-mvp/pull/16",
                 baseRefName: "main",
                 headRefName: "feature/status-lowercase-state",
                 state: "closed",
@@ -1154,7 +1154,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 17,
                 title: "Merged PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/17",
+                url: "https://github.com/example/codething-mvp/pull/17",
                 baseRefName: "main",
                 headRefName: "feature/status-lowercase-state",
                 state: "merged",
@@ -1170,7 +1170,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(status.pr).toEqual({
         number: 17,
         title: "Merged PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/17",
+        url: "https://github.com/example/codething-mvp/pull/17",
         baseRef: "main",
         headRef: "feature/status-lowercase-state",
         state: "merged",
@@ -1181,7 +1181,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status returns an explicit non-repo result for non-git directories", () =>
     Effect.gen(function* () {
-      const cwd = yield* makeTempDir("t3code-git-manager-non-repo-");
+      const cwd = yield* makeTempDir("starkcode-git-manager-non-repo-");
       const { manager } = yield* makeManager();
 
       const status = yield* manager.status({ cwd });
@@ -1208,7 +1208,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status returns an explicit non-repo result for deleted directories", () =>
     Effect.gen(function* () {
-      const rootDir = yield* makeTempDir("t3code-git-manager-missing-dir-");
+      const rootDir = yield* makeTempDir("starkcode-git-manager-missing-dir-");
       const cwd = NodePath.join(rootDir, "deleted-repo");
       yield* makeDirectory(cwd);
       yield* removePath(cwd);
@@ -1238,7 +1238,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status briefly caches repeated lookups for the same cwd", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-cache"]);
       const remoteDir = yield* createBareRemote();
@@ -1248,7 +1248,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const existingPr = {
         number: 113,
         title: "Cached PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/113",
+        url: "https://github.com/example/codething-mvp/pull/113",
         baseRefName: "main",
         headRefName: "feature/status-cache",
       };
@@ -1269,7 +1269,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("a warm PR cache does not reread repository identity for status", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-identity-cache"]);
       const remoteDir = yield* createBareRemote();
@@ -1293,7 +1293,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("a warm branch PR lookup starts no git process", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -1310,7 +1310,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 230,
                 title: "Warm PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/230",
+                url: "https://github.com/example/codething-mvp/pull/230",
                 baseRefName: "main",
                 headRefName: "feature/warm-pr",
                 state: "OPEN",
@@ -1337,10 +1337,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
   );
 
   it.effect(
-    "a branch PR lookup sees an upstream change on request, after a T3 git action, or after the TTL",
+    "a branch PR lookup sees an upstream change on request, after a Stark git action, or after the TTL",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const remoteDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -1352,7 +1352,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             {
               number,
               title: headRefName,
-              url: `https://github.com/pingdotgg/codething-mvp/pull/${number}`,
+              url: `https://github.com/example/codething-mvp/pull/${number}`,
               baseRefName: "main",
               headRefName,
               state: "OPEN",
@@ -1381,21 +1381,21 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         );
         expect(reread?.number).toBe(236);
 
-        // T3's own git actions end in invalidateStatus.
+        // Stark's own git actions end in invalidateStatus.
         yield* runGit(repoDir, ["branch", "--set-upstream-to=origin/feature/moving-upstream"]);
         yield* manager.invalidateStatus(repoDir);
         expect((yield* lookup)?.number).toBe(235);
 
-        // A change made outside T3 shows once the remembered state expires.
+        // A change made outside Stark shows once the remembered state expires.
         yield* runGit(repoDir, ["branch", "--set-upstream-to=origin/feature/other-head"]);
         yield* TestClock.adjust("5 minutes");
         expect((yield* lookup)?.number).toBe(236);
       }),
   );
 
-  it.effect("a git read in flight during a T3 git action does not outlive it", () =>
+  it.effect("a git read in flight during a Stark git action does not outlive it", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -1407,7 +1407,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           {
             number,
             title: headRefName,
-            url: `https://github.com/pingdotgg/codething-mvp/pull/${number}`,
+            url: `https://github.com/example/codething-mvp/pull/${number}`,
             baseRefName: "main",
             headRefName,
             state: "OPEN",
@@ -1434,7 +1434,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         branch: "feature/racing-upstream",
       });
 
-      // The branch read has exited with the old upstream; a T3 git action
+      // The branch read has exited with the old upstream; a Stark git action
       // changes it before the lookup gets that output.
       const inFlight = yield* Effect.forkChild(lookup);
       yield* Deferred.await(gate.reached);
@@ -1449,7 +1449,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("turn-end refresh finds a new PR and keeps known PRs cached", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -1466,7 +1466,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 114,
                 title: "Opened during the turn",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/114",
+                url: "https://github.com/example/codething-mvp/pull/114",
                 baseRefName: "main",
                 headRefName: "feature/turn-refresh",
               },
@@ -1494,7 +1494,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("turn-end refresh preserves failed PR lookup backoff", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -1519,7 +1519,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status skips the provider lookup for a branch that was never pushed", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -1538,7 +1538,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup returns null when the repository has no remotes", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const { manager, ghCalls } = yield* makeManager();
 
@@ -1551,7 +1551,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup uses a saved tracked branch without changing checkout", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -1568,7 +1568,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 216,
                 title: "Saved branch PR",
-                url: "https://github.com/pingdotgg/t3code/pull/216",
+                url: "https://github.com/example/stark-code/pull/216",
                 baseRefName: "main",
                 headRefName: "feature/saved-branch",
                 headRefOid: "a".repeat(40),
@@ -1588,7 +1588,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(pullRequest).toMatchObject({
         number: 216,
         title: "Saved branch PR",
-        url: "https://github.com/pingdotgg/t3code/pull/216",
+        url: "https://github.com/example/stark-code/pull/216",
         baseRef: "main",
         headRef: "feature/saved-branch",
         headSha: "a".repeat(40),
@@ -1603,7 +1603,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup uses the default branch from a non-origin remote", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "upstream", remoteDir]);
@@ -1621,7 +1621,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 221,
                 title: "Merged main PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/221",
+                url: "https://github.com/example/codething-mvp/pull/221",
                 baseRefName: "develop",
                 headRefName: "main",
                 state: "MERGED",
@@ -1646,7 +1646,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup uses the saved name after the local branch is deleted", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -1671,7 +1671,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 217,
                 title: "Deleted local branch PR",
-                url: "https://github.com/pingdotgg/t3code/pull/217",
+                url: "https://github.com/example/stark-code/pull/217",
                 baseRefName: "main",
                 headRefName: "feature/deleted-local-branch",
                 state: "MERGED",
@@ -1701,7 +1701,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup recovers a deleted fork branch from its remote-tracking ref", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -1715,7 +1715,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* configureVisibleRemoteUrlWithLocalRewrite(
         repoDir,
         "origin",
-        "git@github.com:pingdotgg/codething-mvp.git",
+        "git@github.com:example/codething-mvp.git",
         originDir,
       );
       yield* configureVisibleRemoteUrlWithLocalRewrite(
@@ -1733,7 +1733,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 218,
                 title: "Deleted fork branch PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/218",
+                url: "https://github.com/example/codething-mvp/pull/218",
                 baseRefName: "main",
                 headRefName: "feature/deleted-fork-branch",
                 state: "MERGED",
@@ -1767,7 +1767,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup rejects ambiguous deleted-branch remote refs", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -1794,7 +1794,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("finds a fork PR for a branch pushed without an upstream", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -1806,7 +1806,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* configureVisibleRemoteUrlWithLocalRewrite(
         repoDir,
         "origin",
-        "git@github.com:pingdotgg/codething-mvp.git",
+        "git@github.com:example/codething-mvp.git",
         originDir,
       );
       yield* configureVisibleRemoteUrlWithLocalRewrite(
@@ -1822,7 +1822,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             {
               number: 40,
               title: "Another fork's PR",
-              url: "https://github.com/pingdotgg/codething-mvp/pull/40",
+              url: "https://github.com/example/codething-mvp/pull/40",
               baseRefName: "main",
               headRefName: "feature/no-upstream-fork",
               state: "OPEN",
@@ -1833,7 +1833,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             {
               number: 41,
               title: "Our fork's PR",
-              url: "https://github.com/pingdotgg/codething-mvp/pull/41",
+              url: "https://github.com/example/codething-mvp/pull/41",
               baseRefName: "main",
               headRefName: "feature/no-upstream-fork",
               state: "OPEN",
@@ -1906,7 +1906,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("prefers an exact fork ref but does not guess between equal refs", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const firstForkDir = yield* createBareRemote();
@@ -1920,7 +1920,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* configureVisibleRemoteUrlWithLocalRewrite(
         repoDir,
         "origin",
-        "git@github.com:pingdotgg/codething-mvp.git",
+        "git@github.com:example/codething-mvp.git",
         originDir,
       );
       yield* configureVisibleRemoteUrlWithLocalRewrite(
@@ -1942,7 +1942,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             {
               number: 41,
               title: "One fork's PR",
-              url: "https://github.com/pingdotgg/codething-mvp/pull/41",
+              url: "https://github.com/example/codething-mvp/pull/41",
               baseRefName: "main",
               headRefName: "feature/ambiguous-fork",
               state: "OPEN",
@@ -1981,7 +1981,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("does not guess a fork when an ancestry probe fails", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -2015,7 +2015,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* configureVisibleRemoteUrlWithLocalRewrite(
         repoDir,
         "origin",
-        "git@github.com:pingdotgg/codething-mvp.git",
+        "git@github.com:example/codething-mvp.git",
         originDir,
       );
       yield* configureVisibleRemoteUrlWithLocalRewrite(
@@ -2031,7 +2031,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             {
               number: 43,
               title: "Failed probe PR",
-              url: "https://github.com/pingdotgg/codething-mvp/pull/43",
+              url: "https://github.com/example/codething-mvp/pull/43",
               baseRefName: "main",
               headRefName: "feature/failed-probe",
               state: "OPEN",
@@ -2053,7 +2053,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("finds a fork PR when the remote name contains a slash", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -2065,7 +2065,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* configureVisibleRemoteUrlWithLocalRewrite(
         repoDir,
         "origin",
-        "git@github.com:pingdotgg/codething-mvp.git",
+        "git@github.com:example/codething-mvp.git",
         originDir,
       );
       yield* configureVisibleRemoteUrlWithLocalRewrite(
@@ -2082,7 +2082,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 42,
                 title: "Slash remote PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/42",
+                url: "https://github.com/example/codething-mvp/pull/42",
                 baseRefName: "main",
                 headRefName: "feature/slash-remote",
                 state: "OPEN",
@@ -2104,7 +2104,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup does not reuse a cached PR after the remote is repointed", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originalRemoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", originalRemoteDir]);
@@ -2162,7 +2162,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup shares the status cache for the same repository identity", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -2176,7 +2176,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 220,
                 title: "Shared cache PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/220",
+                url: "https://github.com/example/codething-mvp/pull/220",
                 baseRefName: "main",
                 headRefName: "feature/shared-pr-cache",
                 headRefOid: "a".repeat(40),
@@ -2188,7 +2188,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 221,
                 title: "New PR on the same branch",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/221",
+                url: "https://github.com/example/codething-mvp/pull/221",
                 baseRefName: "main",
                 headRefName: "feature/shared-pr-cache",
                 headRefOid: "b".repeat(40),
@@ -2218,7 +2218,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         number: 221,
         state: "open",
         headSha: "b".repeat(40),
-        repositoryKey: "github.com/pingdotgg/codething-mvp",
+        repositoryKey: "github.com/example/codething-mvp",
       });
       expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(2);
     }),
@@ -2226,7 +2226,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup rechecks open PRs every minute and settled answers less often", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -2237,7 +2237,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const pullRequest = (number: number, headRefName: string, state: string) => ({
         number,
         title: headRefName,
-        url: `https://github.com/pingdotgg/codething-mvp/pull/${number}`,
+        url: `https://github.com/example/codething-mvp/pull/${number}`,
         baseRefName: "main",
         headRefName,
         state,
@@ -2282,7 +2282,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
   it.effect("branch PR lookup announces a pull request when it reads it merged", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const remoteDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -2295,7 +2295,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             {
               number,
               title: headRefName,
-              url: `https://github.com/pingdotgg/codething-mvp/pull/${number}`,
+              url: `https://github.com/example/codething-mvp/pull/${number}`,
               baseRefName: "main",
               headRefName,
               state,
@@ -2324,8 +2324,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
         const announced = yield* Stream.runCollect(Stream.take(changes, 2));
         expect(announced).toEqual([
-          { host: "github.com", repository: "pingdotgg/codething-mvp", number: 402 },
-          { host: "github.com", repository: "pingdotgg/codething-mvp", number: 401 },
+          { host: "github.com", repository: "example/codething-mvp", number: 402 },
+          { host: "github.com", repository: "example/codething-mvp", number: 401 },
         ]);
       }),
     ),
@@ -2333,7 +2333,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup propagates provider failures", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -2364,7 +2364,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status finds a merged PR after its remote branch was deleted", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -2402,7 +2402,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 215,
                 title: "Merged branch was deleted",
-                url: "https://github.com/pingdotgg/t3code/pull/215",
+                url: "https://github.com/example/stark-code/pull/215",
                 baseRefName: "main",
                 headRefName: "feature/merged-branch-deleted",
                 state: "MERGED",
@@ -2420,7 +2420,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(status.pr).toEqual({
         number: 215,
         title: "Merged branch was deleted",
-        url: "https://github.com/pingdotgg/t3code/pull/215",
+        url: "https://github.com/example/stark-code/pull/215",
         baseRef: "main",
         headRef: "feature/merged-branch-deleted",
         state: "merged",
@@ -2432,7 +2432,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status still looks up PRs for a branch pushed without --set-upstream", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -2450,7 +2450,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 214,
                 title: "Pushed without upstream",
-                url: "https://github.com/pingdotgg/t3code/pull/214",
+                url: "https://github.com/example/stark-code/pull/214",
                 baseRefName: "main",
                 headRefName: "feature/pushed-no-upstream",
                 state: "OPEN",
@@ -2506,7 +2506,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("distinguishes Enterprise forks with the same head branch", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -2574,7 +2574,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     { remoteUrl: "https://gitlab.com/Group/Subgroup/Fork.git", setUpstream: false },
   ] as const)("matches GitLab forks for $remoteUrl/$setUpstream", ({ remoteUrl, setUpstream }) =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -2669,7 +2669,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "status ignores unrelated fork PRs when the current branch tracks the same repository",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const remoteDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -2682,14 +2682,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 1661,
                   title: "Fork PR from main",
-                  url: "https://github.com/pingdotgg/t3code/pull/1661",
+                  url: "https://github.com/example/stark-code/pull/1661",
                   baseRefName: "main",
                   headRefName: "main",
                   state: "OPEN",
                   updatedAt: "2026-04-01T15:00:00Z",
                   isCrossRepository: true,
                   headRepository: {
-                    nameWithOwner: "lnieuwenhuis/t3code",
+                    nameWithOwner: "lnieuwenhuis/starkcode",
                   },
                   headRepositoryOwner: {
                     login: "lnieuwenhuis",
@@ -2710,7 +2710,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "status detects cross-repo PRs from the upstream remote URL owner",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const forkDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "fork-seed", forkDir]);
@@ -2719,7 +2719,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         yield* runGit(repoDir, ["add", "fork-pr.txt"]);
         yield* runGit(repoDir, ["commit", "-m", "Fork PR branch"]);
         yield* runGit(repoDir, ["push", "-u", "fork-seed", "statemachine"]);
-        yield* runGit(repoDir, ["checkout", "-b", "t3code/pr-488/statemachine"]);
+        yield* runGit(repoDir, ["checkout", "-b", "starkcode/pr-488/statemachine"]);
         yield* runGit(repoDir, ["branch", "--set-upstream-to", "fork-seed/statemachine"]);
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
@@ -2735,7 +2735,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 488,
                   title: "Rebase this PR on latest main",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/488",
+                  url: "https://github.com/example/codething-mvp/pull/488",
                   baseRefName: "main",
                   headRefName: "statemachine",
                   state: "OPEN",
@@ -2754,11 +2754,11 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         });
 
         const status = yield* manager.status({ cwd: repoDir });
-        expect(status.refName).toBe("t3code/pr-488/statemachine");
+        expect(status.refName).toBe("starkcode/pr-488/statemachine");
         expect(status.pr).toEqual({
           number: 488,
           title: "Rebase this PR on latest main",
-          url: "https://github.com/pingdotgg/codething-mvp/pull/488",
+          url: "https://github.com/example/codething-mvp/pull/488",
           baseRef: "main",
           headRef: "statemachine",
           state: "open",
@@ -2775,7 +2775,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "status preserves a fork PR whose head is named after the default branch",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const originDir = yield* createBareRemote();
         const forkDir = yield* createBareRemote();
@@ -2784,7 +2784,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         yield* runGit(repoDir, ["remote", "set-head", "origin", "main"]);
         yield* runGit(repoDir, ["remote", "add", "fork-seed", forkDir]);
         yield* runGit(repoDir, ["push", "fork-seed", "main"]);
-        yield* runGit(repoDir, ["checkout", "-b", "t3code/pr-777/main"]);
+        yield* runGit(repoDir, ["checkout", "-b", "starkcode/pr-777/main"]);
         yield* runGit(repoDir, ["branch", "--set-upstream-to", "fork-seed/main"]);
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
@@ -2800,7 +2800,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 777,
                   title: "Fork PR from main",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/777",
+                  url: "https://github.com/example/codething-mvp/pull/777",
                   baseRefName: "main",
                   headRefName: "main",
                   state: "OPEN",
@@ -2819,11 +2819,11 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         });
 
         const status = yield* manager.status({ cwd: repoDir });
-        expect(status.refName).toBe("t3code/pr-777/main");
+        expect(status.refName).toBe("starkcode/pr-777/main");
         expect(status.pr).toEqual({
           number: 777,
           title: "Fork PR from main",
-          url: "https://github.com/pingdotgg/codething-mvp/pull/777",
+          url: "https://github.com/example/codething-mvp/pull/777",
           baseRef: "main",
           headRef: "main",
           state: "open",
@@ -2840,7 +2840,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "status ignores synthetic local branch aliases when the upstream remote name contains slashes",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const originDir = yield* createBareRemote();
         const upstreamDir = yield* createBareRemote();
@@ -2853,14 +2853,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
           "origin",
-          "git@github.com:pingdotgg/codething-mvp.git",
+          "git@github.com:example/codething-mvp.git",
           originDir,
         );
         yield* runGit(repoDir, ["config", "remote.origin.pushurl", originDir]);
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
           "my-org/upstream",
-          "ssh://git@github.com/pingdotgg/codething-mvp.git",
+          "ssh://git@github.com/example/codething-mvp.git",
           upstreamDir,
         );
         yield* runGit(repoDir, ["config", "remote.my-org/upstream.pushurl", upstreamDir]);
@@ -2875,7 +2875,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 1618,
                   title: "Correct PR",
-                  url: "https://github.com/pingdotgg/t3code/pull/1618",
+                  url: "https://github.com/example/stark-code/pull/1618",
                   baseRefName: "main",
                   headRefName: "effect-atom",
                   state: "OPEN",
@@ -2886,7 +2886,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 1518,
                   title: "Wrong PR",
-                  url: "https://github.com/pingdotgg/t3code/pull/1518",
+                  url: "https://github.com/example/stark-code/pull/1518",
                   baseRefName: "main",
                   headRefName: "upstream/effect-atom",
                   state: "OPEN",
@@ -2902,7 +2902,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         expect(status.pr).toEqual({
           number: 1618,
           title: "Correct PR",
-          url: "https://github.com/pingdotgg/t3code/pull/1618",
+          url: "https://github.com/example/stark-code/pull/1618",
           baseRef: "main",
           headRef: "effect-atom",
           state: "open",
@@ -2912,7 +2912,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           false,
         );
         expect(
-          ghCalls.some((call) => call.includes("pr list --head pingdotgg:upstream/effect-atom ")),
+          ghCalls.some((call) => call.includes("pr list --head example:upstream/effect-atom ")),
         ).toBe(false);
         expect(
           ghCalls.some((call) =>
@@ -2925,7 +2925,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status returns merged PR state when latest PR was merged", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-merged-pr"]);
 
@@ -2936,7 +2936,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 22,
                 title: "Merged PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/22",
+                url: "https://github.com/example/codething-mvp/pull/22",
                 baseRefName: "main",
                 headRefName: "feature/status-merged-pr",
                 state: "MERGED",
@@ -2953,7 +2953,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(status.pr).toEqual({
         number: 22,
         title: "Merged PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/22",
+        url: "https://github.com/example/codething-mvp/pull/22",
         baseRef: "main",
         headRef: "feature/status-merged-pr",
         state: "merged",
@@ -2964,7 +2964,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status hides merged PRs on the default branch", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
 
       const { manager } = yield* makeManager({
@@ -2974,7 +2974,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 23,
                 title: "Merged PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/23",
+                url: "https://github.com/example/codething-mvp/pull/23",
                 baseRefName: "feature/status-default-branch-target",
                 headRefName: "main",
                 state: "MERGED",
@@ -2994,7 +2994,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status does not inherit a merged PR from a feature branch's default upstream", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -3009,7 +3009,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 54,
                 title: "Reverse merge from main",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/54",
+                url: "https://github.com/example/codething-mvp/pull/54",
                 baseRefName: "je-filter-list",
                 headRefName: "main",
                 state: "MERGED",
@@ -3030,7 +3030,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status finds a PR pushed under the branch's own name despite a default upstream", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -3048,7 +3048,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 88,
                 title: "Pushed without -u",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/88",
+                url: "https://github.com/example/codething-mvp/pull/88",
                 baseRefName: "main",
                 headRefName: "feature/pushed-plain",
                 state: "OPEN",
@@ -3070,7 +3070,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "status finds a fork PR pushed under the branch's own name despite a default upstream",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const originDir = yield* createBareRemote();
         const forkDir = yield* createBareRemote();
@@ -3084,7 +3084,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
           "origin",
-          "git@github.com:pingdotgg/codething-mvp.git",
+          "git@github.com:example/codething-mvp.git",
           originDir,
         );
         yield* configureVisibleRemoteUrlWithLocalRewrite(
@@ -3102,7 +3102,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 89,
                   title: "Fork PR pushed without -u",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/89",
+                  url: "https://github.com/example/codething-mvp/pull/89",
                   baseRefName: "main",
                   headRefName: "feature/fork-plain",
                   state: "OPEN",
@@ -3126,7 +3126,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("branch PR lookup verifies identity on the fork that holds the own-name ref", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -3139,7 +3139,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* configureVisibleRemoteUrlWithLocalRewrite(
         repoDir,
         "origin",
-        "git@github.com:pingdotgg/codething-mvp.git",
+        "git@github.com:example/codething-mvp.git",
         originDir,
       );
       yield* configureVisibleRemoteUrlWithLocalRewrite(
@@ -3157,7 +3157,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 91,
                 title: "Fork PR to settle",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/91",
+                url: "https://github.com/example/codething-mvp/pull/91",
                 baseRefName: "main",
                 headRefName: "feature/fork-settle",
                 state: "MERGED",
@@ -3187,7 +3187,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status keeps an own-name PR when a later lookup fails on a default upstream", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -3204,7 +3204,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 90,
                 title: "Sticky own-name PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/90",
+                url: "https://github.com/example/codething-mvp/pull/90",
                 baseRefName: "main",
                 headRefName: "feature/sticky-plain",
                 state: "OPEN",
@@ -3229,7 +3229,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status prefers open PR when merged PR has newer updatedAt", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-open-over-merged"]);
 
@@ -3240,7 +3240,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 45,
                 title: "Merged PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/45",
+                url: "https://github.com/example/codething-mvp/pull/45",
                 baseRefName: "main",
                 headRefName: "feature/status-open-over-merged",
                 state: "MERGED",
@@ -3250,7 +3250,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 46,
                 title: "Open PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/46",
+                url: "https://github.com/example/codething-mvp/pull/46",
                 baseRefName: "main",
                 headRefName: "feature/status-open-over-merged",
                 state: "OPEN",
@@ -3266,7 +3266,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(status.pr).toEqual({
         number: 46,
         title: "Open PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/46",
+        url: "https://github.com/example/codething-mvp/pull/46",
         baseRef: "main",
         headRef: "feature/status-open-over-merged",
         state: "open",
@@ -3277,7 +3277,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status is resilient to gh lookup failures and returns pr null", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-no-gh"]);
       const remoteDir = yield* createBareRemote();
@@ -3299,7 +3299,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status logs actionable provider detail without exposing the upstream cause", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/status-rate-limited"]);
       const remoteDir = yield* createBareRemote();
@@ -3346,7 +3346,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status keeps the last known PR when a later lookup fails", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/pr-sticky"]);
       const remoteDir = yield* createBareRemote();
@@ -3356,7 +3356,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const existingPr = {
         number: 214,
         title: "Sticky PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/214",
+        url: "https://github.com/example/codething-mvp/pull/214",
         baseRefName: "main",
         headRefName: "feature/pr-sticky",
       };
@@ -3385,7 +3385,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "status does not reuse a stale PR after the branch is retargeted to a different upstream",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         yield* runGit(repoDir, ["checkout", "-b", "feature/pr-retarget"]);
 
@@ -3396,7 +3396,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         const existingPr = {
           number: 214,
           title: "Sticky PR",
-          url: "https://github.com/pingdotgg/codething-mvp/pull/214",
+          url: "https://github.com/example/codething-mvp/pull/214",
           baseRefName: "main",
           headRefName: "feature/pr-retarget",
         };
@@ -3432,7 +3432,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status keeps the last known PR when the branch gains its first upstream", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/pr-sticky-first-push"]);
       const remoteDir = yield* createBareRemote();
@@ -3441,7 +3441,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const existingPr = {
         number: 215,
         title: "Sticky first-push PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/215",
+        url: "https://github.com/example/codething-mvp/pull/215",
         baseRefName: "main",
         headRefName: "feature/pr-sticky-first-push",
       };
@@ -3467,7 +3467,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status drops the last known PR when the tracked remote is repointed", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/pr-repointed"]);
       const originalRemoteDir = yield* createBareRemote();
@@ -3477,7 +3477,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const existingPr = {
         number: 216,
         title: "Old remote PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/216",
+        url: "https://github.com/example/codething-mvp/pull/216",
         baseRefName: "main",
         headRefName: "feature/pr-repointed",
       };
@@ -3506,7 +3506,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("status keeps the last known PR when the current remote URL can't be resolved", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/pr-config-hiccup"]);
       const remoteDir = yield* createBareRemote();
@@ -3516,7 +3516,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const existingPr = {
         number: 217,
         title: "Config hiccup PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/217",
+        url: "https://github.com/example/codething-mvp/pull/217",
         baseRefName: "main",
         headRefName: "feature/pr-config-hiccup",
       };
@@ -3550,7 +3550,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("creates a commit when working tree is dirty", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nworld\n");
       let generatedPolicy: TextGeneration.CommitMessageGenerationInput["policy"] = undefined;
@@ -3600,7 +3600,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("preserves custom style when instructions are empty", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nworld\n");
       let generatedPolicy: TextGeneration.CommitMessageGenerationInput["policy"] = undefined;
@@ -3633,7 +3633,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("falls back when the dedicated source control writer is unavailable", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nworld\n");
       const missingInstanceId = ProviderInstanceId.make("missing_writer");
@@ -3673,7 +3673,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("applies a V2-native thread's project settings to generated commit text", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nproject\n");
       const projectId = ProjectId.make("project:git-settings");
@@ -3768,7 +3768,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("includes local agent instructions when recent history is empty", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* runGit(repoDir, ["init", "--initial-branch=main"]);
       yield* runGit(repoDir, ["config", "user.email", "test@example.com"]);
       yield* runGit(repoDir, ["config", "user.name", "Test User"]);
@@ -3815,7 +3815,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "a failed generation preserves staging changed while generating (paths: %s)",
     (filePaths) =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nstaged\n");
         yield* runGit(repoDir, ["add", "README.md"]);
@@ -3860,7 +3860,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("uses custom commit message when provided", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\ncustom\n");
       let generatedCount = 0;
@@ -3903,7 +3903,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("commits only selected files when filePaths is provided", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "a.txt"), "file a\n");
       NodeFS.writeFileSync(NodePath.join(repoDir, "b.txt"), "file b\n");
@@ -3928,7 +3928,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("creates feature branch, commits, and pushes with featureBranch option", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -3994,7 +3994,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     { branch: "fix/name", existingBranches: ["fix/name/child"], expected: "fix/name-2" },
   ])("commits on $expected when $branch has ref namespace collisions", (scenario) =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const mainSha = (yield* runGit(repoDir, ["rev-parse", "main"])).stdout.trim();
       for (const branch of scenario.existingBranches) {
@@ -4032,7 +4032,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("featureBranch uses custom commit message and derives branch name", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\ncustom-feature\n");
       let generatedCount = 0;
@@ -4075,7 +4075,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("skips commit when there are no uncommitted changes", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
 
       const { manager } = yield* makeManager();
@@ -4093,7 +4093,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("featureBranch returns error when worktree is clean", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
 
       const { manager } = yield* makeManager();
@@ -4114,7 +4114,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("commits and pushes with upstream auto-setup when needed", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/stacked-flow"]);
       const remoteDir = yield* createBareRemote();
@@ -4143,7 +4143,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "pushes and creates PR from a no-upstream branch when local commits are ahead of base",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         yield* runGit(repoDir, ["checkout", "-b", "feature/no-upstream-pr"]);
         const remoteDir = yield* createBareRemote();
@@ -4158,7 +4158,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 77,
                   title: "Add no-upstream PR flow",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/77",
+                  url: "https://github.com/example/codething-mvp/pull/77",
                   baseRefName: "main",
                   headRefName: "feature/no-upstream-pr",
                 },
@@ -4192,7 +4192,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("skips push when branch is already up to date", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/up-to-date"]);
       const remoteDir = yield* createBareRemote();
@@ -4213,7 +4213,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("pushes existing clean commits without rerunning commit logic", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/push-only"]);
       const remoteDir = yield* createBareRemote();
@@ -4241,7 +4241,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("pushes existing commits without committing dirty worktree changes", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/push-dirty"]);
       const remoteDir = yield* createBareRemote();
@@ -4276,7 +4276,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("create_pr pushes committed changes while preserving a dirty worktree", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/create-pr-only"]);
       const remoteDir = yield* createBareRemote();
@@ -4297,7 +4297,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 303,
                 title: "Create PR only branch",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/303",
+                url: "https://github.com/example/codething-mvp/pull/303",
                 baseRefName: "main",
                 headRefName: "feature/create-pr-only",
               },
@@ -4330,7 +4330,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("create_pr falls back to main when source control provider detection fails", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/provider-fallback"]);
       NodeFS.writeFileSync(NodePath.join(repoDir, "provider-fallback.txt"), "fallback\n");
@@ -4347,7 +4347,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 404,
                 title: "Provider fallback",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/404",
+                url: "https://github.com/example/codething-mvp/pull/404",
                 baseRefName: "main",
                 headRefName: "feature/provider-fallback",
               },
@@ -4373,7 +4373,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("create_pr targets the remote default branch when it is not main", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -4398,7 +4398,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 505,
                 title: "Master default",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/505",
+                url: "https://github.com/example/codething-mvp/pull/505",
                 baseRefName: "master",
                 headRefName: "feature/master-default",
               },
@@ -4423,7 +4423,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("returns existing PR metadata for commit/push/pr action", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/existing-pr"]);
       const remoteDir = yield* createBareRemote();
@@ -4437,7 +4437,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 42,
                 title: "Existing PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/42",
+                url: "https://github.com/example/codething-mvp/pull/42",
                 baseRefName: "main",
                 headRefName: "feature/existing-pr",
               },
@@ -4459,7 +4459,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         cta: {
           kind: "open_pr",
           label: "View PR",
-          url: "https://github.com/pingdotgg/codething-mvp/pull/42",
+          url: "https://github.com/example/codething-mvp/pull/42",
         },
       });
       expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
@@ -4470,7 +4470,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "returns existing cross-repo PR metadata found under the bare branch name",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         yield* runGit(repoDir, ["checkout", "-b", "statemachine"]);
         const forkDir = yield* createBareRemote();
@@ -4490,7 +4490,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 142,
                   title: "Existing fork PR",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/142",
+                  url: "https://github.com/example/codething-mvp/pull/142",
                   baseRefName: "main",
                   headRefName: "statemachine",
                   state: "OPEN",
@@ -4528,7 +4528,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "returns the correct existing PR when a slash remote checks out to a synthetic local alias",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const originDir = yield* createBareRemote();
         const upstreamDir = yield* createBareRemote();
@@ -4541,14 +4541,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
           "origin",
-          "git@github.com:pingdotgg/codething-mvp.git",
+          "git@github.com:example/codething-mvp.git",
           originDir,
         );
         yield* runGit(repoDir, ["config", "remote.origin.pushurl", originDir]);
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
           "my-org/upstream",
-          "ssh://git@github.com/pingdotgg/codething-mvp.git",
+          "ssh://git@github.com/example/codething-mvp.git",
           upstreamDir,
         );
         yield* runGit(repoDir, ["config", "remote.my-org/upstream.pushurl", upstreamDir]);
@@ -4566,7 +4566,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 1618,
                   title: "Correct PR",
-                  url: "https://github.com/pingdotgg/t3code/pull/1618",
+                  url: "https://github.com/example/stark-code/pull/1618",
                   baseRefName: "main",
                   headRefName: "effect-atom",
                 },
@@ -4575,7 +4575,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 1518,
                   title: "Wrong PR",
-                  url: "https://github.com/pingdotgg/t3code/pull/1518",
+                  url: "https://github.com/example/stark-code/pull/1518",
                   baseRefName: "main",
                   headRefName: "upstream/effect-atom",
                 },
@@ -4602,13 +4602,13 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "picks the fork PR among same-named branches from other repositories",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         yield* runGit(repoDir, ["checkout", "-b", "statemachine"]);
         const forkDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "fork-seed", forkDir]);
         yield* runGit(repoDir, ["push", "-u", "fork-seed", "statemachine"]);
-        yield* runGit(repoDir, ["checkout", "-b", "t3code/pr-142/statemachine"]);
+        yield* runGit(repoDir, ["checkout", "-b", "starkcode/pr-142/statemachine"]);
         yield* runGit(repoDir, ["branch", "--set-upstream-to", "fork-seed/statemachine"]);
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
@@ -4620,19 +4620,19 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         const { manager, ghCalls } = yield* makeManager({
           ghScenario: {
             prListByHeadSelector: {
-              "t3code/pr-142/statemachine": JSON.stringify([]),
+              "starkcode/pr-142/statemachine": JSON.stringify([]),
               statemachine: JSON.stringify([
                 {
                   number: 41,
                   title: "Unrelated same-repo PR",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/41",
+                  url: "https://github.com/example/codething-mvp/pull/41",
                   baseRefName: "main",
                   headRefName: "statemachine",
                 },
                 {
                   number: 142,
                   title: "Existing fork PR",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/142",
+                  url: "https://github.com/example/codething-mvp/pull/142",
                   baseRefName: "main",
                   headRefName: "statemachine",
                   state: "OPEN",
@@ -4668,13 +4668,13 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "stops probing head selectors after finding an existing PR",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         yield* runGit(repoDir, ["checkout", "-b", "statemachine"]);
         const forkDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "fork-seed", forkDir]);
         yield* runGit(repoDir, ["push", "-u", "fork-seed", "statemachine"]);
-        yield* runGit(repoDir, ["checkout", "-b", "t3code/pr-142/statemachine"]);
+        yield* runGit(repoDir, ["checkout", "-b", "starkcode/pr-142/statemachine"]);
         yield* runGit(repoDir, ["branch", "--set-upstream-to", "fork-seed/statemachine"]);
         yield* configureVisibleRemoteUrlWithLocalRewrite(
           repoDir,
@@ -4690,7 +4690,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 142,
                   title: "Existing fork PR",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/142",
+                  url: "https://github.com/example/codething-mvp/pull/142",
                   baseRefName: "main",
                   headRefName: "statemachine",
                   state: "OPEN",
@@ -4703,7 +4703,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                   },
                 },
               ]),
-              "t3code/pr-142/statemachine": JSON.stringify([]),
+              "starkcode/pr-142/statemachine": JSON.stringify([]),
             },
           },
         });
@@ -4729,7 +4729,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "does not reuse a cross-repo PR when GitHub omits head identity metadata",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         yield* runGit(repoDir, ["checkout", "-b", "statemachine"]);
         const forkDir = yield* createBareRemote();
@@ -4745,8 +4745,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           ghScenario: {
             prListSequenceByHeadSelector: {
               statemachine: [
-                `[{"number":41,"title":"Ambiguous fork PR","url":"https://github.com/pingdotgg/codething-mvp/pull/41","baseRefName":"main","headRefName":"statemachine","state":"OPEN"}]`,
-                `[{"number":142,"title":"Add stacked git actions","url":"https://github.com/pingdotgg/codething-mvp/pull/142","baseRefName":"main","headRefName":"statemachine","state":"OPEN","isCrossRepository":true,"headRepository":{"nameWithOwner":"octocat/codething-mvp"},"headRepositoryOwner":{"login":"octocat"}}]`,
+                `[{"number":41,"title":"Ambiguous fork PR","url":"https://github.com/example/codething-mvp/pull/41","baseRefName":"main","headRefName":"statemachine","state":"OPEN"}]`,
+                `[{"number":142,"title":"Add stacked git actions","url":"https://github.com/example/codething-mvp/pull/142","baseRefName":"main","headRefName":"statemachine","state":"OPEN","isCrossRepository":true,"headRepository":{"nameWithOwner":"octocat/codething-mvp"},"headRepositoryOwner":{"login":"octocat"}}]`,
               ],
             },
           },
@@ -4831,8 +4831,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     Effect.sync(() => {
       const headContext = {
         headBranch: "statemachine",
-        headRepositoryNameWithOwner: "pingdotgg/codething-mvp",
-        headRepositoryOwnerLogin: "pingdotgg",
+        headRepositoryNameWithOwner: "example/codething-mvp",
+        headRepositoryOwnerLogin: "example",
         isCrossRepository: true,
       };
 
@@ -4841,14 +4841,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           {
             number: 41,
             title: "Same-repo PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/41",
+            url: "https://github.com/example/codething-mvp/pull/41",
             baseRefName: "main",
             headRefName: "statemachine",
             state: "open",
             updatedAt: Option.none(),
             isCrossRepository: false,
-            headRepositoryNameWithOwner: "pingdotgg/codething-mvp",
-            headRepositoryOwnerLogin: "pingdotgg",
+            headRepositoryNameWithOwner: "example/codething-mvp",
+            headRepositoryOwnerLogin: "example",
           },
           headContext,
         ),
@@ -4859,14 +4859,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           {
             number: 142,
             title: "Fork PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/142",
+            url: "https://github.com/example/codething-mvp/pull/142",
             baseRefName: "main",
             headRefName: "statemachine",
             state: "open",
             updatedAt: Option.none(),
             isCrossRepository: true,
-            headRepositoryNameWithOwner: "pingdotgg/codething-mvp",
-            headRepositoryOwnerLogin: "pingdotgg",
+            headRepositoryNameWithOwner: "example/codething-mvp",
+            headRepositoryOwnerLogin: "example",
           },
           headContext,
         ),
@@ -4877,8 +4877,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
   it.effect("accepts fork PR metadata when origin is the fork checkout remote", () =>
     Effect.sync(() => {
       const headContext = {
-        headBranch: "t3code/git-audit-stability",
-        headRepositoryNameWithOwner: "justsomelegs/t3code",
+        headBranch: "starkcode/git-audit-stability",
+        headRepositoryNameWithOwner: "justsomelegs/starkcode",
         headRepositoryOwnerLogin: "justsomelegs",
         isCrossRepository: false,
       };
@@ -4888,13 +4888,13 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           {
             number: 2284,
             title: "Improve branch mismatch warnings",
-            url: "https://github.com/pingdotgg/t3code/pull/2284",
+            url: "https://github.com/example/stark-code/pull/2284",
             baseRefName: "main",
-            headRefName: "t3code/git-audit-stability",
+            headRefName: "starkcode/git-audit-stability",
             state: "open",
             updatedAt: Option.none(),
             isCrossRepository: true,
-            headRepositoryNameWithOwner: "justsomelegs/t3code",
+            headRepositoryNameWithOwner: "justsomelegs/starkcode",
             headRepositoryOwnerLogin: "justsomelegs",
           },
           headContext,
@@ -4905,7 +4905,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("creates PR when one does not already exist", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.mkdirSync(NodePath.join(repoDir, ".github"));
       NodeFS.writeFileSync(
@@ -4949,7 +4949,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 88,
                 title: "Add stacked git actions",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/88",
+                url: "https://github.com/example/codething-mvp/pull/88",
                 baseRefName: "main",
                 headRefName: "feature-create-pr",
               },
@@ -4981,7 +4981,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "creates a PR against the default branch with a legacy %s base setting",
     (kind) =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         yield* runGit(repoDir, ["branch", "-m", "main", "trunk"]);
         const remoteDir = yield* createBareRemote();
@@ -5037,7 +5037,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "remote-only",
   ])("preserves the configured PR target branch %s", (baseRef) =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const baseBranch = baseRef === "deadbeef" ? baseRef : "release/v2";
       const remoteDir = yield* createBareRemote();
@@ -5074,14 +5074,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("generates PR content from branch changes when the remote base advances", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
       yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
       yield* runGit(remoteDir, ["symbolic-ref", "HEAD", "refs/heads/main"]);
 
-      const peerDir = yield* makeTempDir("t3code-git-peer-");
+      const peerDir = yield* makeTempDir("starkcode-git-peer-");
       yield* runGit(peerDir, ["clone", remoteDir, "."]);
       yield* runGit(peerDir, ["config", "user.email", "peer@example.com"]);
       yield* runGit(peerDir, ["config", "user.name", "Peer User"]);
@@ -5147,7 +5147,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "creates a new PR instead of reusing an unrelated fork PR with the same head branch",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         yield* runGit(repoDir, ["checkout", "-b", "feature/no-fork-match"]);
         const remoteDir = yield* createBareRemote();
@@ -5164,13 +5164,13 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 1661,
                   title: "Fork PR with same branch name",
-                  url: "https://github.com/pingdotgg/t3code/pull/1661",
+                  url: "https://github.com/example/stark-code/pull/1661",
                   baseRefName: "main",
                   headRefName: "feature/no-fork-match",
                   state: "OPEN",
                   isCrossRepository: true,
                   headRepository: {
-                    nameWithOwner: "lnieuwenhuis/t3code",
+                    nameWithOwner: "lnieuwenhuis/starkcode",
                   },
                   headRepositoryOwner: {
                     login: "lnieuwenhuis",
@@ -5181,7 +5181,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 188,
                   title: "Add stacked git actions",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/188",
+                  url: "https://github.com/example/codething-mvp/pull/188",
                   baseRefName: "main",
                   headRefName: "feature/no-fork-match",
                   state: "OPEN",
@@ -5204,7 +5204,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           cta: {
             kind: "open_pr",
             label: "View PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/188",
+            url: "https://github.com/example/codething-mvp/pull/188",
           },
         });
         expect(
@@ -5217,7 +5217,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("creates cross-repo PRs with the fork owner selector and default base branch", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const forkDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "fork-seed", forkDir]);
@@ -5226,7 +5226,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* runGit(repoDir, ["add", "changes.txt"]);
       yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
       yield* runGit(repoDir, ["push", "-u", "fork-seed", "statemachine"]);
-      yield* runGit(repoDir, ["checkout", "-b", "t3code/pr-91/statemachine"]);
+      yield* runGit(repoDir, ["checkout", "-b", "starkcode/pr-91/statemachine"]);
       yield* runGit(repoDir, ["branch", "--set-upstream-to", "fork-seed/statemachine"]);
       yield* configureVisibleRemoteUrlWithLocalRewrite(
         repoDir,
@@ -5244,7 +5244,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 {
                   number: 188,
                   title: "Add stacked git actions",
-                  url: "https://github.com/pingdotgg/codething-mvp/pull/188",
+                  url: "https://github.com/example/codething-mvp/pull/188",
                   baseRefName: "main",
                   headRefName: "statemachine",
                   state: "OPEN",
@@ -5282,7 +5282,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("rejects push/pr actions from detached HEAD", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "--detach", "HEAD"]);
 
@@ -5300,7 +5300,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("surfaces missing gh binary errors", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/gh-missing"]);
       const remoteDir = yield* createBareRemote();
@@ -5327,7 +5327,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("surfaces gh auth errors with guidance", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/gh-auth"]);
       const remoteDir = yield* createBareRemote();
@@ -5353,7 +5353,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("resolves pull requests from #number references", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
 
       const { manager, ghCalls } = yield* makeManager({
@@ -5361,7 +5361,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 42,
             title: "Resolve PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/42",
+            url: "https://github.com/example/codething-mvp/pull/42",
             baseRefName: "main",
             headRefName: "feature/resolve-pr",
             state: "open",
@@ -5377,7 +5377,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(result.pullRequest).toEqual({
         number: 42,
         title: "Resolve PR",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/42",
+        url: "https://github.com/example/codething-mvp/pull/42",
         baseBranch: "main",
         headBranch: "feature/resolve-pr",
         state: "open",
@@ -5388,7 +5388,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("prepares pull request threads in local mode by checking out the PR branch", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/pr-local"]);
       NodeFS.writeFileSync(NodePath.join(repoDir, "local.txt"), "local\n");
@@ -5400,7 +5400,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 64,
             title: "Local PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/64",
+            url: "https://github.com/example/codething-mvp/pull/64",
             baseRefName: "main",
             headRefName: "feature/pr-local",
             state: "open",
@@ -5426,7 +5426,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "restores same-repository upstream tracking after local PR checkout without a remote ref",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const remoteDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -5449,16 +5449,16 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             pullRequest: {
               number: 65,
               title: "Local upstream PR",
-              url: "https://github.com/pingdotgg/codething-mvp/pull/65",
+              url: "https://github.com/example/codething-mvp/pull/65",
               baseRefName: "main",
               headRefName: "feature/pr-local-upstream",
               state: "open",
               isCrossRepository: false,
-              headRepositoryNameWithOwner: "pingdotgg/codething-mvp",
-              headRepositoryOwnerLogin: "pingdotgg",
+              headRepositoryNameWithOwner: "example/codething-mvp",
+              headRepositoryOwnerLogin: "example",
             },
             repositoryCloneUrls: {
-              "pingdotgg/codething-mvp": {
+              "example/codething-mvp": {
                 url: remoteDir,
                 sshUrl: remoteDir,
               },
@@ -5484,7 +5484,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "restores same-repository upstream tracking when provider omits head repository metadata",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const remoteDir = yield* createBareRemote();
         yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -5507,7 +5507,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             pullRequest: {
               number: 66,
               title: "Local upstream PR without repo metadata",
-              url: "https://github.com/pingdotgg/codething-mvp/pull/66",
+              url: "https://github.com/example/codething-mvp/pull/66",
               baseRefName: "main",
               headRefName: "feature/pr-local-no-head-repo",
               state: "open",
@@ -5531,7 +5531,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("prepares pull request threads in worktree mode on the PR head branch", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -5549,7 +5549,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 77,
             title: "Worktree PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/77",
+            url: "https://github.com/example/codething-mvp/pull/77",
             baseRefName: "main",
             headRefName: "feature/pr-worktree",
             state: "open",
@@ -5576,7 +5576,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("prepares a worktree from the head branch when the host has no pull ref", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -5676,7 +5676,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("preserves both branch materialization failures when the fallback also fails", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", originDir]);
@@ -5688,7 +5688,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 93,
             title: "Missing fork branch",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/93",
+            url: "https://github.com/example/codething-mvp/pull/93",
             baseRefName: "main",
             headRefName: "feature/missing-fork-branch",
             state: "open",
@@ -5719,7 +5719,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         pullRequestNumber: 93,
         headRepository: "octocat/codething-mvp",
         headBranch: "feature/missing-fork-branch",
-        localBranch: "t3code/pr-93/feature/missing-fork-branch",
+        localBranch: "starkcode/pr-93/feature/missing-fork-branch",
       });
       if (!(error.cause instanceof AggregateError)) {
         return yield* Effect.die(error.cause);
@@ -5735,7 +5735,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("launches setup when creating a new PR worktree", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -5754,7 +5754,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 177,
             title: "Worktree setup PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/177",
+            url: "https://github.com/example/codething-mvp/pull/177",
             baseRefName: "main",
             headRefName: "feature/pr-worktree-setup",
             state: "open",
@@ -5788,7 +5788,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("preserves fork upstream tracking when preparing a worktree PR thread", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -5807,7 +5807,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 81,
             title: "Fork PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/81",
+            url: "https://github.com/example/codething-mvp/pull/81",
             baseRefName: "main",
             headRefName: "feature/pr-fork",
             state: "open",
@@ -5850,7 +5850,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("preserves fork upstream tracking when preparing a local PR thread", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -5870,7 +5870,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 82,
             title: "Local Fork PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/82",
+            url: "https://github.com/example/codething-mvp/pull/82",
             baseRefName: "main",
             headRefName: "feature/pr-local-fork",
             state: "open",
@@ -5903,7 +5903,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("derives fork repository identity from PR URL when GitHub omits nameWithOwner", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -5928,7 +5928,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 642,
             title: "fix: use commit as the default git action without origin",
-            url: "https://github.com/pingdotgg/t3code/pull/642",
+            url: "https://github.com/example/stark-code/pull/642",
             baseRefName: "main",
             headRefName: "fix/git-action-default-without-origin",
             state: "open",
@@ -5936,7 +5936,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             headRepositoryOwnerLogin: "binbandit",
           },
           repositoryCloneUrls: {
-            "binbandit/t3code": {
+            "binbandit/starkcode": {
               url: forkDir,
               sshUrl: forkDir,
             },
@@ -5960,7 +5960,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("reuses an existing dedicated worktree for the PR head branch", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/pr-existing-worktree"]);
       NodeFS.writeFileSync(NodePath.join(repoDir, "existing.txt"), "existing\n");
@@ -5980,7 +5980,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 78,
             title: "Existing worktree PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/78",
+            url: "https://github.com/example/codething-mvp/pull/78",
             baseRefName: "main",
             headRefName: "feature/pr-existing-worktree",
             state: "open",
@@ -6015,7 +6015,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("refreshes a reused PR worktree onto the updated pull request head", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -6046,7 +6046,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 84,
             title: "Reused stale PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/84",
+            url: "https://github.com/example/codething-mvp/pull/84",
             baseRefName: "main",
             headRefName: "feature/pr-reused-stale",
             state: "open",
@@ -6070,7 +6070,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("runs the setup script when a reused PR worktree moves onto the new head", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -6101,7 +6101,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 85,
             title: "Reused setup PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/85",
+            url: "https://github.com/example/codething-mvp/pull/85",
             baseRefName: "main",
             headRefName: "feature/pr-reused-setup",
             state: "open",
@@ -6135,7 +6135,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("leaves the setup script alone when a reused PR worktree is already on the head", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -6160,7 +6160,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 95,
             title: "Reused current PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/95",
+            url: "https://github.com/example/codething-mvp/pull/95",
             baseRefName: "main",
             headRefName: "feature/pr-reused-current",
             state: "open",
@@ -6190,7 +6190,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("resets a clean reused PR worktree onto a force-pushed pull request head", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -6234,7 +6234,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 86,
             title: "Force-pushed PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/86",
+            url: "https://github.com/example/codething-mvp/pull/86",
             baseRefName: "main",
             headRefName: "feature/pr-force-pushed",
             state: "open",
@@ -6266,7 +6266,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("keeps a reused PR worktree that carries its own commit off the rewritten head", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -6314,7 +6314,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 87,
             title: "Local commit PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/87",
+            url: "https://github.com/example/codething-mvp/pull/87",
             baseRefName: "main",
             headRefName: "feature/pr-local-commit",
             state: "open",
@@ -6345,7 +6345,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("keeps a dirty reused PR worktree off the rewritten pull request head", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -6389,7 +6389,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 89,
             title: "Dirty worktree PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/89",
+            url: "https://github.com/example/codething-mvp/pull/89",
             baseRefName: "main",
             headRefName: "feature/pr-dirty-worktree",
             state: "open",
@@ -6422,7 +6422,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("refreshes a reused PR worktree that has no upstream from the pull request ref", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -6441,7 +6441,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 90,
             title: "Pull ref only PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/90",
+            url: "https://github.com/example/codething-mvp/pull/90",
             baseRefName: "main",
             headRefName: "feature/pr-ref-only",
             state: "open",
@@ -6484,7 +6484,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("never moves an unrelated local branch that shares the fork head branch name", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -6513,7 +6513,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 94,
             title: "Fork main collision PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/94",
+            url: "https://github.com/example/codething-mvp/pull/94",
             baseRefName: "main",
             headRefName: "main",
             state: "open",
@@ -6558,7 +6558,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "does not block fork PR worktree prep when the fork head branch collides with root main",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const originDir = yield* createBareRemote();
         const forkDir = yield* createBareRemote();
@@ -6578,7 +6578,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             pullRequest: {
               number: 91,
               title: "Fork main PR",
-              url: "https://github.com/pingdotgg/codething-mvp/pull/91",
+              url: "https://github.com/example/codething-mvp/pull/91",
               baseRefName: "main",
               headRefName: "main",
               state: "open",
@@ -6601,7 +6601,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           mode: "worktree",
         });
 
-        expect(result.branch).toBe("t3code/pr-91/main");
+        expect(result.branch).toBe("starkcode/pr-91/main");
         expect(result.worktreePath).not.toBeNull();
         expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe("main");
         expect((yield* runGit(repoDir, ["rev-parse", "main"])).stdout.trim()).toBe(mainBefore);
@@ -6610,7 +6610,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             "branch",
             "--show-current",
           ])).stdout.trim(),
-        ).toBe("t3code/pr-91/main");
+        ).toBe("starkcode/pr-91/main");
       }),
   );
 
@@ -6618,7 +6618,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     "does not overwrite an existing local main branch when preparing a fork PR worktree",
     () =>
       Effect.gen(function* () {
-        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        const repoDir = yield* makeTempDir("starkcode-git-manager-");
         yield* initRepo(repoDir);
         const originDir = yield* createBareRemote();
         const forkDir = yield* createBareRemote();
@@ -6639,7 +6639,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
             pullRequest: {
               number: 92,
               title: "Fork main overwrite PR",
-              url: "https://github.com/pingdotgg/codething-mvp/pull/92",
+              url: "https://github.com/example/codething-mvp/pull/92",
               baseRefName: "main",
               headRefName: "main",
               state: "open",
@@ -6662,7 +6662,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           mode: "worktree",
         });
 
-        expect(result.branch).toBe("t3code/pr-92/main");
+        expect(result.branch).toBe("starkcode/pr-92/main");
         expect((yield* runGit(repoDir, ["rev-parse", "main"])).stdout.trim()).toBe(localMainBefore);
         expect(
           (yield* runGit(result.worktreePath as string, [
@@ -6676,7 +6676,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("reuses an existing PR worktree and restores fork upstream tracking", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const originDir = yield* createBareRemote();
       const forkDir = yield* createBareRemote();
@@ -6702,7 +6702,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 83,
             title: "Reused Fork PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/83",
+            url: "https://github.com/example/codething-mvp/pull/83",
             baseRefName: "main",
             headRefName: "feature/pr-reused-fork",
             state: "open",
@@ -6736,7 +6736,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("does not fail PR worktree prep when setup terminal startup fails", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -6754,7 +6754,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 184,
             title: "Setup failure PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/184",
+            url: "https://github.com/example/codething-mvp/pull/184",
             baseRefName: "main",
             headRefName: "feature/pr-setup-failure",
             state: "open",
@@ -6788,7 +6788,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("rejects worktree prep when the PR head branch is checked out in the main repo", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/pr-root-only"]);
 
@@ -6797,7 +6797,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           pullRequest: {
             number: 79,
             title: "Root-only PR",
-            url: "https://github.com/pingdotgg/codething-mvp/pull/79",
+            url: "https://github.com/example/codething-mvp/pull/79",
             baseRefName: "main",
             headRefName: "feature/pr-root-only",
             state: "open",
@@ -6820,7 +6820,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("emits ordered progress events for commit hooks", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "hooked.txt"), "hooked\n");
       NodeFS.writeFileSync(
@@ -6883,7 +6883,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("emits action_failed when a commit hook rejects", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "hook-failure.txt"), "broken\n");
       NodeFS.writeFileSync(
@@ -6938,7 +6938,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
   it.effect("create_pr preserves dirty work on an already pushed branch", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      const repoDir = yield* makeTempDir("starkcode-git-manager-");
       yield* initRepo(repoDir);
       yield* runGit(repoDir, ["checkout", "-b", "feature/pr-only-follow-up"]);
       const remoteDir = yield* createBareRemote();
@@ -6970,7 +6970,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 number: 201,
                 title: "PR only branch",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/201",
+                url: "https://github.com/example/codething-mvp/pull/201",
                 baseRefName: "main",
                 headRefName: "feature/pr-only-follow-up",
                 state: "OPEN",

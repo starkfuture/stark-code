@@ -1,19 +1,19 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentProject } from "@starkfuture/client-runtime/state/shell";
 import {
   type ModelSelection,
   repositoryGroupingKeyOf,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import {
   buildNewThreadLink,
   parsePromptLinkRepository,
   PROMPT_LINK_MAX_PROMPT_LENGTH,
   type PromptLinkRepository,
-} from "@t3tools/shared/promptLinks";
+} from "@starkfuture/shared/promptLinks";
 
 import { type ComposerThreadTarget, useComposerDraftStore } from "~/composerDraftStore";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
-import { configuredHostedAppUrl } from "~/hostedPairing";
+import { promptLinkDeepLink } from "@starkfuture/shared/promptLinks";
 
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
@@ -28,7 +28,13 @@ export function promptLinkFor(
 ): string | null {
   const trimmed = prompt.trim();
   if (trimmed.length === 0 || trimmed.length > PROMPT_LINK_MAX_PROMPT_LENGTH) return null;
-  return buildNewThreadLink({ prompt: trimmed, ...context, origin: configuredHostedAppUrl() });
+  const relative = buildNewThreadLink({
+    prompt: trimmed,
+    ...context,
+    origin: "https://app.invalid",
+  });
+  const localLink = new URL(relative);
+  return promptLinkDeepLink(`${localLink.pathname}${localLink.search}`);
 }
 
 /** The project's GitHub repository, the only kind a prompt link can name. */

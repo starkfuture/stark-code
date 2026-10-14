@@ -57,7 +57,7 @@ export class GitCafeApi extends Context.Service<
     /** The body of a successful answer. */
     readonly request: (input: GitCafeApiRequest) => Effect.Effect<string, GitCafeApiError>;
   }
->()("@t3tools/source-control-gitcafe/server/GitCafeApi") {}
+>()("@starkfuture/source-control-gitcafe/server/GitCafeApi") {}
 
 /** GitCafe's RFC 7807 error body, e.g. `{"type":"https://cafe.sh/errors/not-found",...}`. */
 const decodeProblem = Schema.decodeUnknownOption(
@@ -135,7 +135,7 @@ export const make = Effect.gen(function* () {
       `https://${host}/api${input.path}`,
     ).pipe(
       HttpClientRequest.bearerToken(Redacted.value(credential.token)),
-      HttpClientRequest.setHeaders({ accept: "application/json", "user-agent": "t3code" }),
+      HttpClientRequest.setHeaders({ accept: "application/json", "user-agent": "starkcode" }),
     );
     const { status, text } = yield* Effect.gen(function* () {
       const response = yield* httpClient

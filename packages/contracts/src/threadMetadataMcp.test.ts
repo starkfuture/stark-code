@@ -18,17 +18,17 @@ describe("ThreadMetadataMcpUpdateInput", () => {
       decodeUpdate({
         action: "link_pull_request",
         pullRequest: {
-          repository: "pingdotgg/t3code",
+          repository: "example/stark-code",
           number: 8689,
-          url: "https://github.com/pingdotgg/t3code/pull/8689",
+          url: "https://github.com/example/stark-code/pull/8689",
         },
       }),
       {
         action: "link_pull_request",
         pullRequest: {
-          repository: "pingdotgg/t3code",
+          repository: "example/stark-code",
           number: 8689,
-          url: "https://github.com/pingdotgg/t3code/pull/8689",
+          url: "https://github.com/example/stark-code/pull/8689",
         },
       },
     );
@@ -45,9 +45,9 @@ describe("ThreadMetadataMcpUpdateInput", () => {
       decodeUpdate({
         action: "unlink_pull_request",
         pullRequest: {
-          repository: "pingdotgg/t3code",
+          repository: "example/stark-code",
           number: 8689,
-          url: "https://github.com/pingdotgg/t3code/pull/8689",
+          url: "https://github.com/example/stark-code/pull/8689",
         },
       }),
     );
@@ -76,15 +76,15 @@ describe("ThreadMetadataMcpUpdateInput", () => {
       decodeUpdate({
         action: "link_pull_request",
         pullRequest: {
-          repository: "engineering/t3code",
+          repository: "engineering/starkcode",
           number: 42,
-          url: "https://git.corp.example/engineering/t3code/pulls/42",
+          url: "https://git.corp.example/engineering/starkcode/pulls/42",
         },
       }).pullRequest,
       {
-        repository: "engineering/t3code",
+        repository: "engineering/starkcode",
         number: 42,
-        url: "https://git.corp.example/engineering/t3code/pulls/42",
+        url: "https://git.corp.example/engineering/starkcode/pulls/42",
       },
     );
 
@@ -92,7 +92,7 @@ describe("ThreadMetadataMcpUpdateInput", () => {
       assert.throws(() =>
         decodeUpdate({
           action: "link_pull_request",
-          pullRequest: { repository: "pingdotgg/t3code", number: 8690, url },
+          pullRequest: { repository: "example/stark-code", number: 8690, url },
         }),
       );
     }

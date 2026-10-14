@@ -1,5 +1,5 @@
 // @effect-diagnostics globalTimers:off - The bridge runs in the client, outside an Effect runtime.
-import { MCP_APP_PROTOCOL_VERSION, type McpAppReference } from "@t3tools/shared/mcpApp";
+import { MCP_APP_PROTOCOL_VERSION, type McpAppReference } from "@starkfuture/shared/mcpApp";
 import * as Base64 from "effect/encoding/Base64";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
@@ -242,7 +242,7 @@ export function makeMcpAppHost(options: McpAppHostOptions): McpAppHost {
         respond(id, {
           protocolVersion:
             requested === MCP_APP_PROTOCOL_VERSION ? requested : MCP_APP_PROTOCOL_VERSION,
-          hostInfo: { name: "t3-code", version: options.hostVersion },
+          hostInfo: { name: "stark-code", version: options.hostVersion },
           hostCapabilities: {
             openLinks: {},
             serverTools: {},
@@ -473,7 +473,7 @@ export function makeMcpAppHost(options: McpAppHostOptions): McpAppHost {
           finish();
           return;
         }
-        const id = `t3-host-${nextHostRequestId++}`;
+        const id = `stark-host-${nextHostRequestId++}`;
         hostRequests.set(id, finish);
         timer = setTimeout(() => {
           hostRequests.delete(id);
@@ -537,7 +537,7 @@ function readDownloads(contents: unknown): ReadonlyArray<McpAppDownload> | undef
 }
 
 /**
- * Maps T3's resolved theme variables to the spec's standardized style names, so
+ * Maps Stark's resolved theme variables to the spec's standardized style names, so
  * apps written for any MCP Apps host pick up the thread's colors and fonts.
  */
 export function mcpAppStyleVariables(

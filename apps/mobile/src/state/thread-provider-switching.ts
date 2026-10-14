@@ -1,6 +1,6 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { threadSupportsProviderHandoff } from "@t3tools/client-runtime/state/thread-workflows";
-import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import type { EnvironmentThreadShell } from "@starkfuture/client-runtime/state/shell";
+import { threadSupportsProviderHandoff } from "@starkfuture/client-runtime/state/thread-workflows";
+import type { OrchestrationV2ThreadProjection } from "@starkfuture/contracts";
 
 type ThreadStartMarkers = Pick<
   EnvironmentThreadShell,

@@ -8,13 +8,13 @@ import {
   type StaticScreenProps,
 } from "@react-navigation/native";
 import { SymbolView } from "../../components/AppSymbol";
-import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { availableScratchWorkspaceRoot } from "@starkfuture/client-runtime/operations/projects";
+import { isScratchProject } from "@starkfuture/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+} from "@starkfuture/client-runtime/state/runtime";
+import type { EnvironmentProject } from "@starkfuture/client-runtime/state/shell";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -38,7 +38,7 @@ import { filterProjectScopes, getProjectScopeSelectionTarget } from "./new-task-
 
 type NewTaskRouteParams = {
   readonly incomingShareId?: string | string[];
-  // A `t3code://new?…` prompt link. See usePromptLinkResolver.
+  // A `starkcode://new?…` prompt link. See usePromptLinkResolver.
   readonly prompt?: string | string[];
   readonly repo?: string | string[];
   readonly pr?: string | string[];
@@ -354,7 +354,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                     />
                   </View>
                   <View className="min-w-0 flex-1">
-                    <Text className="text-base font-t3-bold leading-snug">No project</Text>
+                    <Text className="text-base font-stark-bold leading-snug">No project</Text>
                     <Text className="text-xs leading-snug text-foreground-muted" numberOfLines={1}>
                       Start a task without a project
                     </Text>
@@ -380,7 +380,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
               {projectEmptyState.loading ? (
                 <AppActivityIndicator colorClassName="accent-icon-muted" />
               ) : null}
-              <Text className="text-center text-lg font-t3-bold text-foreground">
+              <Text className="text-center text-lg font-stark-bold text-foreground">
                 {projectEmptyState.title}
               </Text>
               <Text className="text-center text-sm leading-normal text-foreground-muted">
@@ -410,7 +410,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                   className="mt-1 rounded-full bg-primary px-4 py-2.5 active:opacity-70"
                   onPress={() => navigation.navigate("ConnectionsNew")}
                 >
-                  <Text className="text-sm font-t3-bold text-primary-foreground">
+                  <Text className="text-sm font-stark-bold text-primary-foreground">
                     Add environment
                   </Text>
                 </Pressable>
@@ -420,7 +420,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                     className="mt-1 rounded-full bg-primary px-4 py-2.5 active:opacity-70"
                     onPress={() => navigation.dispatch(StackActions.push("AddProject"))}
                   >
-                    <Text className="text-sm font-t3-bold text-primary-foreground">
+                    <Text className="text-sm font-stark-bold text-primary-foreground">
                       Add new project
                     </Text>
                   </Pressable>
@@ -429,7 +429,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                       className="rounded-full bg-subtle px-4 py-2.5 active:opacity-70"
                       onPress={() => void startScratch()}
                     >
-                      <Text className="text-sm font-t3-bold text-foreground">
+                      <Text className="text-sm font-stark-bold text-foreground">
                         Start without a project
                       </Text>
                     </Pressable>
@@ -439,7 +439,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
             </View>
           ) : visibleScopes.length === 0 ? (
             <View className="items-center gap-2 px-6 py-8">
-              <Text className="text-center text-lg font-t3-bold text-foreground">
+              <Text className="text-center text-lg font-stark-bold text-foreground">
                 No matching projects
               </Text>
               <Text className="text-center text-sm leading-normal text-foreground-muted">
@@ -512,7 +512,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                         />
                       </View>
                       <View className="min-w-0 flex-1">
-                        <Text className={cn("text-base leading-snug", "font-t3-bold")}>
+                        <Text className={cn("text-base leading-snug", "font-stark-bold")}>
                           {scope.title}
                         </Text>
                         <Text

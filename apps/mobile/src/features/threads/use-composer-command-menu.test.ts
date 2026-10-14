@@ -4,7 +4,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
@@ -79,7 +79,7 @@ describe("mobile slash commands", () => {
     ).toEqual([]);
   });
 
-  it("still applies the T3 plan command for supported providers", () => {
+  it("still applies the Stark plan command for supported providers", () => {
     const items = buildComposerSlashCommandItems({
       query: "plan",
       atMessageStart: true,
@@ -91,7 +91,7 @@ describe("mobile slash commands", () => {
       },
     });
     const item = items[0];
-    if (!item) throw new Error("Expected the T3 plan command");
+    if (!item) throw new Error("Expected the Stark plan command");
     expect(
       resolveComposerCommandSelection({
         draftMessage: "/plan",

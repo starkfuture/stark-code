@@ -1,9 +1,9 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { ProviderDriverKind } from "@starkfuture/contracts";
 
 import {
   AcpRegistryAdapterV2Driver,
   type AcpRegistryAdapterV2DriverEnv,
-} from "@t3tools/provider-acp-registry/server";
+} from "@starkfuture/provider-acp-registry/server";
 import {
   ClaudeAdapterV2Driver,
   type ClaudeAdapterV2DriverEnv,
@@ -12,14 +12,17 @@ import { CodexAdapterV2Driver, type CodexAdapterV2DriverEnv } from "./Adapters/C
 import {
   CursorAdapterV2Driver,
   type CursorAdapterV2DriverEnv,
-} from "@t3tools/provider-cursor/server";
-import { GrokAdapterV2Driver, type GrokAdapterV2DriverEnv } from "@t3tools/provider-grok/server";
+} from "@starkfuture/provider-cursor/server";
+import {
+  GrokAdapterV2Driver,
+  type GrokAdapterV2DriverEnv,
+} from "@starkfuture/provider-grok/server";
 import {
   OpenCodeAdapterV2Driver,
   type OpenCodeAdapterV2DriverEnv,
-} from "@t3tools/provider-opencode/server";
-import { PiAdapterV2Driver, type PiAdapterV2DriverEnv } from "@t3tools/provider-pi/server";
-import type { AnyProviderAdapterDriver } from "@t3tools/provider-core/server/adapterDriver";
+} from "@starkfuture/provider-opencode/server";
+import { PiAdapterV2Driver, type PiAdapterV2DriverEnv } from "@starkfuture/provider-pi/server";
+import type { AnyProviderAdapterDriver } from "@starkfuture/provider-core/server/adapterDriver";
 
 export type BuiltInProviderAdapterDriversV2Env =
   | AcpRegistryAdapterV2DriverEnv

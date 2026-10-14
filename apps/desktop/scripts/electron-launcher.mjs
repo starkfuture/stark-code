@@ -1,5 +1,5 @@
 import BRAND from "../../../stark.brand.json" with { type: "json" };
-// This file mostly exists because we want dev mode to say "T3 Code (Dev)" instead of "electron"
+// This file mostly exists because we want dev mode to say "Stark Code (Dev)" instead of "electron"
 
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -20,11 +20,11 @@ const APP_DISPLAY_NAME = `${BRAND.productName} (${isDevelopment ? "Dev" : "Alpha
 const APP_BUNDLE_ID = isDevelopment
   ? `${BRAND.bundleId}.dev.${devBundleIdSuffix || "local"}`
   : BRAND.bundleId;
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["starkcode-dev"] : ["starkcode"];
 const LAUNCHER_VERSION = 21;
 const developmentMacIconPngPath = NodePath.join(repoRoot, ...BRAND.iconPath.split("/"));
 const productionMacIconPngPath = NodePath.join(repoRoot, ...BRAND.iconPath.split("/"));
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
+// oxlint-disable-next-line starkcode/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
 function setPlistString(plistPath, key, value) {
@@ -107,14 +107,14 @@ function shellSingleQuote(value) {
 export function makeDevelopmentEnvironmentScript(environment) {
   const envEntries = [
     ["VITE_DEV_SERVER_URL", environment.VITE_DEV_SERVER_URL],
-    ["T3CODE_PORT", environment.T3CODE_PORT],
-    ["T3CODE_HOME", environment.T3CODE_HOME],
-    ["T3CODE_COMMIT_HASH", environment.T3CODE_COMMIT_HASH],
-    ["T3CODE_OTLP_TRACES_URL", environment.T3CODE_OTLP_TRACES_URL],
-    ["T3CODE_OTLP_EXPORT_INTERVAL_MS", environment.T3CODE_OTLP_EXPORT_INTERVAL_MS],
-    ["T3CODE_OTLP_HEADERS", environment.T3CODE_OTLP_HEADERS],
-    ["T3CODE_OTLP_PROTOCOL", environment.T3CODE_OTLP_PROTOCOL],
-    ["T3CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
+    ["STARK_CODE_PORT", environment.STARK_CODE_PORT],
+    ["STARK_CODE_HOME", environment.STARK_CODE_HOME],
+    ["STARK_CODE_COMMIT_HASH", environment.STARK_CODE_COMMIT_HASH],
+    ["STARK_CODE_OTLP_TRACES_URL", environment.STARK_CODE_OTLP_TRACES_URL],
+    ["STARK_CODE_OTLP_EXPORT_INTERVAL_MS", environment.STARK_CODE_OTLP_EXPORT_INTERVAL_MS],
+    ["STARK_CODE_OTLP_HEADERS", environment.STARK_CODE_OTLP_HEADERS],
+    ["STARK_CODE_OTLP_PROTOCOL", environment.STARK_CODE_OTLP_PROTOCOL],
+    ["STARK_CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
   return [
     ...envEntries.map(
@@ -133,13 +133,13 @@ export function makeDevelopmentLauncherScript({
 }) {
   return [
     "#!/bin/sh",
-    "export T3CODE_TELEMETRY_ENABLED=false",
-    "export T3CODE_OTEL_SDK_DISABLED=true",
+    "export STARK_CODE_TELEMETRY_ENABLED=false",
+    "export STARK_CODE_OTEL_SDK_DISABLED=true",
     "export OTEL_SDK_DISABLED=true",
-    "export T3CODE_DISABLE_AUTO_UPDATE=1",
-    "export T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED=1",
+    "export STARK_CODE_DISABLE_AUTO_UPDATE=1",
+    "export STARK_CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED=1",
     `if [ -f ${shellSingleQuote(environmentFilePath)} ]; then . ${shellSingleQuote(environmentFilePath)}; fi`,
-    `exec ${shellSingleQuote(electronBinaryPath)} --t3code-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
+    `exec ${shellSingleQuote(electronBinaryPath)} --starkcode-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
     "",
   ].join("\n");
 }
@@ -437,7 +437,7 @@ function buildMacLauncher(electronBinaryPath) {
   if (isDevelopment) {
     // Keep Electron's native executable inside the branded bundle. Launching the
     // node_modules copy makes macOS associate the process (and Dock label) with
-    // Electron.app even though this bundle's Info.plist has the T3 Code name.
+    // Electron.app even though this bundle's Info.plist has the Stark Code name.
     // Its conventional executable name also keeps Electron's default-app runtime
     // in development mode instead of making app.isPackaged report true.
     writeDevelopmentEnvironmentScript();

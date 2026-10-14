@@ -1,6 +1,6 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { formatThreadLink, percentDecodedThreadLinkId } from "@t3tools/shared/threadLinks";
+import { scopeProjectRef, scopeThreadRef } from "@starkfuture/client-runtime/environment";
+import type { EnvironmentId, ThreadId } from "@starkfuture/contracts";
+import { formatThreadLink, percentDecodedThreadLinkId } from "@starkfuture/shared/threadLinks";
 import { Link } from "@tanstack/react-router";
 import { MessageSquareTextIcon } from "lucide-react";
 
@@ -8,7 +8,7 @@ import { useProject, useThreadShell } from "../../state/entities";
 import { ProjectFavicon } from "../ProjectFavicon";
 
 /**
- * A `t3-thread://` link in chat. It shows the thread's current title, so a rename
+ * A `stark-thread://` link in chat. It shows the thread's current title, so a rename
  * reaches every message that links to it, and leads with the thread's project icon
  * the way a web link leads with its favicon. `label` is what the message wrote,
  * shown only when this client cannot see the thread. Opens the thread in the app.

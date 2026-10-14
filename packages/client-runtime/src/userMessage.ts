@@ -2,7 +2,7 @@ import {
   type OrchestrationV2Actor,
   type OrchestrationV2CreationSource,
   ScheduledTaskId,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 
 const LEGACY_AUTOMATION_PREFIX = /^\[Triggered by schedule task: [^\r\n]+\]\r?\n\r?\n/;
 const LEGACY_AUTOMATION_MESSAGE_ID = /^scheduled-task-message:(.+):\d+:(?:scheduled|manual)$/;
@@ -21,7 +21,7 @@ export function resolveUserMessagePresentation(message: {
 }): {
   readonly text: string;
   /** Who sent a user-role message the user did not type. */
-  readonly attribution: "automation" | "agent" | "t3code" | null;
+  readonly attribution: "automation" | "agent" | "starkcode" | null;
   readonly scheduledTaskId: ScheduledTaskId | undefined;
 } {
   if (message.role !== "user") {
@@ -52,7 +52,7 @@ export function resolveUserMessagePresentation(message: {
       message.createdBy !== "agent"
         ? null
         : message.creationSource === "server"
-          ? "t3code"
+          ? "starkcode"
           : "agent",
     scheduledTaskId: undefined,
   };

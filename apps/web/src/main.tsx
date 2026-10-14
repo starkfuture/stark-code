@@ -1,4 +1,4 @@
-import { BRAND } from "@t3tools/shared/branding";
+import { BRAND } from "@starkfuture/shared/branding";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";

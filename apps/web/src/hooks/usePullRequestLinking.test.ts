@@ -7,7 +7,7 @@ describe("canLinkChangeRequest (#9435 / #9440)", () => {
   // A non-Git parent workspace (a folder of several child repositories that is not itself a
   // checkout) registers as a project with no `repositoryIdentity` at all.
   const nonGitProject = { id: "scratch-project" } as never;
-  const link = parseChangeRequestUrl("https://github.com/pingdotgg/t3code/pull/15111")!;
+  const link = parseChangeRequestUrl("https://github.com/example/stark-code/pull/15111")!;
 
   it("links a pasted pull request URL when the server tracks links on the thread, even with no matching project", () => {
     // `multiple` mode (the `threadPullRequests` capability) stores a link's host, repository

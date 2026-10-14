@@ -1,4 +1,4 @@
-import { imageMimeType } from "@t3tools/shared/image";
+import { imageMimeType } from "@starkfuture/shared/image";
 import type {
   ChatFileAttachment as ContractChatFileAttachment,
   ChatImageAttachment as ContractChatImageAttachment,
@@ -14,19 +14,19 @@ import type {
   RunId,
   ScheduledTaskId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
   ThreadRuntimeSummary,
-} from "@t3tools/client-runtime/state/shell";
-import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
-import { videoMimeType } from "@t3tools/shared/video";
+} from "@starkfuture/client-runtime/state/shell";
+import type { ThreadCheckpointSummary } from "@starkfuture/client-runtime/state/thread-checkpoints";
+import { videoMimeType } from "@starkfuture/shared/video";
 
-export { videoMimeType } from "@t3tools/shared/video";
+export { videoMimeType } from "@starkfuture/shared/video";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
-export { DEFAULT_RUNTIME_MODE } from "@t3tools/contracts";
+export { DEFAULT_RUNTIME_MODE } from "@starkfuture/contracts";
 
 export const DEFAULT_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const DEFAULT_THREAD_TERMINAL_HEIGHT = 280;
@@ -89,7 +89,7 @@ export function isBrowserPreviewAttachment(attachment: ChatFileAttachment): bool
 }
 
 export interface ChatMessage {
-  readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
+  readonly context?: import("@starkfuture/contracts").OrchestrationMessageContext | undefined;
   readonly id: MessageId;
   readonly role: "user" | "assistant" | "system";
   readonly text: string;

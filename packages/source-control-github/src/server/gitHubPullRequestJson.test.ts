@@ -44,7 +44,7 @@ function listJson(entries: ReadonlyArray<Record<string, unknown>>): string {
           nodes: entries.map(({ reviewRequests, latestReviews, checks, ...entry }) => ({
             number: 1,
             title: "Add the pull requests page",
-            url: "https://github.com/pingdotgg/t3code/pull/1",
+            url: "https://github.com/example/stark-code/pull/1",
             headRefName: "feat/page",
             baseRefName: "main",
             createdAt: "2026-07-01T00:00:00Z",
@@ -200,12 +200,12 @@ describe("pull request search decoding", () => {
           nodes: rollupStates.map((state, index) => ({
             number: index + 1,
             title: "Add the pull requests page",
-            url: "https://github.com/pingdotgg/t3code/pull/1",
+            url: "https://github.com/example/stark-code/pull/1",
             headRefName: "feat/page",
             baseRefName: "main",
             createdAt: "2026-07-01T00:00:00Z",
             updatedAt: "2026-07-02T00:00:00Z",
-            repository: { nameWithOwner: "pingdotgg/t3code" },
+            repository: { nameWithOwner: "example/stark-code" },
             commits: {
               nodes: [{ commit: { statusCheckRollup: state === null ? null : { state } } }],
             },
@@ -249,7 +249,7 @@ describe("pull request detail decoding", () => {
   const detailJson = JSON.stringify({
     number: 7,
     title: "Detail",
-    url: "https://github.com/pingdotgg/t3code/pull/7",
+    url: "https://github.com/example/stark-code/pull/7",
     headRefName: "feat/detail",
     baseRefName: "main",
     createdAt: "2026-07-01T00:00:00Z",
@@ -2069,18 +2069,18 @@ describe("batched pull request summaries", () => {
 describe("pull request watch fingerprints", () => {
   it("asks for every pull request in one aliased read, and refuses an unsafe selector", () => {
     const document = buildPullRequestWatchFingerprintsGraphQlQuery([
-      { repository: "pingdotgg/t3code", number: 7 },
-      { repository: "pingdotgg/lakebed", number: 8 },
+      { repository: "example/stark-code", number: 7 },
+      { repository: "example/lakebed", number: 8 },
     ]);
     expect(document?.query).toContain(
       "w0: repository(owner: $w0_owner, name: $w0_name) { pullRequest(number: $w0_number)",
     );
     expect(document?.query).toContain("w1: repository(owner: $w1_owner, name: $w1_name)");
     expect(document?.variables).toEqual({
-      w0_owner: "pingdotgg",
-      w0_name: "t3code",
+      w0_owner: "example",
+      w0_name: "starkcode",
       w0_number: 7,
-      w1_owner: "pingdotgg",
+      w1_owner: "example",
       w1_name: "lakebed",
       w1_number: 8,
     });

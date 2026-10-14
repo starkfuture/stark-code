@@ -2,7 +2,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeURL from "node:url";
 import * as NodePath from "node:path";
 
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher has no Effect runtime.
+// oxlint-disable-next-line starkcode/no-global-process-runtime -- Standalone launcher has no Effect runtime.
 const hostPlatform = process.platform;
 
 /** Build native bundles before launch; Vite independently keeps the web UI live. */

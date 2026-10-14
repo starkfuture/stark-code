@@ -1,12 +1,8 @@
-import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Tracer from "effect/Tracer";
-import type { HttpClient } from "effect/http";
-import { OtlpSerialization, OtlpTracer } from "effect/observability";
 
 export interface RelayClientTracingConfig {
   readonly tracesUrl: string;
@@ -23,7 +19,7 @@ export interface RelayClientTracingResource {
 }
 
 export class RelayClientTracer extends Context.Reference(
-  "@t3tools/shared/relayTracing/RelayClientTracer",
+  "@starkfuture/shared/relayTracing/RelayClientTracer",
   {
     defaultValue: () => Option.none<Tracer.Tracer>(),
   },
@@ -33,13 +29,13 @@ export class RelayClientTracer extends Context.Reference(
  * The tracer that was active before relay tracing took over, so work nested
  * inside a relay span can return to it.
  */
-class LocalTracer extends Context.Reference("@t3tools/shared/relayTracing/LocalTracer", {
+class LocalTracer extends Context.Reference("@starkfuture/shared/relayTracing/LocalTracer", {
   defaultValue: () => Option.none<Tracer.Tracer>(),
 }) {}
 
 /**
  * Exports every span `effect` creates through the product tracer. Use it only
- * around T3 Connect work; wrap local work inside it with
+ * around Stark Connect work; wrap local work inside it with
  * {@link withLocalTracing} so it stays off the product tracer.
  */
 export const withRelayClientTracing = <A, E, R>(
@@ -77,117 +73,10 @@ export const withLocalTracing = <A, E, R>(effect: Effect.Effect<A, E, R>): Effec
     ),
   );
 
-function cleanTraceStack(error: Error): string {
-  const stack = error.stack ?? `${error.name}: ${error.message}`;
-  const lines = stack.split("\n");
-  const effectFrameIndex = lines.findIndex(
-    (line, index) => index > 0 && /(?:Generator\.next|~effect\/Effect)/.test(line),
-  );
-  return effectFrameIndex < 0 ? stack : lines.slice(0, effectFrameIndex).join("\n");
-}
-
-function traceSafeError(value: unknown, seen = new WeakSet<object>()): Error {
-  const message =
-    value instanceof Error
-      ? value.message
-      : typeof value === "object" &&
-          value !== null &&
-          "message" in value &&
-          typeof value.message === "string"
-        ? value.message
-        : String(value);
-
-  let cause: Error | undefined;
-  if (typeof value === "object" && value !== null && !seen.has(value)) {
-    seen.add(value);
-    if ("cause" in value && value.cause !== undefined) {
-      cause = traceSafeError(value.cause, seen);
-    }
-  }
-
-  const error = new Error(message, cause ? { cause } : undefined);
-  if (value instanceof Error) {
-    error.name = value.name;
-    error.stack = cleanTraceStack(value);
-  } else if (
-    typeof value === "object" &&
-    value !== null &&
-    "name" in value &&
-    typeof value.name === "string"
-  ) {
-    error.name = value.name;
-  }
-  if (cause) {
-    error.stack = `${error.stack ?? `${error.name}: ${error.message}`}\nCaused by: ${cause.stack ?? `${cause.name}: ${cause.message}`}`;
-  }
-  return error;
-}
-
-function traceSafeExit(exit: Exit.Exit<unknown, unknown>): Exit.Exit<unknown, unknown> {
-  if (Exit.isSuccess(exit)) {
-    return exit;
-  }
-  return Exit.failCause(
-    Cause.fromReasons(
-      exit.cause.reasons.map((reason) => {
-        if (Cause.isFailReason(reason)) {
-          return Cause.makeFailReason(traceSafeError(reason.error));
-        }
-        if (Cause.isDieReason(reason)) {
-          return Cause.makeDieReason(traceSafeError(reason.defect));
-        }
-        return reason;
-      }),
-    ),
-  );
-}
-
-function nonInterferingTracer(delegate: Tracer.Tracer): Tracer.Tracer {
-  return Tracer.make({
-    span(options) {
-      const span = delegate.span(options);
-      const end = span.end.bind(span);
-      span.end = (endTime, exit) => {
-        try {
-          end(endTime, traceSafeExit(exit));
-        } catch {
-          // Telemetry is best-effort and must never change application behavior.
-        }
-      };
-      return span;
-    },
-    ...(delegate.context ? { context: delegate.context } : {}),
-  });
-}
-
+/** Configured relay collectors are deliberately ignored in this app. */
 export function layer(
-  config: RelayClientTracingConfig | null,
-  resource: RelayClientTracingResource,
-): Layer.Layer<never, never, HttpClient.HttpClient> {
-  if (config === null) {
-    return Layer.succeed(RelayClientTracer, Option.none());
-  }
-
-  const layerTracer = OtlpTracer.layer({
-    url: config.tracesUrl,
-    headers: {
-      Authorization: `Bearer ${config.tracesToken}`,
-      "X-Axiom-Dataset": config.tracesDataset,
-    },
-    resource: {
-      serviceName: resource.serviceName,
-      serviceVersion: resource.serviceVersion,
-      attributes: {
-        "service.namespace": "t3code",
-        "service.runtime": resource.runtime,
-        "service.component": resource.component ?? "relay-client",
-        "t3.client.surface": resource.client,
-      },
-    },
-  }).pipe(Layer.provide(OtlpSerialization.layerJson));
-
-  return Layer.effect(
-    RelayClientTracer,
-    Tracer.Tracer.pipe(Effect.map(nonInterferingTracer), Effect.asSome),
-  ).pipe(Layer.provide(layerTracer));
+  _config: RelayClientTracingConfig | null,
+  _resource: RelayClientTracingResource,
+): Layer.Layer<never> {
+  return Layer.succeed(RelayClientTracer, Option.none());
 }

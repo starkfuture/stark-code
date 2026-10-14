@@ -7,7 +7,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import { AsyncResult } from "effect/reactivity";
 
 import type {

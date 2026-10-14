@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@starkfuture/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Atom } from "effect/reactivity";
@@ -47,7 +47,7 @@ export function settleUpdateRunMachine(environmentId: EnvironmentId, failed: boo
   );
 }
 
-const SAVED_RESULT_KEY = "t3code:update-everything-result:v1";
+const SAVED_RESULT_KEY = "starkcode:update-everything-result:v1";
 // A result older than this belongs to an install that never relaunched the app.
 const SAVED_RESULT_MAX_AGE_MS = 10 * 60 * 1000;
 
@@ -133,7 +133,7 @@ export function DesktopUpdateLaunchNotice() {
       stackedThreadToast({
         type: "error",
         title: "Update did not apply",
-        description: `T3 Code is still on ${APP_VERSION}. Install ${notAppliedVersion} again from the update button.`,
+        description: `Stark Code is still on ${APP_VERSION}. Install ${notAppliedVersion} again from the update button.`,
       }),
     );
   }, [notAppliedVersion]);

@@ -20,7 +20,7 @@ import {
   type OrchestrationV2ThreadLaunchInput,
   type OrchestrationV2ThreadProjection,
   type ProjectMutation,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -250,7 +250,7 @@ describe("V2 environment commands", () => {
             parentCheckpointId: null,
             ordinalWithinScope: 0,
             appRunOrdinal: null,
-            ref: CheckpointRef.make("refs/t3/thread-start"),
+            ref: CheckpointRef.make("refs/stark-code/thread-start"),
             status: "ready",
             files: [],
             capturedAt: v2Now,
@@ -507,8 +507,8 @@ describe("V2 environment commands", () => {
     Effect.gen(function* () {
       const link = {
         host: "github.com",
-        repository: "pingdotgg/t3code",
-        url: "https://github.com/pingdotgg/t3code/pull/7",
+        repository: "example/stark-code",
+        url: "https://github.com/example/stark-code/pull/7",
         source: "agent" as const,
         linkedAt: "2026-10-05T00:00:00.000Z",
         snapshot: null,
@@ -549,7 +549,7 @@ describe("V2 environment commands", () => {
           commandId: expect.any(String),
           threadId: v2ThreadId,
           host: "github.com",
-          repository: "pingdotgg/t3code",
+          repository: "example/stark-code",
           number: 7,
           watching: false,
         },
@@ -852,7 +852,7 @@ describe("V2 environment commands", () => {
                       parentCheckpointId: null,
                       ordinalWithinScope: 0,
                       appRunOrdinal: null,
-                      ref: CheckpointRef.make("refs/t3/legacy-checkpoint"),
+                      ref: CheckpointRef.make("refs/stark-code/legacy-checkpoint"),
                       status,
                       files: [],
                       capturedAt: v2Now,

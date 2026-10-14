@@ -1,7 +1,7 @@
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ProjectId } from "@t3tools/contracts";
+import { ProjectId } from "@starkfuture/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import {
   ActivityIndicator,
@@ -323,7 +323,7 @@ export function PullRequestsScreen(
               className="items-center gap-2 px-8 py-4"
             >
               <Text className="text-xs text-foreground-muted">{result.loadMoreError}</Text>
-              <Text className="text-sm font-t3-medium text-link">Try again</Text>
+              <Text className="text-sm font-stark-medium text-link">Try again</Text>
             </Pressable>
           ) : undefined
         }

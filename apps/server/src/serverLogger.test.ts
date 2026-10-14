@@ -9,8 +9,8 @@ import * as Tracer from "effect/Tracer";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
-import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
-import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
+import { DEFAULT_SIGNAL_EXPORT } from "@starkfuture/shared/observability";
+import * as OtelEnvironment from "@starkfuture/shared/otelEnvironment";
 
 import * as ServerConfig from "./config.ts";
 import * as ServerLogger from "./serverLogger.ts";
@@ -43,7 +43,7 @@ const layerConfig = (overrides: Partial<ServerConfig.ServerConfig["Service"]>) =
     ServerConfig.ServerConfig,
     Effect.gen(function* () {
       const path = yield* Path.Path;
-      const baseDir = path.join(NodeOS.tmpdir(), "t3-server-logger-test");
+      const baseDir = path.join(NodeOS.tmpdir(), "stark-server-logger-test");
       const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
       return ServerConfig.make({
         logLevel: "Info",
@@ -136,57 +136,7 @@ const logInSpanThrough = (overrides: Partial<ServerConfig.ServerConfig["Service"
   });
 
 describe("ServerLoggerLive", () => {
-  it.effect("exports log records to the configured logs endpoint", () =>
-    Effect.gen(function* () {
-      const requests = yield* logThrough({
-        otlpLogsUrl: "https://collector.example.com/v1/logs",
-      });
-
-      assert.lengthOf(requests, 1);
-      const [request] = requests;
-      assert.strictEqual(request?.url, "https://collector.example.com/v1/logs");
-      assert.include(request?.body ?? "", "server logger under test");
-      assert.include(request?.body ?? "", "t3code-server");
-      assert.include(request?.body ?? "", "service.runtime");
-    }),
-  );
-
-  it.effect("keeps its service name while OTEL resource attributes add dimensions", () =>
-    Effect.gen(function* () {
-      const requests = yield* logThrough({
-        otlpLogsUrl: "https://collector.example.com/v1/logs",
-      }).pipe(
-        Effect.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromEnv({
-              env: {
-                OTEL_SERVICE_NAME: "renamed",
-                OTEL_RESOURCE_ATTRIBUTES:
-                  "service.name=renamed,service.namespace=renamed,deployment.environment.name=development",
-              },
-            }),
-          ),
-        ),
-      );
-
-      assert.lengthOf(requests, 1);
-      const body = requests[0]?.body ?? "";
-      assert.include(body, '"stringValue":"t3code-server"');
-      assert.include(body, "deployment.environment.name");
-      assert.include(body, '"key":"service.namespace","value":{"stringValue":"t3code"}');
-      assert.notInclude(body, "renamed");
-    }),
-  );
-
-  it.effect("stays off the network when no logs endpoint is configured", () =>
-    Effect.gen(function* () {
-      const requests = yield* logThrough({});
-
-      assert.lengthOf(requests, 0);
-    }),
-  );
-
-  it.effect("sends the headers and wire format the log signal asked for", () =>
+  it.effect("ignores configured log collectors and keeps logs local", () =>
     Effect.gen(function* () {
       const requests = yield* logThrough({
         otlpLogsUrl: "https://collector.example.com/v1/logs",
@@ -196,36 +146,42 @@ describe("ServerLoggerLive", () => {
           headers: { "x-scope": "logs" },
         },
       });
-
-      assert.lengthOf(requests, 1);
-      assert.strictEqual(requests[0]?.headers["x-scope"], "logs");
-      assert.strictEqual(requests[0]?.headers["content-type"], "application/x-protobuf");
+      assert.lengthOf(requests, 0);
     }),
   );
 
-  it.effect("attaches log messages to the active span when no logs endpoint is configured", () =>
+  it.effect("environment collector settings cannot enable export", () =>
     Effect.gen(function* () {
-      const { requests, spans } = yield* logInSpanThrough({});
+      const requests = yield* logThrough({
+        otlpLogsUrl: "https://collector.example.com/v1/logs",
+      }).pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                OTEL_SDK_DISABLED: "false",
+                OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.com",
+                OTEL_SERVICE_NAME: "enabled",
+              },
+            }),
+          ),
+        ),
+      );
+      assert.lengthOf(requests, 0);
+    }),
+  );
 
+  it.effect("attaches log messages to the local active span regardless of collector settings", () =>
+    Effect.gen(function* () {
+      const { requests, spans } = yield* logInSpanThrough({
+        otlpLogsUrl: "https://collector.example.com/v1/logs",
+      });
       assert.lengthOf(requests, 0);
       assert.lengthOf(spans, 1);
       assert.deepEqual(
         spans[0]?.events.map(([name]) => name),
         ["server logger under test"],
       );
-    }),
-  );
-
-  it.effect("stops duplicating messages onto the span once log records are exported", () =>
-    Effect.gen(function* () {
-      const { requests, spans } = yield* logInSpanThrough({
-        otlpLogsUrl: "https://collector.example.com/v1/logs",
-      });
-
-      assert.lengthOf(requests, 1);
-      assert.include(requests[0]?.body ?? "", "server logger under test");
-      assert.lengthOf(spans, 1);
-      assert.lengthOf(spans[0]?.events ?? [], 0);
     }),
   );
 });

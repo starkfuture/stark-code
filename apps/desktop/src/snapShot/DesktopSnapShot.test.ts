@@ -5,7 +5,7 @@ import {
   DesktopPendingSnapShot,
   type ClientSettings,
   type DesktopSnapShotEvent,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -501,7 +501,7 @@ const layerTest = (
           DesktopEnvironment.DesktopEnvironment.of({
             platform,
             stateDir: "/state",
-            linuxDesktopEntryName: "com.t3tools.T3Code.desktop",
+            linuxDesktopEntryName: "com.starkfuture.StarkCode.desktop",
             appRoot: "/repo",
             linuxApplicationsDir: "/test-data/applications",
           } as DesktopEnvironment.DesktopEnvironment["Service"]),
@@ -936,17 +936,17 @@ it.effect.each(["win32", "darwin", "linux"] as const)(
       shouldRenderRichAnimation: true,
     });
     const bounds = { x: 10, y: 20, width: 800, height: 600 };
-    const t3 = {
+    const stark = {
       id: 42,
-      title: "T3 Code",
-      appIdentifier: "com.t3tools.T3Code.desktop",
-      owner: { name: "T3 Code", processId: 123 },
+      title: "Stark Code",
+      appIdentifier: "com.starkfuture.StarkCode.desktop",
+      owner: { name: "Stark Code", processId: 123 },
       bounds,
       png: Buffer.from([1, 2, 3]),
     };
     focusedWindowMock.mockReturnValue({
       getBounds: () => bounds,
-      getTitle: () => t3.title,
+      getTitle: () => stark.title,
       isDestroyed: () => false,
       isMinimized: () => false,
       isVisible: () => true,
@@ -955,26 +955,26 @@ it.effect.each(["win32", "darwin", "linux"] as const)(
     });
     const images: Uint8Array[] = [];
     activeWindowMock.mockReset().mockResolvedValue({
-      ...t3,
+      ...stark,
       platform: platform === "darwin" ? "macos" : "windows",
     });
     regionCaptureMock.mockReset().mockResolvedValue({
       width: bounds.width,
       height: bounds.height,
-      png: t3.png,
+      png: stark.png,
     });
     macCaptureMock.mockReset().mockImplementation(async () => {
-      images.push(t3.png);
-      return { source: { name: t3.title }, png: t3.png };
+      images.push(stark.png);
+      return { source: { name: stark.title }, png: stark.png };
     });
     const activate = vi.fn<(title: string) => Promise<void>>().mockResolvedValue(undefined);
     linuxCaptureMock.mockResolvedValueOnce({
-      png: t3.png,
+      png: stark.png,
       window: {
-        title: t3.title,
-        appName: t3.owner.name,
-        appIdentifier: t3.appIdentifier,
-        processId: t3.owner.processId,
+        title: stark.title,
+        appName: stark.owner.name,
+        appIdentifier: stark.appIdentifier,
+        processId: stark.owner.processId,
         bounds,
       },
       feedback: {
@@ -1015,14 +1015,14 @@ it.effect.each(["win32", "darwin", "linux"] as const)(
         yield* Effect.promise(trigger);
 
         const saved = yield* decodePendingMetadata(metadata);
-        assert.equal(saved.source.windowTitle, t3.title);
-        assert.equal(saved.source.appName, t3.owner.name);
-        assert.equal(saved.source.accessibleText, `Window from process ${t3.owner.processId}`);
-        assert.deepEqual(images, [t3.png]);
+        assert.equal(saved.source.windowTitle, stark.title);
+        assert.equal(saved.source.appName, stark.owner.name);
+        assert.equal(saved.source.accessibleText, `Window from process ${stark.owner.processId}`);
+        assert.deepEqual(images, [stark.png]);
         assert.equal(prepareCaptureRevealMock.mock.calls.length, platform === "win32" ? 1 : 0);
         if (platform === "linux") {
-          assert.equal(saved.source.appIdentifier, t3.appIdentifier);
-          assert.deepEqual(activate.mock.calls, [[t3.title]]);
+          assert.equal(saved.source.appIdentifier, stark.appIdentifier);
+          assert.deepEqual(activate.mock.calls, [[stark.title]]);
         }
       }),
     ).pipe(
@@ -1614,7 +1614,7 @@ it.effect(
     focusedWindowMock.mockReturnValue(undefined);
     const destination = {
       getBounds: () => ({ x: 0, y: 0, width: 1000, height: 800 }),
-      getTitle: () => "T3 Code",
+      getTitle: () => "Stark Code",
       isDestroyed: () => false,
       isVisible: () => true,
       isMinimized: () => false,
@@ -1630,7 +1630,7 @@ it.effect(
         const warning = logs.find(
           (message) =>
             Array.isArray(message) &&
-            message[0] === "The compositor could not activate T3 Code after the snapshot",
+            message[0] === "The compositor could not activate Stark Code after the snapshot",
         );
         assert.strictEqual(Array.isArray(warning) ? warning[1] : undefined, activationFailure);
         const pending = yield* decodePendingMetadata(saved);
@@ -2625,8 +2625,8 @@ it.each([
 );
 
 it.each([
-  { names: ["⠙ t3code"], expected: "Verified text" },
-  { names: ["⠋ t3code", "⠙ t3code"], expected: undefined },
+  { names: ["⠙ starkcode"], expected: "Verified text" },
+  { names: ["⠋ starkcode", "⠙ starkcode"], expected: undefined },
 ])("reads a changing Wayland title only when unambiguous: $names", async ({ names, expected }) => {
   vi.stubEnv("XDG_SESSION_TYPE", "wayland");
   const tree = vi.fn(async () => ({ value: "Verified text", children: [] }));
@@ -2642,12 +2642,12 @@ it.each([
     assert.strictEqual(
       await readAccessibleWindowText(
         {
-          title: "⠋ t3code",
+          title: "⠋ starkcode",
           bounds: { x: 479, y: 342, width: 700, height: 520 },
           owner: { processId: 123 },
         },
         "linux",
-        "⠋ t3code",
+        "⠋ starkcode",
       ),
       expected,
     );
@@ -3161,7 +3161,7 @@ it.effect("flags revoked macOS permissions on read and re-registers once they re
       const revoked = yield* service.state;
       assert.equal(
         revoked.message,
-        "Allow Screen Recording in System Settings, then restart T3 Code.",
+        "Allow Screen Recording in System Settings, then restart Stark Code.",
       );
       assert.deepEqual(revoked.macPermissions, { screenRecording: false, accessibility: true });
 
@@ -3174,7 +3174,7 @@ it.effect("flags revoked macOS permissions on read and re-registers once they re
       const blocked = yield* service.state;
       assert.equal(
         blocked.message,
-        "Allow Screen Recording in System Settings, then restart T3 Code.",
+        "Allow Screen Recording in System Settings, then restart Stark Code.",
       );
       assert.isFalse(blocked.shortcutRegistered);
 
@@ -3880,7 +3880,7 @@ it.effect.each([false, true])(
       platform: "macos",
       id: 42,
       title: "Setup",
-      owner: { name: "T3 Code", processId: 123, path: "/Applications/T3 Code.app" },
+      owner: { name: "Stark Code", processId: 123, path: "/Applications/Stark Code.app" },
       bounds: { x: 0, y: 0, width: 800, height: 600 },
     };
     activeWindowMock.mockReset().mockResolvedValue(active);

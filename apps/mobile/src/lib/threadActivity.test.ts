@@ -18,9 +18,9 @@ import {
   type OrchestrationV2RunAttempt,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2TurnItem,
-} from "@t3tools/contracts";
-import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
-import { summarizeToolGroup } from "@t3tools/client-runtime/work-log/presentation";
+} from "@starkfuture/contracts";
+import { resolveUserMessagePresentation } from "@starkfuture/client-runtime/user-message";
+import { summarizeToolGroup } from "@starkfuture/client-runtime/work-log/presentation";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -85,20 +85,20 @@ it("shows only the structured path in expanded mobile read details", () => {
   expect(withoutPath?.canExpand).toBe(false);
 });
 
-it("expands a T3 Code notice to the prompt the agent got", () => {
+it("expands a Stark Code notice to the prompt the agent got", () => {
   const item = {
     ...base("restart-notice", "2026-06-20T00:00:03.000Z", 2),
     type: "notification",
     source: { kind: "system" },
     outcome: "updated",
-    summary: "T3 Code restarted and resumed this turn",
+    summary: "Stark Code restarted and resumed this turn",
     detail: "Continue where you left off.",
   } as OrchestrationV2TurnItem;
   const [activity] = buildThreadFeed([projected(item, 0)]).flatMap((entry) =>
     entry.type === "activity-group" ? entry.activities : [],
   );
 
-  expect(activity?.summary).toBe("T3 Code restarted and resumed this turn");
+  expect(activity?.summary).toBe("Stark Code restarted and resumed this turn");
   expect(activity?.canExpand).toBe(true);
   expect(activity?.getFullDetail()).toBe("Continue where you left off.");
 });
@@ -1433,11 +1433,11 @@ describe("buildThreadFeed", () => {
     expect(activity?.workEntry.viewedImagePath).toBe("/workspace/reference.png");
   });
 
-  it("pretty prints T3 MCP dynamic tool activities and attaches the product logo", () => {
+  it("pretty prints Stark MCP dynamic tool activities and attaches the product logo", () => {
     const toolItem: OrchestrationV2TurnItem = {
-      ...base("item-t3-tool", "2026-06-20T00:00:04.000Z", 3),
+      ...base("item-stark-tool", "2026-06-20T00:00:04.000Z", 3),
       type: "dynamic_tool",
-      toolName: "mcp__t3-code__t3_thread_read",
+      toolName: "mcp__stark-code__stark_thread_read",
       input: { threadId: "thread-child" },
       output: { messages: [] },
     };
@@ -1445,9 +1445,9 @@ describe("buildThreadFeed", () => {
     const feed = buildThreadFeed([projected(toolItem, 0)]);
     const activity = feed[0]?.type === "activity-group" ? feed[0].activities[0] : null;
 
-    expect(activity?.summary).toBe("Read a T3 thread");
-    expect(activity?.logo).toBe("t3-code");
-    expect(activity?.getCopyText().split("\n")[0]).toBe("Read a T3 thread");
+    expect(activity?.summary).toBe("Read a Stark thread");
+    expect(activity?.logo).toBe("stark-code");
+    expect(activity?.getCopyText().split("\n")[0]).toBe("Read a Stark thread");
   });
 
   it.each(["cua_repl.js", "node_repl.js", "js"])(
@@ -1471,7 +1471,7 @@ describe("buildThreadFeed", () => {
   it.each([
     [
       "failed",
-      "await sky.type_text({app:'T3 Code (Nightly)',text:'debug(ga.run)'});",
+      "await sky.type_text({app:'Stark Code (Nightly)',text:'debug(ga.run)'});",
       "Restrict the breakpoint to Git actions",
       "computer",
     ],
@@ -1500,21 +1500,24 @@ describe("buildThreadFeed", () => {
     );
   });
 
-  it("uses canonical T3 orchestration summaries in compact work groups", () => {
+  it("uses canonical Stark orchestration summaries in compact work groups", () => {
     const rows = [
       projected(command("2026-06-20T00:00:01.000Z"), 0),
-      ...["mcp__t3-code__t3_thread_send", "t3_code.t3_thread_send", "t3_thread_send"].map(
-        (toolName, index) =>
-          projected(
-            {
-              ...base(`item-send-${index}`, `2026-06-20T00:00:0${index + 2}.000Z`, index + 2),
-              type: "dynamic_tool" as const,
-              toolName,
-              input: { threadId: `thread-${index}`, message: "Continue" },
-              output: { threadId: `thread-${index}`, messageId: `message-${index}` },
-            },
-            index + 1,
-          ),
+      ...[
+        "mcp__stark-code__stark_thread_send",
+        "stark_code.stark_thread_send",
+        "stark_thread_send",
+      ].map((toolName, index) =>
+        projected(
+          {
+            ...base(`item-send-${index}`, `2026-06-20T00:00:0${index + 2}.000Z`, index + 2),
+            type: "dynamic_tool" as const,
+            toolName,
+            input: { threadId: `thread-${index}`, message: "Continue" },
+            output: { threadId: `thread-${index}`, messageId: `message-${index}` },
+          },
+          index + 1,
+        ),
       ),
       projected(
         {
@@ -1548,7 +1551,7 @@ describe("buildThreadFeed", () => {
         ...base("list", "2026-09-19T00:00:01.000Z", 1),
         type: "dynamic_tool",
         title: "Custom provider title",
-        toolName: "T3-code.t3_project_list",
+        toolName: "Stark-code.stark_project_list",
         input: {},
         output: { projects: [] },
       },
@@ -1556,7 +1559,7 @@ describe("buildThreadFeed", () => {
         ...base("clone", "2026-09-19T00:00:02.000Z", 2),
         type: "dynamic_tool",
         title: "Custom provider title",
-        toolName: "mcp__t3_code__t3_project_clone",
+        toolName: "mcp__stark_code__stark_project_clone",
         input: {},
         output: { cwd: "/tmp/repo" },
       },
@@ -1564,7 +1567,7 @@ describe("buildThreadFeed", () => {
         ...base("failed-clone", "2026-09-19T00:00:03.000Z", 3),
         type: "dynamic_tool",
         title: "Custom provider title",
-        toolName: "t3_project_clone",
+        toolName: "stark_project_clone",
         input: {},
         output: { isError: true },
       },
@@ -1576,7 +1579,7 @@ describe("buildThreadFeed", () => {
     expect(workEntryRowLabel(activities[0]!.workEntry)).toBe("Listed projects");
     expect(workEntryRowLabel(activities[1]!.workEntry)).toBe("Cloned a repository");
     expect(workEntryRowLabel(activities[2]!.workEntry)).toBe("Failed to clone a repository");
-    expect(activities.every((activity) => activity.logo === "t3-code")).toBe(true);
+    expect(activities.every((activity) => activity.logo === "stark-code")).toBe(true);
     const presented = deriveThreadFeedPresentation(
       feed,
       { runId, status: "running", startedAt: null, completedAt: null },
@@ -1837,7 +1840,7 @@ describe("retained v2 feed presentation", () => {
             ...base("preview-click", "2026-06-20T00:00:02.000Z", 1),
             type: "dynamic_tool",
             status,
-            toolName: "mcp__t3-code__preview_click",
+            toolName: "mcp__stark-code__preview_click",
             input: { element: "button" },
             output: null,
           },
@@ -1890,7 +1893,7 @@ describe("retained v2 feed presentation", () => {
           {
             ...base(id, "2026-06-20T00:00:02.000Z", index),
             type: "dynamic_tool",
-            toolName: "t3-code.delegate_task",
+            toolName: "stark-code.delegate_task",
             input: { task: "Identical task" },
             output,
             ...overrides,
@@ -2560,7 +2563,7 @@ describe("html renders", () => {
   ): OrchestrationV2TurnItem => ({
     ...base("item-render", "2026-06-20T00:00:02.500Z", 2),
     type: "dynamic_tool",
-    toolName: "mcp__t3-code__html_render",
+    toolName: "mcp__stark-code__html_render",
     input: { title: page.title },
     output: { htmlRender: page },
     ...overrides,
@@ -2634,7 +2637,7 @@ describe("MCP apps", () => {
     type: "dynamic_tool",
     toolName: "weather.get_weather",
     input: { city: "Oslo" },
-    output: { t3McpApp: app, result: { content: [] } },
+    output: { starkMcpApp: app, result: { content: [] } },
   });
   const feed = (status: OrchestrationV2TurnItem["status"]) =>
     buildThreadFeed([

@@ -10,8 +10,8 @@ import {
   OrchestrationV2ThreadDetailSnapshot,
   OrchestrationV2ThreadBoundedSnapshot,
   type OrchestrationV2ThreadHistoryPage,
-} from "@t3tools/contracts";
-import { RelayClientTracer } from "@t3tools/shared/relayTracing";
+} from "@starkfuture/contracts";
+import { RelayClientTracer } from "@starkfuture/shared/relayTracing";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -69,7 +69,7 @@ const AUTH = {
   policy: "remote-reachable",
   bootstrapMethods: ["one-time-token"],
   sessionMethods: ["dpop-access-token"],
-  sessionCookieName: "t3_session",
+  sessionCookieName: "stark_session",
 } satisfies AuthSessionState["auth"];
 const SESSION = {
   authenticated: true,
@@ -715,7 +715,7 @@ describe("authenticated environment HTTP requests", () => {
 });
 
 describe("relay request tracing", () => {
-  it.effect("starts an exported trace for a T3 Connect request", () =>
+  it.effect("starts an exported trace for a Stark Connect request", () =>
     Effect.gen(function* () {
       const productSpans: Array<{ readonly name: string; readonly root: boolean }> = [];
       const productTracer = Tracer.make({

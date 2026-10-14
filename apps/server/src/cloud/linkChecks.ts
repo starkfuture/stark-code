@@ -1,5 +1,5 @@
 /**
- * Pure checks behind T3 Connect link proofs and relay requests: which local
+ * Pure checks behind Stark Connect link proofs and relay requests: which local
  * origin a link may point at, and which scopes and lifetimes a proof claims and
  * accepts.
  */
@@ -8,7 +8,7 @@ import type {
   RelayLinkProofRequest,
   RelayManagedEndpointOrigin,
   RelayManagedEndpointRuntimeConfig,
-} from "@t3tools/contracts/relay";
+} from "@starkfuture/contracts/relay";
 import type { HttpServerRequest } from "effect/http";
 
 const CLOUD_PROOF_MAX_LIFETIME_SECONDS = 5 * 60;

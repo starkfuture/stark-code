@@ -1,15 +1,15 @@
 import { useNavigation, useNavigationState, useRoute } from "@react-navigation/native";
-import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
+import { threadPullRequestLinkMode } from "@starkfuture/client-runtime/thread-pull-request-compatibility";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
   ThreadId,
   type PullRequestDetail,
   type PullRequestLinkedThreadsResult,
-} from "@t3tools/contracts";
-import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
-import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
-import { normalizeThreadPullRequestKey } from "@t3tools/shared/threadPullRequests";
+} from "@starkfuture/contracts";
+import { formatComposerContextReference } from "@starkfuture/shared/composerContextReferences";
+import { parseChangeRequestUrl } from "@starkfuture/shared/changeRequestUrl";
+import { normalizeThreadPullRequestKey } from "@starkfuture/shared/threadPullRequests";
 import { useRef, useState } from "react";
 import { Alert, Platform } from "react-native";
 import { useAndroidWorkspaceSelection } from "../workspace/useAndroidWorkspaceSelection";

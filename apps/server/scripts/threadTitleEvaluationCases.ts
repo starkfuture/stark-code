@@ -1,18 +1,18 @@
-import type { ThreadTitleMessage } from "@t3tools/provider-core/server/threadTitleContext";
+import type { ThreadTitleMessage } from "@starkfuture/provider-core/server/threadTitleContext";
 
 // Public PR subjects and existing title scenarios. Repeated text adds context pressure.
 export const threadTitleEvaluationCases = [
   {
     id: "linked-reset-credits",
-    source: "https://github.com/pingdotgg/t3code/pull/10462",
+    source: "https://github.com/example/stark-code/pull/10462",
     request: "Review the reset credit routing change.",
     previousTitle: "Review PR 10462",
-    messages: [{ role: "user", text: "Review https://github.com/pingdotgg/t3code/pull/10462" }],
+    messages: [{ role: "user", text: "Review https://github.com/example/stark-code/pull/10462" }],
     rubric: "Name reset credit routing. Distinguish it from displaying credit balances.",
   },
   {
     id: "onboarding-merge",
-    source: "https://github.com/pingdotgg/t3code/pull/10465",
+    source: "https://github.com/example/stark-code/pull/10465",
     request: "Make onboarding one shared wizard across computers, then merge when green.",
     previousTitle: "Finish onboarding PR",
     messages: [
@@ -92,10 +92,10 @@ export const threadTitleEvaluationCases = [
   {
     id: "research",
     source: "Maintainer title generation request",
-    request: "How can we improve title generation in T3 Code?",
+    request: "How can we improve title generation in Stark Code?",
     previousTitle: "Research title gen improvements",
     messages: [
-      { role: "user", text: "How can we improve title gen further in T3 Code?" },
+      { role: "user", text: "How can we improve title gen further in Stark Code?" },
       {
         role: "assistant",
         text: "Prioritize user messages, refine vague titles once, and resolve PR subjects.",

@@ -59,43 +59,31 @@ describe("withRelayClientTracing", () => {
     }),
   );
 
-  it.effect("preserves nested error causes in exported relay spans", () => {
+  it.effect("never installs an exporter even when collector configuration is supplied", () => {
     const fetchFn = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }));
     const layerHttpClient = FetchHttpClient.layer.pipe(
       Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn)),
     );
     const layerTracing = RelayTracing.layer(
       {
-        tracesUrl: "https://api.axiom.test/v1/traces",
+        tracesUrl: "https://collector.example.test/v1/traces",
         tracesDataset: "relay-traces",
-        tracesToken: "public-ingest-token",
+        tracesToken: "ingest-token",
       },
-      {
-        serviceName: "relay-test",
-        runtime: "test",
-        client: "test",
-      },
+      { serviceName: "relay-test", runtime: "test", client: "test" },
     ).pipe(Layer.provide(layerHttpClient));
-    const rootCause = new Error("relay socket closed");
-    const failure = new Error("relay request failed", { cause: rootCause });
-    const layerTracedApplication = Layer.effectDiscard(
-      Effect.fail(failure).pipe(
+    return Effect.gen(function* () {
+      expect(Option.isNone(yield* RelayClientTracer)).toBe(true);
+      yield* Effect.fail(new Error("relay failure")).pipe(
         Effect.withSpan("relay.failed-operation"),
         withRelayClientTracing,
         Effect.exit,
-      ),
-    ).pipe(Layer.provide(layerTracing));
-
-    return Layer.build(layerTracedApplication).pipe(
-      Effect.scoped,
+      );
+    }).pipe(
+      Effect.provide(layerTracing),
       Effect.andThen(
         Effect.sync(() => {
-          expect(fetchFn).toHaveBeenCalledOnce();
-          const payload = new TextDecoder().decode(fetchFn.mock.calls[0]?.[1]?.body as Uint8Array);
-          expect(payload).toContain("relay request failed");
-          expect(payload).toContain("relay socket closed");
-          expect(payload).toContain('"key":"service.name","value":{"stringValue":"relay-test"}');
-          expect(payload).toContain('"key":"service.namespace","value":{"stringValue":"t3code"}');
+          expect(fetchFn).not.toHaveBeenCalled();
         }),
       ),
     );

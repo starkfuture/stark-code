@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentHttpApi } from "@t3tools/contracts";
+import { EnvironmentHttpApi } from "@starkfuture/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -45,7 +45,7 @@ const answerHealthWith = async (failure: HealthFailure) => {
   });
   try {
     const response = await handler(
-      new Request("http://127.0.0.1/api/t3-connect/health", {
+      new Request("http://127.0.0.1/api/stark-connect/health", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ proof: "proof" }),

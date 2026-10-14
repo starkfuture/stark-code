@@ -1,7 +1,7 @@
 /**
  * Optional integration check against a real `grok agent stdio` install.
- * Enable with: T3_GROK_ACP_PROBE=1 vp test run GrokAcpCliProbe
- * Set T3_GROK_LIVE_TURN=1 to also send a small prompt to the real model.
+ * Enable with: STARK_GROK_ACP_PROBE=1 vp test run GrokAcpCliProbe
+ * Set STARK_GROK_LIVE_TURN=1 to also send a small prompt to the real model.
  *
  * The probe assumes either `XAI_API_KEY` is set in the environment or
  * the user has previously run `grok login`. Without credentials the
@@ -23,10 +23,10 @@ const makeProbeRuntime = makeGrokAcpRuntime({
   grokSettings: { binaryPath: "grok" },
   environment: process.env,
   cwd: process.cwd(),
-  clientInfo: { name: "t3-grok-probe", version: "0.0.0" },
+  clientInfo: { name: "stark-grok-probe", version: "0.0.0" },
 });
 
-describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () => {
+describe.runIf(process.env.STARK_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () => {
   it.effect("initialize and authenticate against real grok agent stdio", () =>
     Effect.gen(function* () {
       const runtime = yield* makeProbeRuntime;
@@ -67,7 +67,7 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () =
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect.skipIf(process.env.T3_GROK_LIVE_TURN !== "1")(
+  it.effect.skipIf(process.env.STARK_GROK_LIVE_TURN !== "1")(
     "finishes a real Grok turn and streams its answer",
     () =>
       Effect.gen(function* () {
@@ -78,7 +78,7 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () =
           environment: process.env,
           cwd,
           runtimeMode: "approval-required",
-          clientInfo: { name: "t3-grok-probe", version: "0.0.0" },
+          clientInfo: { name: "stark-grok-probe", version: "0.0.0" },
         });
         yield* runtime.start();
         const chunks: string[] = [];
@@ -92,11 +92,11 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () =
           return Effect.void;
         }).pipe(Effect.forkChild);
         const result = yield* runtime.prompt({
-          prompt: [{ type: "text", text: "Reply exactly GROK_T3_OK. Do not use any tools." }],
+          prompt: [{ type: "text", text: "Reply exactly GROK_STARK_OK. Do not use any tools." }],
         });
         yield* runtime.drainEvents;
         expect(result.stopReason).toBe("end_turn");
-        expect(chunks.join("")).toContain("GROK_T3_OK");
+        expect(chunks.join("")).toContain("GROK_STARK_OK");
         yield* Fiber.interrupt(events);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

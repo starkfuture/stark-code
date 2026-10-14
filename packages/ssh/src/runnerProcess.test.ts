@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@starkfuture/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -12,7 +12,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as NodeNet from "node:net";
 
 import { remoteStateKey } from "./command.ts";
-import { buildRemoteStopScript, buildRemoteT3RunnerScript } from "./tunnel.ts";
+import { buildRemoteStopScript, buildRemoteStarkRunnerScript } from "./tunnel.ts";
 
 const Started = Schema.Struct({
   pid: Schema.Number,
@@ -29,7 +29,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "t3-runner-" });
+        const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "stark-runner-" });
         const bin = path.join(fixture, "bin");
         const cliPath = path.join(fixture, "installed cli.mjs");
         yield* fs.makeDirectory(bin);
@@ -45,7 +45,7 @@ const server = net.createServer((socket) => {
 process.on("SIGTERM", () => server.close(() => {
   process.stdout.write("graceful shutdown\\n");
 }));
-server.listen(Number(process.env.T3_TEST_PORT ?? 0), "127.0.0.1", () => {
+server.listen(Number(process.env.STARK_TEST_PORT ?? 0), "127.0.0.1", () => {
   process.stdout.write(JSON.stringify({
     pid: process.pid,
     port: server.address().port,
@@ -63,11 +63,13 @@ server.listen(Number(process.env.T3_TEST_PORT ?? 0), "127.0.0.1", () => {
                 cwd: fixture,
                 env: {
                   PATH: bin,
-                  T3_TEST_PORT: String(port),
+                  STARK_TEST_PORT: String(port),
                 },
                 detached: false,
                 stdin: Stream.make(
-                  new TextEncoder().encode(buildRemoteT3RunnerScript({ nodeScriptPath: cliPath })),
+                  new TextEncoder().encode(
+                    buildRemoteStarkRunnerScript({ nodeScriptPath: cliPath }),
+                  ),
                 ),
               }),
             );
@@ -140,7 +142,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-          const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "t3-stop-" });
+          const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "stark-stop-" });
           const signalPath = path.join(fixture, "signals");
           const child = yield* spawner.spawn(
             ChildProcess.make(
@@ -198,14 +200,14 @@ server.listen(0, "127.0.0.1", () => {
           // Redirect only the state directory. Never use the developer's SSH state.
           const isolatedScript = script.replace(
             /^STATE_DIR=.*$/mu,
-            'STATE_DIR="$T3_TEST_STATE_DIR"',
+            'STATE_DIR="$STARK_TEST_STATE_DIR"',
           );
           assert.notEqual(isolatedScript, script);
           const runStop = Effect.fn("test.remoteStop")(function* () {
             const stop = yield* spawner.spawn(
               ChildProcess.make("/bin/sh", ["-s"], {
                 cwd: fixture,
-                env: { T3_TEST_STATE_DIR: fixture },
+                env: { STARK_TEST_STATE_DIR: fixture },
                 stdin: Stream.make(new TextEncoder().encode(isolatedScript)),
               }),
             );

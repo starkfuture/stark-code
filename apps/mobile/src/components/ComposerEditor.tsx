@@ -1,14 +1,14 @@
-import { ComposerContextId } from "@t3tools/contracts";
+import { ComposerContextId } from "@starkfuture/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { useNavigation } from "@react-navigation/native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "react-native";
-import type { EnvironmentId } from "@t3tools/contracts";
-import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
-import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
-import { ComposerEditor as NativeComposerEditor } from "../native/T3ComposerEditor";
-import type { ComposerEditorProps as NativeComposerEditorProps } from "../native/T3ComposerEditor";
+import type { EnvironmentId } from "@starkfuture/contracts";
+import { encodeComposerContextFragment } from "@starkfuture/shared/composerContextClipboard";
+import { collectComposerContextReferences } from "@starkfuture/shared/composerContextReferences";
+import { ComposerEditor as NativeComposerEditor } from "../native/StarkComposerEditor";
+import type { ComposerEditorProps as NativeComposerEditorProps } from "../native/StarkComposerEditor";
 import {
   appendComposerDraftAttachments,
   createComposerDraftContextHistory,
@@ -265,4 +265,4 @@ export type {
   ComposerEditorHandle,
   ComposerEditorSelection,
   ComposerTextPaste,
-} from "../native/T3ComposerEditor";
+} from "../native/StarkComposerEditor";

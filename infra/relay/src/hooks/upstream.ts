@@ -12,9 +12,9 @@ import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { withoutRedirects } from "../environments/EnvironmentConnector.ts";
 
 /** Set by the relay on every forward; the environment uses it as the delivery id. */
-const RELAY_DELIVERY_ID_HEADER = "x-t3-relay-delivery-id";
+const RELAY_DELIVERY_ID_HEADER = "x-stark-relay-delivery-id";
 /** When the relay received the request; the environment trusts it only with the delivery id. */
-const RELAY_RECEIVED_AT_HEADER = "x-t3-relay-received-at";
+const RELAY_RECEIVED_AT_HEADER = "x-stark-relay-received-at";
 /** The environment answers with a small JSON status; anything past this is cut off. */
 const MAX_RESPONSE_BYTES = 64 * 1024;
 export const RELAY_HOOK_UPSTREAM_TIMEOUT_MS = 8_000;
@@ -38,7 +38,7 @@ export interface UpstreamHook {
 export interface UpstreamResponse {
   readonly status: number;
   readonly contentType: string | undefined;
-  /** What the environment did with the request (`x-t3-hook-outcome`). */
+  /** What the environment did with the request (`x-stark-hook-outcome`). */
   readonly outcome: string | undefined;
   readonly body: Uint8Array;
 }
@@ -107,7 +107,7 @@ export const sendUpstream = (baseUrl: string, hook: UpstreamHook) =>
       Effect.flatMap((response) =>
         readCapped(response).pipe(
           Effect.map((body): UpstreamResponse => {
-            const outcome = response.headers["x-t3-hook-outcome"];
+            const outcome = response.headers["x-stark-hook-outcome"];
             return {
               status: response.status,
               contentType: response.headers["content-type"],

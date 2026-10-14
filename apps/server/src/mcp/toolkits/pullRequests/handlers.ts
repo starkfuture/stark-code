@@ -1,7 +1,7 @@
 import {
   threadPullRequestsOf,
   threadPullRequestKeysEqual,
-} from "@t3tools/shared/threadPullRequests";
+} from "@starkfuture/shared/threadPullRequests";
 import {
   CommandId,
   pullRequestHostOf,
@@ -10,15 +10,15 @@ import {
   type SourceControlProviderKind,
   type ThreadId,
   type ThreadPullRequestLink,
-} from "@t3tools/contracts";
-import { changeRequestUrlFor, parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
-import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
+} from "@starkfuture/contracts";
+import { changeRequestUrlFor, parseChangeRequestUrl } from "@starkfuture/shared/changeRequestUrl";
+import { sourceControlRepositorySelector } from "@starkfuture/shared/sourceControl";
 import {
   normalizeThreadPullRequestKey,
   resolveThreadPullRequestChains,
   threadPullRequestKeyOf,
   visibleThreadPullRequests,
-} from "@t3tools/shared/threadPullRequests";
+} from "@starkfuture/shared/threadPullRequests";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";

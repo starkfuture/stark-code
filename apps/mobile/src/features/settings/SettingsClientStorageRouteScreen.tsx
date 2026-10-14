@@ -1,7 +1,7 @@
 import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { type EnvironmentMachineKind, resolveEnvironmentMachineKind } from "@t3tools/contracts";
+import { type EnvironmentMachineKind, resolveEnvironmentMachineKind } from "@starkfuture/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { useMemo } from "react";
 import { Alert, Pressable, View } from "react-native";
@@ -192,7 +192,7 @@ function CacheEnvironmentRow(props: {
         onPress={props.onClear}
         className="rounded-full px-3 py-2 disabled:opacity-40"
       >
-        <Text className="font-t3-medium tabular-nums text-danger-foreground" numberOfLines={1}>
+        <Text className="font-stark-medium tabular-nums text-danger-foreground" numberOfLines={1}>
           Clear {formatBytes(props.environment.payloadBytes)}
         </Text>
       </Pressable>

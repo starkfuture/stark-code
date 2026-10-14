@@ -3,7 +3,7 @@ import * as NodeCrypto from "node:crypto";
 
 import * as NodePlatformCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
-import { ScheduledTaskUpsertInput, SecretRequestError } from "@t3tools/contracts";
+import { ScheduledTaskUpsertInput, SecretRequestError } from "@starkfuture/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -114,7 +114,7 @@ it.effect("dispatches exactly the rendered prompt and logs the delivery", () =>
       assert.equal(task.nextRunAt, null);
       assert.isDefined(task.webhook);
       assert.isTrue(task.webhook!.path.startsWith("/api/hooks/scheduled-task%3Ahook/"));
-      // Not linked to T3 Connect in tests.
+      // Not linked to Stark Connect in tests.
       assert.equal(task.webhook!.url, null);
 
       const result = yield* service.triggerWebhook(requestFor(task));
@@ -147,11 +147,11 @@ it("builds the relay hook URL from the managed tunnel's key, never the environme
   assert.equal(
     ScheduledTaskService.relayHookBaseUrl({
       relayUrl,
-      tunnelName: "t3coderelay-managedendpoint-dev-julius-0123456789abcdef",
+      tunnelName: "starkcoderelay-managedendpoint-dev-julius-0123456789abcdef",
     }),
     "https://relay.example.com/v1/hooks/0123456789abcdef",
   );
-  for (const tunnelName of [undefined, "t3coderelay-managedendpoint", "x-0123456789ABCDEF"]) {
+  for (const tunnelName of [undefined, "starkcoderelay-managedendpoint", "x-0123456789ABCDEF"]) {
     assert.isNull(ScheduledTaskService.relayHookBaseUrl({ relayUrl, tunnelName }));
   }
 });
@@ -836,13 +836,13 @@ it.effect("a signature without any secret is refused", () =>
 const signatureFor = (secret: string) =>
   `sha256=${NodeCrypto.createHmac("sha256", secret).update(pullRequestBody).digest("hex")}`;
 
-/** Count recorded by `t3_webhook_deliveries_total` for one outcome and source. */
+/** Count recorded by `stark_webhook_deliveries_total` for one outcome and source. */
 const deliveriesCounted = (outcome: string, source: "relay" | "direct") =>
   Metric.snapshot.pipe(
     Effect.map((snapshots) => {
       const found = snapshots.find(
         (snapshot) =>
-          snapshot.id === "t3_webhook_deliveries_total" &&
+          snapshot.id === "stark_webhook_deliveries_total" &&
           snapshot.attributes?.outcome === outcome &&
           snapshot.attributes?.source === source,
       );

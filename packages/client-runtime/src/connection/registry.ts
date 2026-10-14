@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@starkfuture/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -140,7 +140,7 @@ export class EnvironmentRegistry extends Context.Service<
       | ConnectionBlockedError
     >;
     /**
-     * Drops the T3 Connect route of every environment, after a cloud sign-out
+     * Drops the Stark Connect route of every environment, after a cloud sign-out
      * or account change. Environments with no other route are removed.
      */
     readonly removeRelayEnvironments: () => Effect.Effect<
@@ -195,7 +195,7 @@ export class EnvironmentRegistry extends Context.Service<
       stream: Stream.Stream<A, E, R>,
     ) => Stream.Stream<A, E, Exclude<R, EnvironmentSupervisor.EnvironmentSupervisor>>;
   }
->()("@t3tools/client-runtime/connection/registry/EnvironmentRegistry") {}
+>()("@starkfuture/client-runtime/connection/registry/EnvironmentRegistry") {}
 
 interface EnvironmentServiceScope {
   readonly entry: ConnectionCatalogEntry;

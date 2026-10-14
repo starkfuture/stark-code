@@ -1,4 +1,4 @@
-import deviceStreamScript from "@t3tools/mobile-device-stream";
+import deviceStreamScript from "@starkfuture/mobile-device-stream";
 import {
   useEffect,
   useEffectEvent,
@@ -11,7 +11,7 @@ import {
 } from "react";
 import { Platform, Pressable, View } from "react-native";
 import { WebView } from "react-native-webview";
-import type { DeviceStreamStatus } from "@t3tools/client-runtime/device/stream";
+import type { DeviceStreamStatus } from "@starkfuture/client-runtime/device/stream";
 
 import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { AppText } from "../../components/AppText";
@@ -100,7 +100,7 @@ function DeviceStreamDocumentView({
     if (!active.current || failed.current) return;
     failed.current = true;
     void onInputConnected(false);
-    webView.current?.injectJavaScript("window.T3DeviceStream?.stop(); true;");
+    webView.current?.injectJavaScript("window.StarkDeviceStream?.stop(); true;");
     setError(message);
     setStatus("error");
   };
@@ -123,7 +123,7 @@ function DeviceStreamDocumentView({
   );
   const command = (button: keyof DeviceStreamRef) => {
     webView.current?.injectJavaScript(
-      `window.T3DeviceStream?.command(${JSON.stringify(button)}); true;`,
+      `window.StarkDeviceStream?.command(${JSON.stringify(button)}); true;`,
     );
   };
   useImperativeHandle(ref, () => ({
@@ -139,7 +139,7 @@ function DeviceStreamDocumentView({
     const view = webView.current;
     return () => {
       active.current = false;
-      view?.injectJavaScript("window.T3DeviceStream?.stop(); true;");
+      view?.injectJavaScript("window.StarkDeviceStream?.stop(); true;");
     };
   }, []);
   const processTerminated = () => {

@@ -26,7 +26,7 @@ const MANAGED_ENDPOINT_LEGACY_AGE_BUCKET_DAYS = [7, 30, 90] as const;
 // A host that never registered recovery cannot replace a deleted tunnel on
 // its own build. Only delete its tunnel after it has been gone this long. A
 // returning host that has updated recovers the tunnel at the same hostname;
-// one that has not sees the client's "update T3 Code" message instead.
+// one that has not sees the client's "update Stark Code" message instead.
 const MANAGED_ENDPOINT_LEGACY_GRACE_PERIOD_DAYS = 7;
 // Deletions run a few at a time: each one is a row-locked database
 // transaction plus two Cloudflare calls, so one at a time cannot finish a
@@ -76,7 +76,7 @@ export class ManagedEndpointReaper extends Context.Service<
       | ManagedEndpointAllocations.ManagedEndpointAllocationPersistenceError
     >;
   }
->()("t3code-relay/environments/ManagedEndpointReaper") {}
+>()("starkcode-relay/environments/ManagedEndpointReaper") {}
 
 function isExpiredManagedTunnel(input: {
   readonly tunnel: ManagedEndpointProvider.ManagedEndpointTunnel;

@@ -1,7 +1,7 @@
 import type {
   RelayAgentActivityAggregateState,
   RelayAgentActivityState,
-} from "@t3tools/contracts/relay";
+} from "@starkfuture/contracts/relay";
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no generateKeyPairSync.
@@ -38,12 +38,12 @@ const config = RelayConfiguration.RelayConfiguration.of({
     teamId: "team-id",
     keyId: "key-id",
     privateKey: Redacted.make("not-a-private-key"),
-    bundleId: "com.t3tools.t3code.dev",
+    bundleId: "com.starkfuture.starkcode.dev",
   },
   apnsDeliveryJobSigningSecret: Redacted.make("job-signing-secret"),
   clerkSecretKey: Redacted.make("clerk-secret"),
   clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
+  clerkJwtAudience: "stark-code-relay",
   cloudMintPrivateKey: Redacted.make("cloud-private-key"),
   cloudMintPublicKey: "cloud-public-key",
   managedEndpointBaseDomain: undefined,
@@ -77,7 +77,7 @@ const state: RelayAgentActivityState = {
 };
 
 const aggregate: RelayAgentActivityAggregateState = {
-  title: "T3 Code",
+  title: "Stark Code",
   subtitle: "Agent work in progress",
   activeCount: 1,
   updatedAt: state.updatedAt,
@@ -462,7 +462,7 @@ describe("ApnsDeliveries", () => {
       yield* deliveries.sendForTarget({
         target: {
           ...target,
-          bundle_id: "com.t3tools.t3code.preview",
+          bundle_id: "com.starkfuture.starkcode.preview",
           aps_environment: "production",
           ended_at: "1970-01-01T00:00:05.000Z",
         },
@@ -476,7 +476,7 @@ describe("ApnsDeliveries", () => {
             kind: "live_activity_update",
             target: {
               token: "activity-token",
-              bundleId: "com.t3tools.t3code.preview",
+              bundleId: "com.starkfuture.starkcode.preview",
               apsEnvironment: "production",
             },
           },
@@ -493,7 +493,7 @@ describe("ApnsDeliveries", () => {
       userId: target.user_id,
       deviceId: target.device_id,
       token: "activity-token",
-      bundleId: "com.t3tools.t3code.preview",
+      bundleId: "com.starkfuture.starkcode.preview",
       apsEnvironment: "sandbox",
       aggregate,
       createdAt: "1970-01-01T00:00:00.000Z",
@@ -518,14 +518,18 @@ describe("ApnsDeliveries", () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]?.url).toBe("https://api.sandbox.push.apple.com/3/device/activity-token");
       expect(requests[0]?.headers["apns-topic"]).toBe(
-        "com.t3tools.t3code.preview.push-type.liveactivity",
+        "com.starkfuture.starkcode.preview.push-type.liveactivity",
       );
     }).pipe(
       Effect.provide(
         layerFor({
           attempts,
           currentTargets: [
-            { ...target, bundle_id: "com.t3tools.t3code.preview", aps_environment: "sandbox" },
+            {
+              ...target,
+              bundle_id: "com.starkfuture.starkcode.preview",
+              aps_environment: "sandbox",
+            },
           ],
           config: signingConfig,
           execute,
@@ -2030,7 +2034,7 @@ describe("signed APNs registration metadata", () => {
       token: "unchanged-token",
       ...(changed === "legacy"
         ? {}
-        : { bundleId: "com.t3tools.t3code.dev", apsEnvironment: "sandbox" as const }),
+        : { bundleId: "com.starkfuture.starkcode.dev", apsEnvironment: "sandbox" as const }),
       aggregate: kind === "live_activity_update" ? aggregate : null,
       ...(kind === "push_notification"
         ? {
@@ -2060,7 +2064,7 @@ describe("signed APNs registration metadata", () => {
         `${changed === "environment" ? "https://api.push.apple.com" : "https://api.sandbox.push.apple.com"}/3/device/unchanged-token`,
       );
       expect(requests[0]?.headers["apns-topic"]).toBe(
-        `${changed === "bundle" ? "com.t3tools.t3code.preview" : "com.t3tools.t3code.dev"}${kind === "live_activity_update" ? ".push-type.liveactivity" : ""}`,
+        `${changed === "bundle" ? "com.starkfuture.starkcode.preview" : "com.starkfuture.starkcode.dev"}${kind === "live_activity_update" ? ".push-type.liveactivity" : ""}`,
       );
     }).pipe(
       Effect.provide(
@@ -2073,7 +2077,9 @@ describe("signed APNs registration metadata", () => {
               push_token: "unchanged-token",
               activity_push_token: "unchanged-token",
               bundle_id:
-                changed === "bundle" ? "com.t3tools.t3code.preview" : "com.t3tools.t3code.dev",
+                changed === "bundle"
+                  ? "com.starkfuture.starkcode.preview"
+                  : "com.starkfuture.starkcode.dev",
               aps_environment: changed === "environment" ? "production" : "sandbox",
             },
           ],

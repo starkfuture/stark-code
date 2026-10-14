@@ -1,6 +1,6 @@
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId } from "@t3tools/contracts";
+import { squashAtomCommandFailure } from "@starkfuture/client-runtime/state/runtime";
+import type { EnvironmentThreadShell } from "@starkfuture/client-runtime/state/shell";
+import type { EnvironmentId } from "@starkfuture/contracts";
 import * as DateTime from "effect/DateTime";
 import { useState } from "react";
 import { Pressable, View } from "react-native";

@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest";
-import type { ProviderReplayTranscript } from "@t3tools/contracts";
+import type { ProviderReplayTranscript } from "@starkfuture/contracts";
 
 import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
 import {
@@ -12,7 +12,7 @@ import {
 } from "../shared.ts";
 
 /**
- * Stop while Muse works on a `sleep 30` request: T3 sends `turn/interrupt`, Muse
+ * Stop while Muse works on a `sleep 30` request: Stark sends `turn/interrupt`, Muse
  * ends the turn as cancelled, and the run, every row and the session settle.
  */
 export function assertMuseTurnInterruptOutput(

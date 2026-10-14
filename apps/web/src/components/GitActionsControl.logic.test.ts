@@ -1,5 +1,5 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
-import type { VcsStatusResult } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@starkfuture/contracts";
+import type { VcsStatusResult } from "@starkfuture/contracts";
 import { assert, describe, it } from "vite-plus/test";
 import {
   buildGitActionProgressStages,
@@ -1187,8 +1187,8 @@ describe("resolveLiveThreadBranchUpdate", () => {
 
   it("does not regress a semantic thread ref back to a temporary worktree ref", () => {
     const update = resolveLiveThreadBranchUpdate({
-      threadBranch: "t3code/github-query-rate-limit",
-      gitStatus: status({ refName: "t3code/bda76797" }),
+      threadBranch: "starkcode/github-query-rate-limit",
+      gitStatus: status({ refName: "starkcode/bda76797" }),
     });
 
     assert.equal(update, null);
@@ -1196,7 +1196,7 @@ describe("resolveLiveThreadBranchUpdate", () => {
 
   it("allows a temporary worktree ref to reconcile to a semantic branch", () => {
     const update = resolveLiveThreadBranchUpdate({
-      threadBranch: "t3code/a9628676",
+      threadBranch: "starkcode/a9628676",
       gitStatus: status({ refName: "feature/diff-panel-toggle" }),
     });
 

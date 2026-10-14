@@ -1,6 +1,6 @@
-import { AuthFilesystemReadScope, type EnvironmentId } from "@t3tools/contracts";
-import { resolvePathLinkTarget, splitFilePathPosition } from "@t3tools/shared/fileLinks";
-import { normalizeProjectPathForComparison, isAbsolutePath } from "@t3tools/shared/path";
+import { AuthFilesystemReadScope, type EnvironmentId } from "@starkfuture/contracts";
+import { resolvePathLinkTarget, splitFilePathPosition } from "@starkfuture/shared/fileLinks";
+import { normalizeProjectPathForComparison, isAbsolutePath } from "@starkfuture/shared/path";
 import { useContext } from "react";
 
 import { useEnvironmentScope } from "../state/session";

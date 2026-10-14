@@ -1,4 +1,8 @@
-import { EnvironmentId, ProjectId, type AgentSessionProjectCandidate } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  type AgentSessionProjectCandidate,
+} from "@starkfuture/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -85,18 +89,18 @@ describe("partitionOnboardingProjects", () => {
 
 describe("groupOnboardingProjects", () => {
   it("groups clones by origin, keeps local repos separate, and folds non-git folders away", () => {
-    const main = candidate("/code/t3code", {
-      git: github("pingdotgg/t3code"),
+    const main = candidate("/code/starkcode", {
+      git: github("example/stark-code"),
       threadCount: 79,
       lastActiveAt: "2026-08-21T12:00:00.000Z",
     });
-    const clone = candidate("/code/clones/t3code-2", {
-      git: github("pingdotgg/t3code"),
+    const clone = candidate("/code/clones/starkcode-2", {
+      git: github("example/stark-code"),
       threadCount: 13,
       lastActiveAt: "2026-08-10T12:00:00.000Z",
     });
     const older = candidate("/code/fleet", {
-      git: github("t3dotgg/fleet"),
+      git: github("starkdotgg/fleet"),
       threadCount: 295,
       lastActiveAt: "2026-08-22T00:00:00.000Z",
     });
@@ -115,14 +119,14 @@ describe("groupOnboardingProjects", () => {
       })),
     ).toEqual([
       {
-        label: "t3dotgg/fleet",
+        label: "starkdotgg/fleet",
         paths: ["/code/fleet"],
         threadCount: 295,
         lastActiveAt: "2026-08-22T00:00:00.000Z",
       },
       {
-        label: "pingdotgg/t3code",
-        paths: ["/code/t3code", "/code/clones/t3code-2"],
+        label: "example/stark-code",
+        paths: ["/code/starkcode", "/code/clones/starkcode-2"],
         threadCount: 92,
         lastActiveAt: "2026-08-21T12:00:00.000Z",
       },
@@ -353,25 +357,28 @@ describe("projects on multiple computers", () => {
 
 describe("splitOnboardingProjectPath", () => {
   it("keeps sibling checkouts that share a prefix distinguishable by name", () => {
-    const left = splitOnboardingProjectPath("/Users/me/Projects/clients/acme/t3code");
-    const right = splitOnboardingProjectPath("/Users/me/Projects/clients/acme/t3code-worktree");
-    expect(left).toEqual({ name: "t3code", parent: "/Users/me/Projects/clients/acme/" });
-    expect(right).toEqual({ name: "t3code-worktree", parent: "/Users/me/Projects/clients/acme/" });
+    const left = splitOnboardingProjectPath("/Users/me/Projects/clients/acme/starkcode");
+    const right = splitOnboardingProjectPath("/Users/me/Projects/clients/acme/starkcode-worktree");
+    expect(left).toEqual({ name: "starkcode", parent: "/Users/me/Projects/clients/acme/" });
+    expect(right).toEqual({
+      name: "starkcode-worktree",
+      parent: "/Users/me/Projects/clients/acme/",
+    });
     expect(left.name).not.toBe(right.name);
   });
 
   it("splits Windows paths and ignores a trailing separator", () => {
-    expect(splitOnboardingProjectPath("C:\\Users\\me\\t3code\\")).toEqual({
-      name: "t3code",
+    expect(splitOnboardingProjectPath("C:\\Users\\me\\starkcode\\")).toEqual({
+      name: "starkcode",
       parent: "C:\\Users\\me\\",
     });
   });
 
   it("keeps a root or bare name whole", () => {
     expect(splitOnboardingProjectPath("/")).toEqual({ name: "/", parent: "" });
-    expect(splitOnboardingProjectPath("/t3code")).toEqual({ name: "t3code", parent: "/" });
-    expect(splitOnboardingProjectPath("t3code")).toEqual({ name: "t3code", parent: "" });
-    expect(splitOnboardingProjectPath("t3code/")).toEqual({ name: "t3code", parent: "" });
+    expect(splitOnboardingProjectPath("/starkcode")).toEqual({ name: "starkcode", parent: "/" });
+    expect(splitOnboardingProjectPath("starkcode")).toEqual({ name: "starkcode", parent: "" });
+    expect(splitOnboardingProjectPath("starkcode/")).toEqual({ name: "starkcode", parent: "" });
   });
 
   it.each(["C:\\", "C:/", "\\\\server\\share", "\\\\server\\share\\", "//server/share/"])(

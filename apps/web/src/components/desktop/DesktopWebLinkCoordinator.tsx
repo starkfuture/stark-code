@@ -1,7 +1,7 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
+import { scopeProjectRef, scopeThreadRef } from "@starkfuture/client-runtime/environment";
+import { squashAtomCommandFailure } from "@starkfuture/client-runtime/state/runtime";
+import type { EnvironmentId, ScopedThreadRef } from "@starkfuture/contracts";
+import { promptLinkAppPath } from "@starkfuture/shared/promptLinks";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 
@@ -46,9 +46,9 @@ function threadShowingBrowser(
 }
 
 /**
- * Opens each link the OS hands T3 Code. Prompt and thread links, by `t3code://`
+ * Opens each link the OS hands Stark Code. Prompt and thread links, by `starkcode://`
  * or as hosted-app pages, open in the app. Other web links and HTML files arrive
- * because T3 Code is the default browser (macOS): with a browser panel on screen
+ * because Stark Code is the default browser (macOS): with a browser panel on screen
  * the page opens as a new tab there; otherwise it starts a thread without a
  * project, its browser panel maximized.
  */

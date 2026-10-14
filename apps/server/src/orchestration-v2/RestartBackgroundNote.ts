@@ -5,8 +5,8 @@ import type {
   OrchestrationV2Run,
   OrchestrationV2RunAttempt,
   OrchestrationV2TurnItem,
-} from "@t3tools/contracts";
-import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+} from "@starkfuture/contracts";
+import { runRanAfter } from "@starkfuture/shared/orchestrationV2ThreadError";
 
 type Work = OrchestrationV2RestartCancelledBackgroundWork;
 type Attempt = Pick<OrchestrationV2RunAttempt, "id" | "runId">;
@@ -90,7 +90,7 @@ const MAX_NOTE_ENTRIES = 10;
 export function restartCancelledBackgroundWorkNote(work: ReadonlyArray<Work>): string {
   const omitted = work.length - MAX_NOTE_ENTRIES;
   return [
-    "Note: the T3 server restarted, and this background work was cancelled before it finished. It will not report back:",
+    "Note: the Stark server restarted, and this background work was cancelled before it finished. It will not report back:",
     ...work.slice(0, MAX_NOTE_ENTRIES).map((entry) => `- ${entry.kind}: ${entry.label}`),
     ...(omitted > 0 ? [`- and ${omitted} more`] : []),
   ].join("\n");
@@ -135,7 +135,7 @@ export function isAwaitedWork(work: Pick<Work, "kind">): boolean {
 
 /**
  * A run's status as its waiter should read it: a delegating parent,
- * `task_status`, or `t3_thread_wait`. A turn that ended to wait on work the
+ * `task_status`, or `stark_thread_wait`. A turn that ended to wait on work the
  * restart then cancelled did not finish, so it is "interrupted", not
  * "completed", and its last message is not a final result.
  */

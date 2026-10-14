@@ -14,7 +14,7 @@ import { macPasskeyBackend } from "./PasskeyBackendMac.ts";
 import type { PasskeyCeremonyResult } from "./PasskeyBridge.ts";
 
 const PasskeyPackageMetadata = Schema.Struct({
-  t3codeWebAuthn: Schema.optional(
+  starkcodeWebAuthn: Schema.optional(
     Schema.Struct({
       touchIdKeychainAccessGroup: Schema.optional(Schema.String),
       browserPasskeys: Schema.optional(Schema.Boolean),
@@ -44,7 +44,7 @@ export class PreviewPasskeysConfigureError extends Schema.TaggedError<PreviewPas
  * only when its entitlement is present:
  *
  * - Touch ID: Electron's built-in platform authenticator. Passkeys it creates
- *   stay on this Mac, in T3 Code's keychain group.
+ *   stay on this Mac, in Stark Code's keychain group.
  * - Browser passkeys: Apple's managed browser entitlement lets the system sheet
  *   (iCloud Keychain, password managers, phones, security keys) serve any
  *   site. The guest preload hands each ceremony to this process, which pins
@@ -64,7 +64,7 @@ export class PreviewPasskeys extends Context.Service<
     /** Serves a preview guest's passkey ceremonies. Returns the detach function. */
     readonly attachGuest: (guest: WebContents) => () => void;
   }
->()("@t3tools/desktop/preview/Passkeys/PreviewPasskeys") {}
+>()("@starkfuture/desktop/preview/Passkeys/PreviewPasskeys") {}
 
 const notAllowed: PasskeyCeremonyResult = { success: false, error: "NotAllowedError" };
 
@@ -147,7 +147,7 @@ const make = Effect.gen(function* () {
           .readFileString(environment.path.join(environment.appRoot, "package.json"))
           .pipe(
             Effect.flatMap(decodePasskeyPackageMetadata),
-            Effect.map((parsed) => parsed.t3codeWebAuthn),
+            Effect.map((parsed) => parsed.starkcodeWebAuthn),
             Effect.orElseSucceed(() => undefined),
           )
       : undefined;

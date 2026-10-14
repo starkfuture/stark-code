@@ -8,12 +8,12 @@ import {
   ProviderThreadId,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import * as Effect from "effect/Effect";
 
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
-import { CursorProviderCapabilitiesV2 } from "@t3tools/provider-cursor/testing";
-import { GrokProviderCapabilitiesV2 } from "@t3tools/provider-grok/testing";
+import { CursorProviderCapabilitiesV2 } from "@starkfuture/provider-cursor/testing";
+import { GrokProviderCapabilitiesV2 } from "@starkfuture/provider-grok/testing";
 import * as CommandPolicy from "./CommandPolicy.ts";
 
 const commandId = CommandId.make("command-policy-test");

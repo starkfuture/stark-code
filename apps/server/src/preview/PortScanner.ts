@@ -8,7 +8,7 @@
  * Linux without lsof: reads listening sockets from `/proc/net/tcp{,6}` and
  * finds their processes through `/proc/<pid>/fd`.
  *
- * Only listeners owned by T3 terminal processes and explicitly configured
+ * Only listeners owned by Stark terminal processes and explicitly configured
  * URLs receive probes. Without listener ownership, only configured URLs do.
  *
  * Listening ports are published only after a bounded HTTP(S) probe finds a
@@ -24,9 +24,9 @@ import {
   PREVIEW_URL_MAX_LENGTH,
   ThreadId,
   type DiscoveredLocalServer,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { isLoopbackHost, LSOF_LOCAL_HOST_TOKENS } from "@t3tools/shared/preview";
+} from "@starkfuture/contracts";
+import * as HostProcess from "@starkfuture/shared/HostProcess";
+import { isLoopbackHost, LSOF_LOCAL_HOST_TOKENS } from "@starkfuture/shared/preview";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -68,7 +68,7 @@ export class PortDiscovery extends Context.Service<
       readonly terminalId: string;
     }) => Effect.Effect<void>;
   }
->()("t3/preview/PortScanner/PortDiscovery") {}
+>()("stark-code/preview/PortScanner/PortDiscovery") {}
 
 const POLL_INTERVAL = Duration.seconds(3);
 const LSOF_TIMEOUT_MS = 5_000;
@@ -215,7 +215,7 @@ const parseLsofOutput = (
       const key = `localhost:${portMatch}`;
       const terminal = pid === null ? null : (terminalByProcessId.get(pid) ?? null);
       const existing = seen.get(key);
-      // A port receives probes only when T3 terminals own all of its listeners.
+      // A port receives probes only when Stark terminals own all of its listeners.
       if (existing) {
         if (terminal === null) seen.set(key, { ...existing, terminal: null });
         continue;

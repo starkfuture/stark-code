@@ -1,5 +1,5 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
-import { ProjectId, type PullRequestSummary, type VcsStatusResult } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@starkfuture/contracts";
+import { ProjectId, type PullRequestSummary, type VcsStatusResult } from "@starkfuture/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { AtomRegistry } from "effect/reactivity";
@@ -61,7 +61,7 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
     pr: {
       number: 42,
       title: "PR branch",
-      url: "https://github.com/pingdotgg/t3code/pull/42",
+      url: "https://github.com/example/stark-code/pull/42",
       baseRef: "main",
       headRef: "feature/current",
       state: "open",
@@ -74,7 +74,7 @@ function mergedFeaturePr(): NonNullable<VcsStatusResult["pr"]> {
   return {
     number: 42,
     title: "Feature PR",
-    url: "https://github.com/pingdotgg/t3code/pull/42",
+    url: "https://github.com/example/stark-code/pull/42",
     baseRef: "main",
     headRef: "feature/current",
     state: "merged",
@@ -96,10 +96,10 @@ function pullRequestSummary(
   return {
     provider: SourceControlProviderKind.make("github"),
     projectId: ProjectId.make("project-1"),
-    repository: "pingdotgg/t3code",
+    repository: "example/stark-code",
     number: 42,
     title: "Feature PR",
-    url: "https://github.com/pingdotgg/t3code/pull/42",
+    url: "https://github.com/example/stark-code/pull/42",
     state,
     headBranch: "feature/current",
     baseBranch: "main",
@@ -175,9 +175,9 @@ describe("resolveDisplayedThreadPr + nextThreadChangeRequestSnapshot", () => {
   const mergedPr = mergedFeaturePr();
   const linkedPullRequest = {
     projectId: ProjectId.make("project-1"),
-    repository: "pingdotgg/t3code",
+    repository: "example/stark-code",
     number: 42,
-    url: "https://github.com/pingdotgg/t3code/pull/42",
+    url: "https://github.com/example/stark-code/pull/42",
   };
   const provider = {
     kind: SourceControlProviderKind.make("github"),
@@ -343,7 +343,7 @@ describe("resolveDisplayedThreadPr + nextThreadChangeRequestSnapshot", () => {
       pr: {
         number: 99,
         title: "Unrelated main PR",
-        url: "https://github.com/pingdotgg/t3code/pull/99",
+        url: "https://github.com/example/stark-code/pull/99",
         baseRef: "main",
         headRef: "main",
         state: "open",
@@ -373,7 +373,7 @@ describe("resolveDisplayedThreadPr + nextThreadChangeRequestSnapshot", () => {
     const mainPr = {
       number: 99,
       title: "Unrelated main PR",
-      url: "https://github.com/pingdotgg/t3code/pull/99",
+      url: "https://github.com/example/stark-code/pull/99",
       baseRef: "develop",
       headRef: "main",
       state: "merged" as const,
@@ -677,7 +677,7 @@ describe("prStatusIndicator", () => {
 });
 
 describe("resolveThreadPullRequestBadgePresentation", () => {
-  const url = "https://github.com/pingdotgg/t3code/pull/42";
+  const url = "https://github.com/example/stark-code/pull/42";
 
   it("returns the pending pull-request badge when no snapshot is available", () => {
     expect(

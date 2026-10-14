@@ -1,10 +1,10 @@
-import type { ProviderOptionChoice, ProviderOptionDescriptor } from "@t3tools/contracts";
+import type { ProviderOptionChoice, ProviderOptionDescriptor } from "@starkfuture/contracts";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
 import type { AcpSessionModeState } from "./runtimeModel.ts";
 
 /**
- * Maps ACP session configuration and session modes onto T3's provider option
+ * Maps ACP session configuration and session modes onto Stark's provider option
  * descriptors so the existing model-options UI can drive them.
  *
  * Model selection stays on the dedicated model picker: `category: "model"`
@@ -15,7 +15,7 @@ import type { AcpSessionModeState } from "./runtimeModel.ts";
  */
 
 /** Synthetic descriptor ID for agents that expose modes outside config options. */
-export const ACP_SESSION_MODE_OPTION_ID = "_t3/session-mode";
+export const ACP_SESSION_MODE_OPTION_ID = "_stark-code/session-mode";
 
 const MAX_OPTION_DESCRIPTORS = 16;
 const MAX_OPTION_CHOICES = 64;
@@ -69,7 +69,7 @@ export function acpProviderOptionDescriptors(input: {
 
   for (const option of input.configOptions ?? []) {
     // "model" options surface as the model list; "collaboration_mode" options
-    // are driven by T3's own plan/build interaction mode in the ACP adapter.
+    // are driven by Stark's own plan/build interaction mode in the ACP adapter.
     if (option.category === "model" || option.category === "collaboration_mode") {
       continue;
     }

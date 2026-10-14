@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@starkfuture/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Crypto from "effect/Crypto";
 import type * as Duration from "effect/Duration";
@@ -86,7 +86,7 @@ const makeHarness = Effect.fn("test.makePreviewBrowser")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-preview-browser-test-" });
+  const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "stark-preview-browser-test-" });
   const archive = options.archive ?? browserArchive;
   const crypto = yield* Crypto.Crypto;
   const sha256 =
@@ -175,7 +175,9 @@ it.layer(NodeServices.layer)("PreviewBrowser", (it) => {
       const error = yield* browser.executable.pipe(Effect.flip);
 
       expect(error._tag).toBe("PreviewBrowserInstallError");
-      expect(error.message).toMatch(/^T3 could not install its headless browser: .+ Try again\.$/);
+      expect(error.message).toMatch(
+        /^Stark could not install its headless browser: .+ Try again\.$/,
+      );
       expect(yield* fs.readDirectory(installRoot)).toEqual([]);
       yield* browser.executable.pipe(Effect.flip);
       expect(requests).toHaveLength(2);
@@ -292,5 +294,7 @@ it("tells the agent how far the install has come", () => {
       totalBytes: 120_477_194,
       unpacking: false,
     }).message,
-  ).toBe("T3 is installing its headless browser (37 of 120 MB downloaded). Try again in a minute.");
+  ).toBe(
+    "Stark is installing its headless browser (37 of 120 MB downloaded). Try again in a minute.",
+  );
 });

@@ -1,4 +1,4 @@
 import branding from "../../../stark.brand.json" with { type: "json" };
 
-/** Fork identity stays separate from upstream package names and protocols. */
+/** Application identity for the Stark workspace. */
 export const BRAND = branding;

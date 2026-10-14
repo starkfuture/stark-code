@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/source-control-bitbucket",
+  "name": "@starkfuture/source-control-bitbucket",
   "private": true,
   "type": "module",
   "exports": {
@@ -41,10 +41,10 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/provider-core": "workspace:*",
-    "@t3tools/shared": "workspace:*",
-    "@t3tools/source-control-core": "workspace:*",
+    "@starkfuture/contracts": "workspace:*",
+    "@starkfuture/provider-core": "workspace:*",
+    "@starkfuture/shared": "workspace:*",
+    "@starkfuture/source-control-core": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

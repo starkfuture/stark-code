@@ -53,7 +53,7 @@ export interface SqliteClientConfig {
  * Set by `readOnly`. A top-level transaction started while it is true runs on
  * the reader worker when the client has one, and on the writer otherwise.
  */
-const ReadOnly = Context.Reference<boolean>("@t3tools/shared/nodeSqliteClient/ReadOnly", {
+const ReadOnly = Context.Reference<boolean>("@starkfuture/shared/nodeSqliteClient/ReadOnly", {
   defaultValue: () => false,
 });
 

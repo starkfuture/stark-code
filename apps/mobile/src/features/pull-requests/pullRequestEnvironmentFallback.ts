@@ -1,4 +1,4 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
+import type { EnvironmentProject } from "@starkfuture/client-runtime/state/models";
 
 export type PullRequestEnvironmentTarget = {
   readonly environmentId: string;

@@ -1,7 +1,8 @@
-import { BRAND } from "@t3tools/shared/branding";
-import { ClaudeSettings, CodexSettings } from "@t3tools/contracts";
-import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { CODEX_PRIVACY_ARGS, PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/providerPrivacy";
+import { BRAND } from "@starkfuture/shared/branding";
+import { ClaudeSettings, CodexSettings } from "@starkfuture/contracts";
+import { tokenizeCliArgs } from "@starkfuture/shared/cliArgs";
+import { expandHomePath } from "@starkfuture/provider-core/server/pathExpansion";
 import * as Schema from "effect/Schema";
 
 const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
@@ -62,11 +63,13 @@ export function nativeAgentLaunch(input: {
     args.push(
       "--settings",
       JSON.stringify({
+        env: PROVIDER_PRIVACY_ENV,
         disableAutoMode: "disable",
         permissions: { disableBypassPermissionsMode: "disable" },
       }),
     );
   }
+  if (input.driver === "codex") args.push(...CODEX_PRIVACY_ARGS);
   return {
     shell: expandHomePath(settings.binaryPath, input.home),
     args,

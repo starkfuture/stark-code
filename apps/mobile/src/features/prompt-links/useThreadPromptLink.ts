@@ -1,5 +1,5 @@
 import { useNavigation } from "@react-navigation/native";
-import { parseThreadLinkPrompt } from "@t3tools/shared/promptLinks";
+import { parseThreadLinkPrompt } from "@starkfuture/shared/promptLinks";
 import { useEffect, useRef } from "react";
 import { Alert } from "react-native";
 
@@ -13,7 +13,7 @@ import {
 const THREAD_LINK_KEYS = ["prompt"];
 
 /**
- * Applies the `prompt` of a `t3code://threads/<environmentId>/<threadId>?prompt=…` link to that
+ * Applies the `prompt` of a `starkcode://threads/<environmentId>/<threadId>?prompt=…` link to that
  * thread's composer draft, once per link. Used by `ThreadRouteScreen`.
  */
 export function useThreadPromptLink(

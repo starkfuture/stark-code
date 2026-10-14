@@ -1,5 +1,5 @@
-import { BRAND } from "@t3tools/shared/branding";
-import type { DesktopAppBranding } from "@t3tools/contracts";
+import { BRAND } from "@starkfuture/shared/branding";
+import type { DesktopAppBranding } from "@starkfuture/contracts";
 import { formatAppDisplayName } from "./branding.logic";
 
 function readInjectedDesktopAppBranding(): DesktopAppBranding | null {

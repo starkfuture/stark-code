@@ -3,7 +3,7 @@ import type {
   ProviderApprovalDecision,
   ProviderApprovalOption,
   RuntimeRequestId,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import { View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
@@ -35,10 +35,10 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
   return (
     <View className="gap-2.5 rounded-[20px] border border-border bg-card-alt p-4">
-      <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary">
+      <Text className="font-stark-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary">
         Approval needed
       </Text>
-      <Text className="font-t3-bold text-lg text-foreground">
+      <Text className="font-stark-bold text-lg text-foreground">
         {props.approval.appName ?? props.approval.requestKind}
       </Text>
       {props.approval.detail ? (

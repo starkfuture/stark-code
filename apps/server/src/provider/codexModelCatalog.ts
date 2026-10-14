@@ -5,14 +5,14 @@
  *
  * @module provider/codexModelCatalog
  */
-import type { ServerProviderUpdateRequiredModel } from "@t3tools/contracts";
-import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
-import type { ServerProviderDraft } from "@t3tools/provider-core/server/snapshotProbe";
-import { codexModelFamily } from "@t3tools/shared/model";
-import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
+import type { ServerProviderUpdateRequiredModel } from "@starkfuture/contracts";
+import * as ModelCatalog from "@starkfuture/provider-core/server/ModelCatalog";
+import type { ServerProviderDraft } from "@starkfuture/provider-core/server/snapshotProbe";
+import { codexModelFamily } from "@starkfuture/shared/model";
+import { compareSemverVersions, parseSemver } from "@starkfuture/shared/semver";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "@t3tools/contracts";
+import { TrimmedNonEmptyString } from "@starkfuture/contracts";
 
 /** Dated Codex builds match their base model's catalog entry. */
 const CODEX_MATCHING: ModelCatalog.CatalogMatching = { family: codexModelFamily };

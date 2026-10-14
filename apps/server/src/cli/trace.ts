@@ -1,9 +1,9 @@
 /**
- * `t3 trace summary` - per-span counts, rates, and latency percentiles from
+ * `stark-code trace summary` - per-span counts, rates, and latency percentiles from
  * the local server trace file and its rotated backups. It reads the files
  * directly, so it works while the server is stalled or stopped.
  */
-import { PositiveInt } from "@t3tools/contracts";
+import { PositiveInt } from "@starkfuture/contracts";
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
@@ -182,9 +182,9 @@ const traceSummaryCommand = Command.make("summary", {
   Command.withHandler(
     Effect.fn("cli.trace.summary")(function* (flags) {
       const fs = yield* FileSystem.FileSystem;
-      // T3CODE_TRACE_FILE, else the userdata trace file for --base-dir or
-      // T3CODE_HOME. Implicit dev runs write elsewhere; set T3CODE_TRACE_FILE.
-      const envHome = yield* Config.String("T3CODE_HOME").pipe(Config.option);
+      // STARK_CODE_TRACE_FILE, else the userdata trace file for --base-dir or
+      // STARK_CODE_HOME. Implicit dev runs write elsewhere; set STARK_CODE_TRACE_FILE.
+      const envHome = yield* Config.String("STARK_CODE_HOME").pipe(Config.option);
       const baseDir = yield* resolveBaseDir(
         Option.getOrUndefined(Option.orElse(flags.baseDir, () => envHome)),
       );

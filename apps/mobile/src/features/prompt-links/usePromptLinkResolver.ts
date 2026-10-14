@@ -1,22 +1,22 @@
 import { StackActions, useNavigation } from "@react-navigation/native";
-import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
+import { availableScratchWorkspaceRoot } from "@starkfuture/client-runtime/operations/projects";
 import {
   findPromptLinkProject,
   findPromptLinkPullRequestThread,
   resolvePromptLinkModelSelection,
-} from "@t3tools/client-runtime/prompt-links";
+} from "@starkfuture/client-runtime/prompt-links";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from "@starkfuture/client-runtime/state/runtime";
+import type { EnvironmentProject } from "@starkfuture/client-runtime/state/shell";
+import type { EnvironmentId } from "@starkfuture/contracts";
 import {
   parseNewThreadLink,
   type LinkedPrompt,
   type PromptLinkPullRequest,
   type PromptLinkRepository,
-} from "@t3tools/shared/promptLinks";
+} from "@starkfuture/shared/promptLinks";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { Alert } from "react-native";
 
@@ -54,7 +54,7 @@ type LinkedDraftRequest = {
 };
 
 /**
- * Opens a `t3code://new?…` link. The link lands on the New Task picker with its query as route
+ * Opens a `starkcode://new?…` link. The link lands on the New Task picker with its query as route
  * params; this resolves it to a project, a thread, or a choice, then fills a draft. Nothing is
  * ever sent: the user reads the prompt and presses Send. Used by `NewTaskRouteScreen`.
  */

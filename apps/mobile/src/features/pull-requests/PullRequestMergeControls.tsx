@@ -1,6 +1,6 @@
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { PullRequestDetail, PullRequestMergeMethod } from "@t3tools/contracts";
+import { squashAtomCommandFailure } from "@starkfuture/client-runtime/state/runtime";
+import type { PullRequestDetail, PullRequestMergeMethod } from "@starkfuture/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { useRef, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, View } from "react-native";
@@ -206,7 +206,7 @@ export function PullRequestMergeControls(props: {
               />
             )}
             <Text
-              className={`shrink text-center text-sm font-t3-semibold ${canMerge ? "text-prominent-action-foreground" : "text-foreground-muted"}`}
+              className={`shrink text-center text-sm font-stark-semibold ${canMerge ? "text-prominent-action-foreground" : "text-foreground-muted"}`}
             >
               {busy ? "Working…" : !permissions.connected ? "Reconnect to merge" : label}
             </Text>

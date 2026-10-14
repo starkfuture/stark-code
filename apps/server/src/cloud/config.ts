@@ -1,7 +1,8 @@
+import { BRAND } from "@starkfuture/shared/branding";
 import {
   RelayManagedEndpointOrigin,
   RelayManagedEndpointRuntimeConfig,
-} from "@t3tools/contracts/relay";
+} from "@starkfuture/contracts/relay";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -48,54 +49,14 @@ export function isAgentActivityPublishingEnabledValue(value: string | null): boo
     Mirrors the per-publish gate in AgentAwarenessRelay, so the descriptor
     capability never advertises publishing that the publisher would skip. */
 export const readAgentActivityPublishingActive = (
-  secrets: ServerSecretStore.ServerSecretStore["Service"],
-): Effect.Effect<boolean> =>
-  Effect.gen(function* () {
-    const readSecretString = (name: string) =>
-      secrets
-        .get(name)
-        .pipe(
-          Effect.map((bytes) =>
-            Option.isSome(bytes) ? new TextDecoder().decode(bytes.value) : null,
-          ),
-        );
-    const [enabled, url, environmentCredential] = yield* Effect.all([
-      readSecretString(PUBLISH_AGENT_ACTIVITY_SECRET),
-      readSecretString(RELAY_URL_SECRET),
-      readSecretString(RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
-    ]);
-    // Empty strings are as unconfigured as missing files: the publisher's
-    // truthiness gate skips them, so the capability must too.
-    return (
-      isAgentActivityPublishingEnabledValue(enabled) &&
-      url !== null &&
-      url !== "" &&
-      environmentCredential !== null &&
-      environmentCredential !== ""
-    );
-  }).pipe(Effect.orElseSucceed(() => false));
+  _secrets: ServerSecretStore.ServerSecretStore["Service"],
+): Effect.Effect<boolean> => Effect.succeed(false);
 
 /** A non-empty secret as text, or null when it is missing, empty or unreadable. */
-const readSecretString = (name: string) =>
-  ServerSecretStore.ServerSecretStore.pipe(
-    Effect.flatMap((secrets) => secrets.get(name)),
-    Effect.map((bytes) =>
-      Option.isSome(bytes) && bytes.value.length > 0 ? new TextDecoder().decode(bytes.value) : null,
-    ),
-    Effect.orElseSucceed(() => null),
-  );
+/** Hosted relay metadata is unavailable, including saved credentials. */
+export const readRelayConnection: Effect.Effect<{
+  readonly url: string;
+  readonly environmentCredential: string;
+} | null> = Effect.succeed(null);
 
-/** The relay URL and environment credential, or null when not linked to T3 Connect. */
-export const readRelayConnection = Effect.all([
-  readSecretString(RELAY_URL_SECRET),
-  readSecretString(RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
-]).pipe(
-  Effect.map(([url, environmentCredential]) =>
-    url && environmentCredential ? { url, environmentCredential } : null,
-  ),
-);
-
-/** Whether this environment opted in to T3 Connect holding webhooks while it is offline. */
-export const readHoldWebhooksWhileOffline = readSecretString(
-  HOLD_WEBHOOKS_WHILE_OFFLINE_SECRET,
-).pipe(Effect.map((value) => value === "true"));
+export const readHoldWebhooksWhileOffline = Effect.succeed(false);

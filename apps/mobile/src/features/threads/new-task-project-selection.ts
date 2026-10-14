@@ -1,5 +1,5 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { repositoryGroupingKeyOf, type EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentProject } from "@starkfuture/client-runtime/state/shell";
+import { repositoryGroupingKeyOf, type EnvironmentId } from "@starkfuture/contracts";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import type { HomeProjectScope } from "../home/homeThreadList";

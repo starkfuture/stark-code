@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
-import { EnvironmentId, type AuthEnvironmentScope } from "@t3tools/contracts";
+import { EnvironmentId, type AuthEnvironmentScope } from "@starkfuture/contracts";
 import { createRoot } from "react-dom/client";
 import { useThreadFindHighlights } from "./chat/threadFindHighlights";
-import { searchableMessageSegments } from "@t3tools/shared/threadFindText";
-import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
+import { searchableMessageSegments } from "@starkfuture/shared/threadFindText";
+import { countThreadSearchOccurrences } from "@starkfuture/shared/threadSearch";
 
 import { MarkdownFindContext } from "./chat/markdownFindContext";
 import { act, type ComponentProps, type ReactNode } from "react";
@@ -51,7 +51,7 @@ vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => vi.
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
 vi.mock("../state/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../state/session")>();
-  const { AuthStandardClientScopes } = await import("@t3tools/contracts");
+  const { AuthStandardClientScopes } = await import("@starkfuture/contracts");
   const grantedScopes = new Set<AuthEnvironmentScope>(AuthStandardClientScopes);
   const hasScope = (environmentId: EnvironmentId | null, scope: AuthEnvironmentScope) =>
     environmentId !== null && grantedScopes.has(scope);
@@ -176,7 +176,7 @@ describe("ChatMarkdown context references", () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     let renderer: ReactTestRenderer | undefined;
     const text =
-      "See [Terminal output](t3-context://v1/terminal/term-1) and ![Error image](t3-context://v1/image/img-1).";
+      "See [Terminal output](stark-context://v1/terminal/term-1) and ![Error image](stark-context://v1/image/img-1).";
     try {
       await act(async () => {
         renderer = create(
@@ -221,7 +221,7 @@ describe("ChatMarkdown context references", () => {
         renderer = create(
           <ChatMarkdown
             cwd={undefined}
-            text="See [**Bold** `code`](t3-context://v1/terminal/term-1)."
+            text="See [**Bold** `code`](stark-context://v1/terminal/term-1)."
             renderContextReference={({ kind, label }) => {
               seen.push(`${kind}: ${label}`);
               return <button>{label}</button>;
@@ -240,7 +240,7 @@ describe("ChatMarkdown context references", () => {
 });
 
 describe("ChatMarkdown favicon privacy", () => {
-  it("suppresses private link images while preserving public links across updates", async () => {
+  it("keeps citation hostnames private across public and private link updates", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     let renderer: ReactTestRenderer | undefined;
     const markdown = (url: string) => <ChatMarkdown cwd="/tmp/project" text={`[Link](${url})`} />;
@@ -248,9 +248,7 @@ describe("ChatMarkdown favicon privacy", () => {
       await act(async () => {
         renderer = create(markdown("https://example.com"));
       });
-      expect(renderer!.root.findAllByType("img").map((image) => image.props.src)).toEqual([
-        "https://www.google.com/s2/favicons?domain=example.com&sz=32",
-      ]);
+      expect(renderer!.root.findAllByType("img")).toHaveLength(0);
       for (const url of ["http://192.168.1.10:8080", "http://localhost:3000", "http://home.arpa"]) {
         await act(async () => {
           renderer!.update(markdown(url));
@@ -260,10 +258,10 @@ describe("ChatMarkdown favicon privacy", () => {
       await act(async () => {
         renderer!.update(markdown("https://example.com"));
       });
-      expect(renderer!.root.findAllByType("img")).toHaveLength(1);
+      expect(renderer!.root.findAllByType("img")).toHaveLength(0);
       // GitHub links draw the brand mark in currentColor instead of fetching a favicon.
       await act(async () => {
-        renderer!.update(markdown("https://github.com/pingdotgg/t3code/pull/1"));
+        renderer!.update(markdown("https://github.com/example/stark-code/pull/1"));
       });
       expect(renderer!.root.findAllByType("img")).toHaveLength(0);
       expect(renderer!.root.findAllByType(GitHubIcon)).toHaveLength(1);
@@ -1108,16 +1106,16 @@ it("opens a disclosure only when find selects a match inside it", async () => {
     expect(openStates()).toEqual(["false", "false", "false"]);
     expect(container.textContent).toContain("nothing here");
     expect(
-      [...(highlights.get("t3-thread-find-active") ?? [])].map((range) => range.toString()),
+      [...(highlights.get("stark-thread-find-active") ?? [])].map((range) => range.toString()),
     ).toEqual(["needle"]);
-    expect(highlights.get("t3-thread-find")?.size).toBe(0);
+    expect(highlights.get("stark-thread-find")?.size).toBe(0);
 
     await act(() => root.render(<Probe activeOccurrence={1} />));
     await frame();
     await frame();
     // Stepping to the folded match opens its two ancestors, not the unrelated one.
     expect(openStates()).toEqual(["false", "true", "true"]);
-    expect(highlights.get("t3-thread-find-active")?.size).toBe(1);
+    expect(highlights.get("stark-thread-find-active")?.size).toBe(1);
   } finally {
     await act(() => root.unmount());
     container.remove();
@@ -1172,7 +1170,7 @@ it("keeps Mermaid diagrams rendered until find selects a match in their source",
     // Only the diagram holding the selected match switches to source.
     expect(diagrams()).toBe(1);
     expect(
-      [...(highlights.get("t3-thread-find-active") ?? [])].map((range) => range.toString()),
+      [...(highlights.get("stark-thread-find-active") ?? [])].map((range) => range.toString()),
     ).toEqual(["Alpha"]);
   } finally {
     await act(() => root.unmount());
@@ -1195,7 +1193,7 @@ it.each([
   },
   { text: '```ts title="src/needle.ts"\nconst a = 1;\n```', query: "needle", count: 0 },
   { text: "```weirdlang\nconst a = 1;\n```", query: "weirdlang", count: 0 },
-  { text: "Use $test-t3-app now", query: "T3 App Testing", count: 1 },
+  { text: "Use $test-stark-app now", query: "Stark App Testing", count: 1 },
   { text: "`/tmp/file.ts:42`", query: "file.ts · L42", count: 1, user: true, lineBreaks: true },
   { text: "> [!NOTE]\n> Searchable alert", query: "Searchable alert", count: 1 },
   {
@@ -1210,7 +1208,7 @@ it.each([
 ])(
   "highlights the indexed occurrences of $query in $text",
   async ({ text, query, count, lineBreaks, user, useTemplate }) => {
-    const skills = [{ name: "test-t3-app", displayName: "T3 App Testing" }];
+    const skills = [{ name: "test-stark-app", displayName: "Stark App Testing" }];
     const highlights = new Map<string, Set<Range>>();
     vi.stubGlobal(
       "Highlight",

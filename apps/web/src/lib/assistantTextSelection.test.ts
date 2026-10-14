@@ -4,11 +4,11 @@ import {
   EnvironmentId,
   MessageId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import {
   formatAssistantCitationHref,
   parseAssistantCitationHref,
-} from "@t3tools/shared/assistantCitations";
+} from "@starkfuture/shared/assistantCitations";
 
 import {
   type AssistantTextSelector,
@@ -273,7 +273,7 @@ describe("captureAssistantTextSelection", () => {
     const viewport = new SelectionNode("MAIN").append(
       source,
       new SelectionNode("DIV", "", { "data-select-none": "" }).append(textNode("echo ok")),
-      new SelectionNode("H3", "", { "data-select-none": "" }).append(textNode("T3 Code")),
+      new SelectionNode("H3", "", { "data-select-none": "" }).append(textNode("Stark Code")),
       assistantSource(nextParagraph),
     );
 

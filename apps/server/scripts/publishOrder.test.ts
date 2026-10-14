@@ -6,7 +6,7 @@ import * as Latch from "effect/Latch";
 import { publishPlatformsThenLauncher } from "./publishOrder.ts";
 
 const platformTarballs = ["a.tgz", "b.tgz", "c.tgz"];
-const launcherTarball = "t3.tgz";
+const launcherTarball = "stark-code.tgz";
 
 // A fake publish that records when each upload starts and ends. Platform
 // uploads only end once every platform upload has started, so they have to

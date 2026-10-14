@@ -2,8 +2,8 @@
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import type { MenuAction } from "@react-native-menu/menu";
-import { EnvironmentId } from "@t3tools/contracts";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+import { EnvironmentId } from "@starkfuture/contracts";
+import { formatAttachmentSize } from "@starkfuture/client-runtime/state/attachments";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Platform, ScrollView, View } from "react-native";
 
@@ -113,7 +113,7 @@ function AttachmentDocumentBody(props: {
                           selectable
                           className={
                             rowIndex === 0
-                              ? "text-sm font-t3-semibold text-foreground"
+                              ? "text-sm font-stark-semibold text-foreground"
                               : "text-sm text-foreground"
                           }
                         >

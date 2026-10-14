@@ -1,4 +1,4 @@
-import type { SnapShotShortcut } from "@t3tools/contracts";
+import type { SnapShotShortcut } from "@starkfuture/contracts";
 import { snapShotShortcutKeyLabels } from "../../lib/snapShotShortcut";
 import { Kbd, KbdGroup } from "../ui/kbd";
 

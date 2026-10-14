@@ -37,4 +37,4 @@ export class HookInbox extends Context.Service<
       readonly endpointKey: string;
     }) => Effect.Effect<void, HookInboxError>;
   }
->()("t3code-relay/hooks/HookInbox") {}
+>()("starkcode-relay/hooks/HookInbox") {}

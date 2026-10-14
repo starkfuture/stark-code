@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/source-control-github",
+  "name": "@starkfuture/source-control-github",
   "private": true,
   "type": "module",
   "exports": {
@@ -77,16 +77,16 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/provider-core": "workspace:*",
-    "@t3tools/shared": "workspace:*",
-    "@t3tools/source-control-core": "workspace:*",
+    "@starkfuture/contracts": "workspace:*",
+    "@starkfuture/provider-core": "workspace:*",
+    "@starkfuture/shared": "workspace:*",
+    "@starkfuture/source-control-core": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
-    "@t3tools/source-control-testing": "workspace:*",
+    "@starkfuture/source-control-testing": "workspace:*",
     "@types/node": "catalog:",
     "vite-plus": "catalog:"
   }

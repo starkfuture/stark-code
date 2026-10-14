@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@starkfuture/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -20,13 +20,13 @@ it.effect("maps Bitbucket PR summaries into provider-neutral change requests", (
         Effect.succeed({
           number: 42,
           title: "Add Bitbucket provider",
-          url: "https://bitbucket.org/pingdotgg/t3code/pull-requests/42",
+          url: "https://bitbucket.org/example/stark-code/pull-requests/42",
           baseRefName: "main",
           headRefName: "feature/source-control",
           state: "open",
           updatedAt: Option.none(),
           isCrossRepository: true,
-          headRepositoryNameWithOwner: "fork/t3code",
+          headRepositoryNameWithOwner: "fork/starkcode",
           headRepositoryOwnerLogin: "fork",
         }),
     });
@@ -40,13 +40,13 @@ it.effect("maps Bitbucket PR summaries into provider-neutral change requests", (
       provider: SourceControlProviderKind.make("bitbucket"),
       number: 42,
       title: "Add Bitbucket provider",
-      url: "https://bitbucket.org/pingdotgg/t3code/pull-requests/42",
+      url: "https://bitbucket.org/example/stark-code/pull-requests/42",
       baseRefName: "main",
       headRefName: "feature/source-control",
       state: "open",
       updatedAt: Option.none(),
       isCrossRepository: true,
-      headRepositoryNameWithOwner: "fork/t3code",
+      headRepositoryNameWithOwner: "fork/starkcode",
       headRepositoryOwnerLogin: "fork",
     });
   }),

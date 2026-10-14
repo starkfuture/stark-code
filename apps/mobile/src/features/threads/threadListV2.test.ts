@@ -1,6 +1,6 @@
-import { presentThreadShell } from "@t3tools/client-runtime/state/models";
+import { presentThreadShell } from "@starkfuture/client-runtime/state/models";
 import * as DateTime from "effect/DateTime";
-import { planPinnedMove } from "@t3tools/client-runtime/state/thread-sort";
+import { planPinnedMove } from "@starkfuture/client-runtime/state/thread-sort";
 import {
   createPendingThreadOrder,
   createThreadMovePlanner,
@@ -10,9 +10,9 @@ import {
   type PendingThreadOrder,
   type ThreadMoveAvailability,
 } from "./threadOrder";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { resolveSnoozePresets } from "@t3tools/client-runtime/state/thread-settled";
+import type { EnvironmentThreadShell } from "@starkfuture/client-runtime/state/shell";
+import { threadSearchMatchKey } from "@starkfuture/client-runtime/state/thread-search";
+import { resolveSnoozePresets } from "@starkfuture/client-runtime/state/thread-settled";
 import {
   CommandId,
   EnvironmentId,
@@ -21,7 +21,7 @@ import {
   ProviderInstanceId,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
@@ -57,9 +57,9 @@ const NOW = "2026-06-02T00:00:00.000Z";
 
 const linkedPullRequest = {
   projectId: ProjectId.make("project-1"),
-  repository: "pingdotgg/t3code",
+  repository: "example/stark-code",
   number: 42,
-  url: "https://github.com/pingdotgg/t3code/pull/42",
+  url: "https://github.com/example/stark-code/pull/42",
 };
 
 describe("resolveThreadListV2SnoozeMenuSelection", () => {

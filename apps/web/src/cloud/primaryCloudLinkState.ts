@@ -3,7 +3,7 @@ import {
   AuthRelayReadScope,
   EnvironmentId,
   type EnvironmentCloudLinkStateResult,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -79,7 +79,7 @@ export function usePrimaryCloudLinkState() {
         : null,
     [primary],
   );
-  // Builds without T3 Connect have no link to read; skip the request.
+  // Builds without Stark Connect have no link to read; skip the request.
   const atom =
     target && hasCloudPublicConfig() && canReadRelay
       ? primaryCloudLinkStateAtom(targetKey(target))
@@ -91,7 +91,7 @@ export function usePrimaryCloudLinkState() {
   let error: string | null = null;
   if (result._tag === "Failure") {
     const cause = Cause.squash(result.cause);
-    error = cause instanceof Error ? cause.message : "Could not read T3 Connect link state.";
+    error = cause instanceof Error ? cause.message : "Could not read Stark Connect link state.";
   }
 
   return {

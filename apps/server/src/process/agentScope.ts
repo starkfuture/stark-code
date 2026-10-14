@@ -7,9 +7,9 @@ import {
   agentScopeCommand,
   type AgentScopeShape,
   type AgentSystemdScope,
-} from "@t3tools/shared/AgentScope";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { resolveCommandPath } from "@t3tools/shared/shell";
+} from "@starkfuture/shared/AgentScope";
+import * as HostProcess from "@starkfuture/shared/HostProcess";
+import { resolveCommandPath } from "@starkfuture/shared/shell";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -23,7 +23,7 @@ import * as ProcessRunner from "../processRunner.ts";
  * server's own unit, so the server's CPUWeight and IOWeight compete with the
  * agents directly.
  */
-const AGENT_SLICE = "app-t3code-agents.slice";
+const AGENT_SLICE = "app-starkcode-agents.slice";
 
 /**
  * The child slice for one server's agents, named after its state directory.
@@ -34,7 +34,7 @@ const AGENT_SLICE = "app-t3code-agents.slice";
  */
 export function ownedAgentSlice(stateDir: string): string {
   const hash = NodeCrypto.createHash("sha256").update(stateDir).digest("hex").slice(0, 12);
-  return `app-t3code-agents-${hash}.slice`;
+  return `app-starkcode-agents-${hash}.slice`;
 }
 
 const GiB = 1024 ** 3;
@@ -355,7 +355,7 @@ export const make = Effect.gen(function* () {
       if (resolved === null) return { command, args };
       const scope = yield* systemd;
       if (scope === undefined) return agentScopeCommand({ command: resolved, args });
-      const unit = `t3code-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
+      const unit = `starkcode-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
       if (threadId !== undefined) yield* track(scope.systemctl, threadId, unit);
       const systemdScope: AgentSystemdScope = {
         systemdRun: scope.systemdRun,

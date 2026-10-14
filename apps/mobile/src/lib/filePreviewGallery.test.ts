@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@starkfuture/contracts";
 import type { FilePreviewItem } from "../components/FilePreviewModal.types";
 import { filePreviewGallery, filePreviewKey, filePreviewName } from "./filePreviewGallery";
 
@@ -41,7 +41,7 @@ describe("image preview groups", () => {
 
   it("uses actual filenames instead of captions with punctuation and paths", () => {
     expect(
-      filePreviewName({ ...first, name: 'main: "New thread in..." shows pingdotgg/t3code' }),
+      filePreviewName({ ...first, name: 'main: "New thread in..." shows example/stark-code' }),
     ).toBe("first.png");
     expect(
       filePreviewName({

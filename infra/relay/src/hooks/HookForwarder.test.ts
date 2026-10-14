@@ -4,7 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "node:crypto";
 import * as EffectNodeCrypto from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
-import { RelayApi } from "@t3tools/contracts/relay";
+import { RelayApi } from "@starkfuture/contracts/relay";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -34,7 +34,7 @@ import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllo
 import { RELAY_HTTP_ROUTER_CONFIG, traceRelayHttpRequestWith } from "../http/Api.ts";
 import * as RelayHttpApi from "../http/Api.ts";
 import * as HookForwarder from "./HookForwarder.ts";
-import { RELAY_HOOK_DELIVERY_TYP, verifyRelayJwt } from "@t3tools/shared/relayJwt";
+import { RELAY_HOOK_DELIVERY_TYP, verifyRelayJwt } from "@starkfuture/shared/relayJwt";
 import * as HeldHooks from "./HeldHooks.ts";
 import * as HookInbox from "./HookInbox.ts";
 import type { HeldHook } from "./HookInboxStore.ts";
@@ -50,7 +50,7 @@ const settings: RelayConfiguration.RelayConfiguration["Service"] = {
   apns: null,
   clerkSecretKey: Redacted.make("clerk-secret-key"),
   clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
+  clerkJwtAudience: "stark-code-relay",
   apnsDeliveryJobSigningSecret: Redacted.make("apns-delivery-secret"),
   cloudMintPrivateKey: Redacted.make(mintKeys.privateKey),
   cloudMintPublicKey: mintKeys.publicKey,
@@ -65,7 +65,7 @@ const readyAllocation: ManagedEndpointAllocations.ManagedEndpointAllocation = {
   environmentId,
   hostname: "env.example.test",
   tunnelId: "tunnel-id",
-  tunnelName: `t3coderelay-managedendpoint-dev-${endpointKey}`,
+  tunnelName: `starkcoderelay-managedendpoint-dev-${endpointKey}`,
   dnsRecordId: "dns-record-id",
   readyAt: "2026-05-25T00:00:00.000Z",
   tunnelReleasedAt: null,
@@ -261,27 +261,27 @@ describe("HookForwarder", () => {
       yield* harness.send(
         new Request(hookUrl("hook-1/tok"), {
           method: "POST",
-          headers: { "x-t3-relay-delivery": "forged", "x-t3-relay-delivery-id": "forged" },
+          headers: { "x-stark-relay-delivery": "forged", "x-stark-relay-delivery-id": "forged" },
           body: "{}",
         }),
       );
       const sent = harness.sent[0]!;
       const payload = yield* verifyRelayJwt({
         publicKey: mintKeys.publicKey,
-        token: sent.headers["x-t3-relay-delivery"]!,
+        token: sent.headers["x-stark-relay-delivery"]!,
         typ: RELAY_HOOK_DELIVERY_TYP,
         issuer: settings.relayIssuer,
-        audience: `t3-env:${environmentId}`,
+        audience: `stark-env:${environmentId}`,
         nowEpochSeconds: Math.floor((yield* Clock.currentTimeMillis) / 1_000),
       });
       // The proof names exactly the delivery the environment receives.
       expect(payload).toMatchObject({
         environmentId,
         hookId: "hook-1",
-        deliveryId: sent.headers["x-t3-relay-delivery-id"],
-        receivedAt: sent.headers["x-t3-relay-received-at"],
+        deliveryId: sent.headers["x-stark-relay-delivery-id"],
+        receivedAt: sent.headers["x-stark-relay-received-at"],
       });
-      expect(sent.headers["x-t3-relay-delivery-id"]).not.toBe("forged");
+      expect(sent.headers["x-stark-relay-delivery-id"]).not.toBe("forged");
     }),
   );
 
@@ -663,7 +663,7 @@ describe("HookForwarder", () => {
                 request,
                 new Response('{"deliveryId":"d"}', {
                   status: 202,
-                  headers: { "x-t3-hook-outcome": outcome },
+                  headers: { "x-stark-hook-outcome": outcome },
                 }),
               ),
             ),
@@ -761,7 +761,7 @@ describe("HookForwarder", () => {
           new Request(hookUrl("%68ook-1/tok%2Fen", "?a=1"), {
             method: "POST",
             body,
-            headers: { "x-t3-relay-delivery-id": "forged", "x-sig": "s" },
+            headers: { "x-stark-relay-delivery-id": "forged", "x-sig": "s" },
           }),
         );
         expect(response.status).toBe(202);
@@ -774,7 +774,7 @@ describe("HookForwarder", () => {
         // Every spelling of the hook id shares one per-hook cap.
         expect(hook?.hookKey).toBe("hook-1");
         // The sender cannot choose the delivery id.
-        expect(hook?.headers["x-t3-relay-delivery-id"]).toBeUndefined();
+        expect(hook?.headers["x-stark-relay-delivery-id"]).toBeUndefined();
         expect(hook?.id).not.toBe("forged");
       }),
     );
@@ -801,10 +801,10 @@ describe("HookForwarder", () => {
           new Request(hookUrl(), {
             method: "POST",
             body: "{}",
-            headers: { "x-t3-relay-delivery-id": "forged" },
+            headers: { "x-stark-relay-delivery-id": "forged" },
           }),
         );
-        const id = harness.sent[0]?.headers["x-t3-relay-delivery-id"];
+        const id = harness.sent[0]?.headers["x-stark-relay-delivery-id"];
         expect(id).toMatch(/^[0-9a-f-]{36}$/);
       }),
     );

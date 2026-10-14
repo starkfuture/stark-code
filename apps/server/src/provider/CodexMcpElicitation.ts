@@ -1,4 +1,4 @@
-import type { ProviderApprovalDecision, ProviderApprovalOption } from "@t3tools/contracts";
+import type { ProviderApprovalDecision, ProviderApprovalOption } from "@starkfuture/contracts";
 import * as Schema from "effect/Schema";
 import type * as EffectCodexSchema from "effect-codex-app-server/schema";
 
@@ -171,7 +171,7 @@ export function describeMcpElicitation(
   };
 }
 
-/** Converts a T3 approval decision into the MCP elicitation wire response. */
+/** Converts a Stark approval decision into the MCP elicitation wire response. */
 export function toMcpElicitationResponse(
   payload: EffectCodexSchema.McpServerElicitationRequestParams,
   decision: ProviderApprovalDecision,

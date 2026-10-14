@@ -1,7 +1,11 @@
 import { act, type ReactElement } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AuthSessionState, type EnvironmentId, type ServerInstallation } from "@t3tools/contracts";
+import {
+  AuthSessionState,
+  type EnvironmentId,
+  type ServerInstallation,
+} from "@starkfuture/contracts";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/reactivity";
@@ -84,7 +88,7 @@ const legacyAuth = {
   policy: "remote-reachable",
   bootstrapMethods: ["one-time-token"],
   sessionMethods: ["bearer-access-token"],
-  sessionCookieName: "t3_session",
+  sessionCookieName: "stark_session",
 } as const;
 
 const currentSession = {
@@ -165,21 +169,21 @@ describe("ServerUpdateAction", () => {
   it.each([
     [
       { kind: "npm-global", prefix: "/opt/node" },
-      "npm install --global --prefix '/opt/node' t3@0.0.45",
+      "npm install --global --prefix '/opt/node' stark-code@0.0.45",
       "Update command copied",
-      "then restart t3",
+      "then restart stark",
     ],
     [
       { kind: "npx" },
-      "npx t3@0.0.45",
+      "npx stark-code@0.0.45",
       "Relaunch command copied",
-      "This does not update an installed t3 command.",
+      "This does not update an installed stark-code command.",
     ],
     [
       undefined,
-      "npx t3@0.0.45",
+      "npx stark-code@0.0.45",
       "Relaunch command copied",
-      "This does not update an installed t3 command.",
+      "This does not update an installed stark-code command.",
     ],
   ] satisfies ReadonlyArray<readonly [ServerInstallation | undefined, string, string, string]>)(
     "copies an honest manual command for %j without invoking remote update",
@@ -218,7 +222,7 @@ describe("ServerUpdateAction", () => {
     expect(testState.toast).toHaveBeenCalledWith({
       type: "success",
       title: "Test server updated",
-      description: "Reconnected on t3@0.0.31.",
+      description: "Reconnected on stark-code@0.0.31.",
     });
   });
 

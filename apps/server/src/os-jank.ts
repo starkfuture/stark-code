@@ -1,12 +1,12 @@
-import { BRAND } from "@t3tools/shared/branding";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { BRAND } from "@starkfuture/shared/branding";
+import * as HostProcess from "@starkfuture/shared/HostProcess";
 import {
   listLoginShellCandidates,
   mergePathEntries,
   readPathFromLoginShell,
   readPathFromLaunchctl,
   resolveWindowsEnvironment,
-} from "@t3tools/shared/shell";
+} from "@starkfuture/shared/shell";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";

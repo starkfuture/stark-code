@@ -1,5 +1,5 @@
-import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { resolveAssetUrl } from "@starkfuture/client-runtime/state/assets";
+import type { EnvironmentId, ThreadId } from "@starkfuture/contracts";
 import * as Option from "effect/Option";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { Alert } from "react-native";

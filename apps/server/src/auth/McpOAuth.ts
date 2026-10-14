@@ -13,8 +13,8 @@ import {
   type AuthEnvironmentScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-} from "@t3tools/contracts";
-import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
+} from "@starkfuture/contracts";
+import { encodeOAuthScope } from "@starkfuture/shared/oauthScope";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -40,10 +40,10 @@ import {
 
 /**
  * The OAuth authorization server MCP clients (Claude Code, Codex, any agent
- * T3 Code did not launch) use to sign in to this environment's `/mcp`.
+ * Stark Code did not launch) use to sign in to this environment's `/mcp`.
  *
  * Every URL is derived from the request's own origin, so the same server
- * answers correctly over loopback, Tailscale Serve and a T3 Connect tunnel.
+ * answers correctly over loopback, Tailscale Serve and a Stark Connect tunnel.
  * Client registration is stateless: a client id is its signed metadata, so
  * an unauthenticated caller cannot grow server state. Redirects go to a
  * loopback address (a CLI agent on the user's machine) or any https address
@@ -88,7 +88,7 @@ export const protectedResourceMetadata = (
   authorization_servers: [urls.issuer],
   scopes_supported: MCP_OAUTH_SCOPES,
   bearer_methods_supported: ["header"],
-  resource_name: "T3 Code",
+  resource_name: "Stark Code",
 });
 
 export const authorizationServerMetadata = (
@@ -239,7 +239,7 @@ export class McpOAuth extends Context.Service<
       readonly token: AuthMcpTokenRequest;
     }) => Effect.Effect<AuthMcpTokenResult, AuthMcpTokenError>;
   }
->()("t3/auth/McpOAuth") {}
+>()("stark-code/auth/McpOAuth") {}
 
 /** Appends OAuth response parameters, keeping any the client put in its redirect URI. */
 const redirectWith = (redirectUri: string, params: Record<string, string | undefined>) => {

@@ -4,8 +4,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderInstanceConfig,
-} from "@t3tools/contracts";
-import { getBackgroundActivityPresetSettings } from "@t3tools/shared/backgroundActivitySettings";
+} from "@starkfuture/contracts";
+import { getBackgroundActivityPresetSettings } from "@starkfuture/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
 import { describe, expect, it } from "vite-plus/test";
 import {
@@ -200,7 +200,7 @@ describe("buildProviderInstanceUpdatePatch", () => {
     const nextInstance = {
       driver: ProviderDriverKind.make("codex"),
       enabled: true,
-      config: { binaryPath: "/opt/t3/codex" },
+      config: { binaryPath: "/opt/stark-code/codex" },
     } satisfies ProviderInstanceConfig;
 
     const patch = buildProviderInstanceUpdatePatch({

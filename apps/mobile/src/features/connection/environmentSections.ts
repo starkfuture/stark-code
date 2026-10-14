@@ -1,5 +1,5 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import type { RelayClientEnvironmentRecord } from "@t3tools/contracts/relay";
+import type { EnvironmentId } from "@starkfuture/contracts";
+import type { RelayClientEnvironmentRecord } from "@starkfuture/contracts/relay";
 import type { ConnectedEnvironmentSummary } from "../../state/remote-runtime-types";
 
 export interface EnvironmentSectionsInput {
@@ -14,7 +14,7 @@ export interface EnvironmentSections {
 }
 
 /**
- * Ids of the environments that already occupy a T3 Connect slot. A backend saved directly is
+ * Ids of the environments that already occupy a Stark Connect slot. A backend saved directly is
  * not one of them, so it must not suppress the cloud environment that happens to share its id.
  */
 export function relayManagedEnvironmentIds(

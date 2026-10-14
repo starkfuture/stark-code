@@ -1,4 +1,4 @@
-import { EnvironmentId, ProviderInstanceId, ScheduledTaskId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId, ScheduledTaskId } from "@starkfuture/contracts";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -14,9 +14,9 @@ import { retainSettingsScope, validateSettingsRouteSearch } from "./settingsScop
 import { validateScheduledTasksSearch } from "./scheduledTasksSettings.logic";
 
 const checkoutSearch = {
-  project: "repository:t3code",
+  project: "repository:starkcode",
   machine: "remote-server",
-  checkout: "remote-server:/home/user/T3 Code",
+  checkout: "remote-server:/home/user/Stark Code",
 };
 
 function createSettingsRouter(initialEntry = "/settings/general") {
@@ -131,7 +131,7 @@ describe("settings scope navigation", () => {
       const router = createSettingsRouter();
       await router.navigate({ to, search: checkoutSearch });
 
-      const regroupedCheckout = { ...checkoutSearch, project: "separate:t3code" };
+      const regroupedCheckout = { ...checkoutSearch, project: "separate:starkcode" };
       await router.navigate({
         from: "/settings",
         to: router.state.location.pathname,

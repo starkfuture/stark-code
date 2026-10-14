@@ -9,9 +9,9 @@ import {
   ThreadId,
   type DesktopAppActivationRequest,
   type DesktopAppActivationResponse,
-} from "@t3tools/contracts";
-import { resolveDesktopAppControlAddress } from "@t3tools/shared/desktopAppControl";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@starkfuture/contracts";
+import { resolveDesktopAppControlAddress } from "@starkfuture/shared/desktopAppControl";
+import * as HostProcess from "@starkfuture/shared/HostProcess";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { afterEach, describe, expect } from "vite-plus/test";
@@ -86,7 +86,9 @@ describe("desktop app control server", () => {
       const platform = yield* HostProcess.Platform;
       const userId = yield* HostProcess.UserId;
       yield* Effect.promise(async () => {
-        const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-app-control-test-"));
+        const root = await NodeFSP.mkdtemp(
+          NodePath.join(NodeOS.tmpdir(), "stark-app-control-test-"),
+        );
         const target = makeTarget(NodePath.join(root, "userdata"), platform, userId);
         const received: DesktopAppActivationRequest[] = [];
         const server = await startDesktopAppControlServer({
@@ -126,7 +128,9 @@ describe("desktop app control server", () => {
       const platform = yield* HostProcess.Platform;
       const userId = yield* HostProcess.UserId;
       yield* Effect.promise(async () => {
-        const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-app-cancel-test-"));
+        const root = await NodeFSP.mkdtemp(
+          NodePath.join(NodeOS.tmpdir(), "stark-app-cancel-test-"),
+        );
         const target = makeTarget(NodePath.join(root, "userdata"), platform, userId);
         let resolveCanceled: (requestId: string) => void = () => undefined;
         const canceled = new Promise<string>((resolve) => {
@@ -166,7 +170,9 @@ describe("desktop app control server", () => {
       const userId = yield* HostProcess.UserId;
       if (platform === "win32") return;
       yield* Effect.promise(async () => {
-        const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-app-takeover-test-"));
+        const root = await NodeFSP.mkdtemp(
+          NodePath.join(NodeOS.tmpdir(), "stark-app-takeover-test-"),
+        );
         const target = makeTarget(NodePath.join(root, "userdata"), platform, userId);
         const older = await startOkServer(target, userId);
         await startOkServer(target, userId);
@@ -187,7 +193,9 @@ describe("desktop app control server", () => {
       const userId = yield* HostProcess.UserId;
       if (platform === "win32") return;
       yield* Effect.promise(async () => {
-        const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-app-reclaim-test-"));
+        const root = await NodeFSP.mkdtemp(
+          NodePath.join(NodeOS.tmpdir(), "stark-app-reclaim-test-"),
+        );
         const target = makeTarget(NodePath.join(root, "userdata"), platform, userId);
         const server = await startOkServer(target, userId);
 

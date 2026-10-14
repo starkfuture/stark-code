@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
-import { ProviderInstanceId } from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+import { ProviderInstanceId } from "@starkfuture/contracts";
+import { createModelSelection } from "@starkfuture/shared/model";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
@@ -75,7 +75,7 @@ it.effect("puts linked source control context in the Pi thread title prompt", ()
 
     const generated = yield* textGeneration.generateThreadTitle({
       cwd: process.cwd(),
-      message: "Review https://github.com/pingdotgg/t3code/pull/8588",
+      message: "Review https://github.com/example/stark-code/pull/8588",
       linkedContext: "Reset credits must route through the hub that owns the account.",
       modelSelection: createModelSelection(ProviderInstanceId.make("pi"), "default"),
     });

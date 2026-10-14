@@ -1,17 +1,19 @@
-import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
+import { CODEX_PRIVACY_ARGS } from "@starkfuture/shared/providerPrivacy";
+import { tokenizeCliArgs } from "@starkfuture/shared/cliArgs";
 
-const T3CODE_CODEX_LAUNCH_ARGS_ENV = "T3CODE_CODEX_LAUNCH_ARGS";
+const STARK_CODE_CODEX_LAUNCH_ARGS_ENV = "STARK_CODE_CODEX_LAUNCH_ARGS";
 
 export const resolveCodexLaunchArgs = (
   launchArgs?: string,
   environment: NodeJS.ProcessEnv = process.env,
-) => environment[T3CODE_CODEX_LAUNCH_ARGS_ENV]?.trim() || launchArgs?.trim() || "";
+) => environment[STARK_CODE_CODEX_LAUNCH_ARGS_ENV]?.trim() || launchArgs?.trim() || "";
 
 const codexLaunchArgv = (launchArgs?: string): ReadonlyArray<string> => tokenizeCliArgs(launchArgs);
 
 export const codexAppServerArgs = (launchArgs?: string) => [
   "app-server",
   ...codexLaunchArgv(launchArgs),
+  ...CODEX_PRIVACY_ARGS,
 ];
 
 export const codexExecLaunchArgs = (launchArgs?: string) => {
@@ -35,5 +37,5 @@ export const codexExecLaunchArgs = (launchArgs?: string) => {
     }
   }
 
-  return execArgs;
+  return [...execArgs, ...CODEX_PRIVACY_ARGS];
 };

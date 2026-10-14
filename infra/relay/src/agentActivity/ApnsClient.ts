@@ -1,4 +1,4 @@
-import type { RelayAgentActivityAggregateState } from "@t3tools/contracts/relay";
+import type { RelayAgentActivityAggregateState } from "@starkfuture/contracts/relay";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -171,7 +171,7 @@ function makeLiveActivityRequest(input: MakeLiveActivityRequestInput): ApnsLiveA
 function notificationThreadId(notification: ApnsNotificationPayload): string {
   return notification.threadId.length > 0
     ? `${notification.environmentId}/${notification.threadId}`
-    : "t3-agent-alerts";
+    : "stark-agent-alerts";
 }
 
 function makePushNotificationRequest(input: {
@@ -225,7 +225,7 @@ export class ApnsClient extends Context.Service<
       readonly issuedAtUnixSeconds: number;
     }) => Effect.Effect<ApnsDeliveryResult, ApnsError>;
   }
->()("t3code-relay/agentActivity/ApnsClient") {}
+>()("starkcode-relay/agentActivity/ApnsClient") {}
 
 export const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;

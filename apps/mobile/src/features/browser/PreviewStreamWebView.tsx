@@ -1,4 +1,4 @@
-import previewStreamScript from "@t3tools/mobile-preview-stream";
+import previewStreamScript from "@starkfuture/mobile-preview-stream";
 import {
   previewStreamControlLabel,
   previewStreamHostSetupMessage,
@@ -6,8 +6,8 @@ import {
   type PreviewStreamDownload,
   type PreviewStreamFileChooser,
   type PreviewStreamInput,
-} from "@t3tools/client-runtime/preview/server-browser-stream";
-import type { EnvironmentId, PreviewStreamHostSetup } from "@t3tools/contracts";
+} from "@starkfuture/client-runtime/preview/server-browser-stream";
+import type { EnvironmentId, PreviewStreamHostSetup } from "@starkfuture/contracts";
 import {
   useEffect,
   useEffectEvent,
@@ -274,12 +274,12 @@ function PreviewStreamDocumentView({
   const controlChanged = useEffectEvent((next: PreviewStreamControl | null) => onControl?.(next));
   const command = (input: PreviewStreamInput) =>
     webView.current?.injectJavaScript(
-      `window.T3PreviewStream?.command(${JSON.stringify(input)}); true;`,
+      `window.StarkPreviewStream?.command(${JSON.stringify(input)}); true;`,
     );
   const fail = (message: string) => {
     if (!active.current || failed.current) return;
     failed.current = true;
-    webView.current?.injectJavaScript("window.T3PreviewStream?.stop(); true;");
+    webView.current?.injectJavaScript("window.StarkPreviewStream?.stop(); true;");
     onStreamingChange?.(false);
     setControl(null);
     setFileChooser(null);
@@ -306,14 +306,14 @@ function PreviewStreamDocumentView({
   useImperativeHandle(ref, () => ({
     command,
     togglePictureInPicture: () =>
-      webView.current?.injectJavaScript("window.T3PreviewStream?.pictureInPicture(); true;"),
+      webView.current?.injectJavaScript("window.StarkPreviewStream?.pictureInPicture(); true;"),
   }));
   useLayoutEffect(() => {
     active.current = true;
     const view = webView.current;
     return () => {
       active.current = false;
-      view?.injectJavaScript("window.T3PreviewStream?.stop(); true;");
+      view?.injectJavaScript("window.StarkPreviewStream?.stop(); true;");
     };
   }, []);
   useEffect(() => () => onStreamingChange?.(false), [onStreamingChange]);

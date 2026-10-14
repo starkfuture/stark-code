@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 18.4.0",
-    "appVersionSource": "remote",
+    "appVersionSource": "local",
     "promptToConfigurePushNotifications": false
   },
   "build": {
@@ -54,7 +54,7 @@
       "distribution": "store",
       "channel": "v2-preview",
       "env": {
-        "T3CODE_MOBILE_UPDATES_ENABLED": "0"
+        "STARK_CODE_MOBILE_UPDATES_ENABLED": "0"
       }
     },
     "production": {
@@ -68,23 +68,6 @@
       "autoIncrement": true,
       "ios": {
         "image": "macos-tahoe-26.6-xcode-27.1"
-      }
-    }
-  },
-  "submit": {
-    "v2-preview": {
-      "extends": "production",
-      "android": {
-        "track": "v2",
-        "releaseStatus": "completed"
-      }
-    },
-    "production": {
-      "ios": {
-        "ascAppId": "6787819824"
-      },
-      "android": {
-        "track": "internal"
       }
     }
   }

@@ -8,11 +8,11 @@ import {
   type ServerLifecycleWelcomePayload,
   type ServerProvider,
   type ServerSettings,
-} from "@t3tools/contracts";
-import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
-import { createOutdatedServerUpdateCommand } from "@t3tools/client-runtime/state/outdatedServerUpdate";
-import { createEnvironmentServerConfigsAtom } from "@t3tools/client-runtime/state/shell";
-import { mergeWithDefaultKeybindings } from "@t3tools/shared/keybindings";
+} from "@starkfuture/contracts";
+import { createServerEnvironmentAtoms } from "@starkfuture/client-runtime/state/server";
+import { createOutdatedServerUpdateCommand } from "@starkfuture/client-runtime/state/outdatedServerUpdate";
+import { createEnvironmentServerConfigsAtom } from "@starkfuture/client-runtime/state/shell";
+import { mergeWithDefaultKeybindings } from "@starkfuture/shared/keybindings";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 

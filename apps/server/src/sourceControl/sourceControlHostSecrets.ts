@@ -7,14 +7,14 @@
  *
  * @module sourceControl/sourceControlHostSecrets
  */
-import { secretSettingsFields } from "@t3tools/contracts";
-import * as AzureDevOps from "@t3tools/source-control-azure-devops/client/definition";
-import * as Bitbucket from "@t3tools/source-control-bitbucket/client/definition";
-import type { SourceControlClientDefinition } from "@t3tools/source-control-core/client/definition";
-import * as Forgejo from "@t3tools/source-control-forgejo/client/definition";
-import * as GitCafe from "@t3tools/source-control-gitcafe/client/definition";
-import * as GitHub from "@t3tools/source-control-github/client/definition";
-import * as GitLab from "@t3tools/source-control-gitlab/client/definition";
+import { secretSettingsFields } from "@starkfuture/contracts";
+import * as AzureDevOps from "@starkfuture/source-control-azure-devops/client/definition";
+import * as Bitbucket from "@starkfuture/source-control-bitbucket/client/definition";
+import type { SourceControlClientDefinition } from "@starkfuture/source-control-core/client/definition";
+import * as Forgejo from "@starkfuture/source-control-forgejo/client/definition";
+import * as GitCafe from "@starkfuture/source-control-gitcafe/client/definition";
+import * as GitHub from "@starkfuture/source-control-github/client/definition";
+import * as GitLab from "@starkfuture/source-control-gitlab/client/definition";
 
 const definitions: ReadonlyArray<SourceControlClientDefinition> = [
   GitHub.definition,

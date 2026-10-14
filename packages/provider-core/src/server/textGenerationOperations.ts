@@ -9,9 +9,13 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { type ChatAttachment, type ModelSelection, TextGenerationError } from "@t3tools/contracts";
-import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@t3tools/shared/git";
-import { extractJsonObject } from "@t3tools/shared/schemaJson";
+import {
+  type ChatAttachment,
+  type ModelSelection,
+  TextGenerationError,
+} from "@starkfuture/contracts";
+import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@starkfuture/shared/git";
+import { extractJsonObject } from "@starkfuture/shared/schemaJson";
 
 import type { ProviderTextGeneration } from "./textGeneration.ts";
 import {

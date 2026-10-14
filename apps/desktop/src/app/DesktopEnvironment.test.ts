@@ -43,9 +43,9 @@ describe("DesktopEnvironment", () => {
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(
         {},
-        { STARK_CODE_DESKTOP_DATA_DIR: "/tmp/stark/electron" },
+        { STARK_CODE_DESKTOP_DATA_DIR: "/tmp/stark-code/electron" },
       );
-      assert.strictEqual(environment.appDataDirectory, "/tmp/stark/electron");
+      assert.strictEqual(environment.appDataDirectory, "/tmp/stark-code/electron");
       assert.strictEqual(environment.branding.baseName, "Stark Code");
     }),
   );
@@ -55,60 +55,60 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_HOME: " /tmp/stark ",
-          T3CODE_COMMIT_HASH: " 0123456789abcdef ",
-          T3CODE_PORT: "4949",
+          STARK_CODE_HOME: " /tmp/stark-code ",
+          STARK_CODE_COMMIT_HASH: " 0123456789abcdef ",
+          STARK_CODE_PORT: "4949",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
-          T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH: " /remote/server.mjs ",
-          T3CODE_OTLP_TRACES_URL: " http://127.0.0.1:4318/v1/traces ",
-          T3CODE_OTLP_METRICS_URL: " http://127.0.0.1:4318/v1/metrics ",
-          T3CODE_OTLP_LOGS_URL: " http://127.0.0.1:4318/v1/logs ",
-          T3CODE_OTLP_EXPORT_INTERVAL_MS: "2500",
-          T3CODE_OTLP_HEADERS: "authorization=Basic%20abc%3D%3D,x-tenant=t3-code",
-          T3CODE_OTLP_PROTOCOL: "http/protobuf",
+          STARK_CODE_DEV_REMOTE_STARK_SERVER_ENTRY_PATH: " /remote/server.mjs ",
+          STARK_CODE_OTLP_TRACES_URL: " http://127.0.0.1:4318/v1/traces ",
+          STARK_CODE_OTLP_METRICS_URL: " http://127.0.0.1:4318/v1/metrics ",
+          STARK_CODE_OTLP_LOGS_URL: " http://127.0.0.1:4318/v1/logs ",
+          STARK_CODE_OTLP_EXPORT_INTERVAL_MS: "2500",
+          STARK_CODE_OTLP_HEADERS: "authorization=Basic%20abc%3D%3D,x-tenant=stark-code",
+          STARK_CODE_OTLP_PROTOCOL: "http/protobuf",
         },
       );
 
       assert.equal(environment.isDevelopment, true);
       assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
-      assert.equal(environment.baseDir, "/tmp/stark");
-      assert.equal(environment.stateDir, "/tmp/stark/userdata");
-      assert.equal(environment.desktopSettingsPath, "/tmp/stark/userdata/desktop-settings.json");
-      assert.equal(environment.clientSettingsPath, "/tmp/stark/userdata/client-settings.json");
+      assert.equal(environment.baseDir, "/tmp/stark-code");
+      assert.equal(environment.stateDir, "/tmp/stark-code/userdata");
+      assert.equal(environment.desktopSettingsPath, "/tmp/stark-code/userdata/desktop-settings.json");
+      assert.equal(environment.clientSettingsPath, "/tmp/stark-code/userdata/client-settings.json");
       assert.equal(
         environment.savedEnvironmentRegistryPath,
-        "/tmp/stark/userdata/saved-environments.json",
+        "/tmp/stark-code/userdata/saved-environments.json",
       );
-      assert.equal(environment.serverSettingsPath, "/tmp/stark/userdata/settings.json");
-      assert.equal(environment.logDir, "/tmp/stark/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/stark/userdata/browser-artifacts");
+      assert.equal(environment.serverSettingsPath, "/tmp/stark-code/userdata/settings.json");
+      assert.equal(environment.logDir, "/tmp/stark-code/userdata/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/stark-code/userdata/browser-artifacts");
       assert.equal(environment.rootDir, "/repo");
       assert.equal(environment.appRoot, "/repo");
       assert.equal(environment.serverRoot, "/repo");
       assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
       assert.equal(environment.backendCwd, "/repo");
       assert.equal(environment.appUserModelId, "com.starkfuture.starkcode.dev");
-      assert.equal(environment.linuxWmClass, "t3code-dev");
-      assert.equal(environment.linuxDesktopEntryName, "com.t3tools.T3Code.Development.desktop");
+      assert.equal(environment.linuxWmClass, "starkcode-dev");
+      assert.equal(
+        environment.linuxDesktopEntryName,
+        "com.starkfuture.StarkCode.Development.desktop",
+      );
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
       );
-      assert.deepEqual(environment.devRemoteT3ServerEntryPath, Option.some("/remote/server.mjs"));
+      assert.deepEqual(
+        environment.devRemoteStarkServerEntryPath,
+        Option.some("/remote/server.mjs"),
+      );
       assert.deepEqual(environment.configuredBackendPort, Option.some(4949));
       assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abcdef"));
-      assert.deepEqual(environment.otlpTracesUrl, Option.some("http://127.0.0.1:4318/v1/traces"));
-      assert.deepEqual(environment.otlpMetricsUrl, Option.some("http://127.0.0.1:4318/v1/metrics"));
-      assert.deepEqual(environment.otlpLogsUrl, Option.some("http://127.0.0.1:4318/v1/logs"));
-      assert.equal(environment.otlpExportIntervalMs, 2500);
-      assert.deepEqual(
-        environment.otlpHeaders,
-        Option.some({
-          authorization: "Basic abc==",
-          "x-tenant": "t3-code",
-        }),
-      );
-      assert.equal(environment.otlpProtocol, "http/protobuf");
+      assert.deepEqual(environment.otlpTracesUrl, Option.none());
+      assert.deepEqual(environment.otlpMetricsUrl, Option.none());
+      assert.deepEqual(environment.otlpLogsUrl, Option.none());
+      assert.equal(environment.otlpExportIntervalMs, 10_000);
+      assert.deepEqual(environment.otlpHeaders, Option.none());
+      assert.equal(environment.otlpProtocol, "http/json");
     }),
   );
 
@@ -117,15 +117,15 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_HOME: "/tmp/stark",
+          STARK_CODE_HOME: "/tmp/stark-code",
         },
       );
 
       assert.equal(environment.isDevelopment, false);
-      assert.equal(environment.stateDir, "/tmp/stark/userdata");
-      assert.equal(environment.logDir, "/tmp/stark/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/stark/userdata/browser-artifacts");
-      assert.equal(environment.serverSettingsPath, "/tmp/stark/userdata/settings.json");
+      assert.equal(environment.stateDir, "/tmp/stark-code/userdata");
+      assert.equal(environment.logDir, "/tmp/stark-code/userdata/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/stark-code/userdata/browser-artifacts");
+      assert.equal(environment.serverSettingsPath, "/tmp/stark-code/userdata/settings.json");
       assert.equal(environment.otlpProtocol, "http/json");
     }),
   );
@@ -157,11 +157,11 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment({
         platform: "linux",
         isPackaged: true,
-        appPath: "/tmp/.mount_t3code/resources/app.asar",
-        resourcesPath: "/tmp/.mount_t3code/resources",
+        appPath: "/tmp/.mount_starkcode/resources/app.asar",
+        resourcesPath: "/tmp/.mount_starkcode/resources",
       });
 
-      assert.equal(environment.linuxDesktopEntryName, "com.t3tools.T3Code.desktop");
+      assert.equal(environment.linuxDesktopEntryName, "com.starkfuture.StarkCode.desktop");
     }),
   );
 
@@ -183,7 +183,7 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.starkfuture.starkcode.dev.local ",
+          STARK_CODE_DESKTOP_APP_USER_MODEL_ID: " com.starkfuture.starkcode.dev.local ",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
         },
       );

@@ -1,4 +1,4 @@
-import type { AssetResource, EnvironmentId } from "@t3tools/contracts";
+import type { AssetResource, EnvironmentId } from "@starkfuture/contracts";
 import type { ImageSource } from "expo-image";
 
 /**
@@ -14,7 +14,7 @@ export function assetImageSource(
   return resource._tag === "attachment"
     ? {
         uri,
-        cacheKey: `t3-attachment:${JSON.stringify([environmentId, resource.attachmentId])}`,
+        cacheKey: `stark-attachment:${JSON.stringify([environmentId, resource.attachmentId])}`,
       }
     : { uri };
 }

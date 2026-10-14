@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/shared",
+  "name": "@starkfuture/shared",
   "private": true,
   "type": "module",
   "exports": {
@@ -155,9 +155,9 @@
       "types": "./src/projectSettings.ts",
       "import": "./src/projectSettings.ts"
     },
-    "./t3ProjectFile": {
-      "types": "./src/t3ProjectFile.ts",
-      "import": "./src/t3ProjectFile.ts"
+    "./starkProjectFile": {
+      "types": "./src/starkProjectFile.ts",
+      "import": "./src/starkProjectFile.ts"
     },
     "./orchestrationTiming": {
       "types": "./src/orchestrationTiming.ts",
@@ -383,9 +383,9 @@
       "types": "./src/orchestrationV2Timeline.ts",
       "import": "./src/orchestrationV2Timeline.ts"
     },
-    "./t3McpToolPresentation": {
-      "types": "./src/t3McpToolPresentation.ts",
-      "import": "./src/t3McpToolPresentation.ts"
+    "./starkMcpToolPresentation": {
+      "types": "./src/starkMcpToolPresentation.ts",
+      "import": "./src/starkMcpToolPresentation.ts"
     },
     "./Array": {
       "types": "./src/Array.ts",
@@ -490,6 +490,10 @@
     "./branding": {
       "types": "./src/branding.ts",
       "import": "./src/branding.ts"
+    },
+    "./providerPrivacy": {
+      "types": "./src/providerPrivacy.ts",
+      "import": "./src/providerPrivacy.ts"
     }
   },
   "scripts": {
@@ -499,7 +503,7 @@
   "dependencies": {
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
-    "@t3tools/contracts": "workspace:*",
+    "@starkfuture/contracts": "workspace:*",
     "effect": "catalog:",
     "jose": "catalog:",
     "mdast-util-directive": "catalog:",

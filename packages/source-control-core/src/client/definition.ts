@@ -17,8 +17,8 @@ import {
   type PullRequestReviewVerdict,
   type RepositoryIdentity,
   SourceControlProviderKind,
-} from "@t3tools/contracts";
-import type { ChangeRequestLink } from "@t3tools/shared/changeRequestUrl";
+} from "@starkfuture/contracts";
+import type { ChangeRequestLink } from "@starkfuture/shared/changeRequestUrl";
 import * as Schema from "effect/Schema";
 
 /** What a host calls a change request, e.g. `MR` and `merge request` on GitLab. */

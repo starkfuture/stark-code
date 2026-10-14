@@ -4,8 +4,8 @@
  *
  * @module provider-opencode/client
  */
-import { ProviderDriverKind } from "@t3tools/contracts";
-import { defineProviderClient } from "@t3tools/provider-core/client";
+import { ProviderDriverKind } from "@starkfuture/contracts";
+import { defineProviderClient } from "@starkfuture/provider-core/client";
 
 import { OpenCodeSettings } from "./settings.ts";
 

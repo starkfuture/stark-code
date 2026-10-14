@@ -7,12 +7,12 @@ vi.mock("@electron/osx-sign", () => ({ sign: vi.fn() }));
 
 it("batches codesign calls without changing existing signing options", async () => {
   const options = {
-    app: "/tmp/T3 Code.app",
-    identity: "Developer ID Application: T3 Tools, Inc.",
-    keychain: "/tmp/t3code.keychain",
-    provisioningProfile: "/tmp/t3code.provisionprofile",
+    app: "/tmp/Stark Code.app",
+    identity: "Developer ID Application: Stark Future, Inc.",
+    keychain: "/tmp/starkcode.keychain",
+    provisioningProfile: "/tmp/starkcode.provisionprofile",
     optionsForFile: () => ({
-      entitlements: "/tmp/t3code.entitlements.plist",
+      entitlements: "/tmp/starkcode.entitlements.plist",
       hardenedRuntime: true,
     }),
   } satisfies SignOptions;

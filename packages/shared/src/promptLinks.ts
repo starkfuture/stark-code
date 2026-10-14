@@ -1,17 +1,17 @@
 import { DEFAULT_HOSTED_APP_URL } from "./connectAuth.ts";
 
 /**
- * Prompt links open T3 Code from outside it with a prompt ready to send. They never send it:
+ * Prompt links open Stark Code from outside it with a prompt ready to send. They never send it:
  * a link from a stranger fills a draft, and the user reads it and presses Send. A link also
  * cannot pick a runtime mode, branch, or worktree. Those stay the user's own defaults.
  *
  * Shared links are https on the hosted app, because that is what Twitter and GitHub make
- * clickable. The `t3code://` scheme carries the same paths into desktop and mobile:
+ * clickable. The `starkcode://` scheme carries the same paths into desktop and mobile:
  *
- *   https://app.t3.codes/new?prompt=…&repo=owner/name&provider=codex&model=gpt-5
- *   https://app.t3.codes/new?pr=owner/name/123&prompt=…
- *   https://app.t3.codes/<environmentId>/<threadId>?prompt=…
- *   t3code://new?…   t3code://threads/<environmentId>/<threadId>?…
+ *   http://127.0.0.1:3773/new?prompt=…&repo=owner/name&provider=codex&model=gpt-5
+ *   http://127.0.0.1:3773/new?pr=owner/name/123&prompt=…
+ *   http://127.0.0.1:3773/<environmentId>/<threadId>?prompt=…
+ *   starkcode://new?…   starkcode://threads/<environmentId>/<threadId>?…
  */
 
 /** URLs stay well under the limits browsers and link shorteners apply. */
@@ -134,7 +134,7 @@ function readPrompt(params: URLSearchParams): PromptLinkResult<LinkedPrompt | nu
   if (raw.length > PROMPT_LINK_MAX_PROMPT_LENGTH) {
     return {
       ok: false,
-      error: `This prompt is longer than ${PROMPT_LINK_MAX_PROMPT_LENGTH.toLocaleString("en-US")} characters, so T3 Code did not open it.`,
+      error: `This prompt is longer than ${PROMPT_LINK_MAX_PROMPT_LENGTH.toLocaleString("en-US")} characters, so Stark Code did not open it.`,
     };
   }
   const prompt = sanitizeLinkedPrompt(raw);
@@ -142,7 +142,7 @@ function readPrompt(params: URLSearchParams): PromptLinkResult<LinkedPrompt | nu
     return {
       ok: false,
       error:
-        "This prompt had only hidden characters, so it may be malicious. T3 Code did not open it.",
+        "This prompt had only hidden characters, so it may be malicious. Stark Code did not open it.",
     };
   }
   return { ok: true, value: prompt.text.length > 0 ? prompt : null };
@@ -159,7 +159,7 @@ export function parseNewThreadLink(search: string): PromptLinkResult<NewThreadLi
   if (pr !== null) {
     const pullRequest = parsePromptLinkPullRequest(pr);
     if (pullRequest === null) {
-      return { ok: false, error: "This link names a pull request T3 Code cannot read." };
+      return { ok: false, error: "This link names a pull request Stark Code cannot read." };
     }
     return { ok: true, value: { kind: "pull-request", pullRequest, prompt: prompt.value } };
   }
@@ -167,7 +167,7 @@ export function parseNewThreadLink(search: string): PromptLinkResult<NewThreadLi
   const repo = params.get("repo");
   const repository = repo === null ? null : parsePromptLinkRepository(repo);
   if (repo !== null && repository === null) {
-    return { ok: false, error: "This link names a repository T3 Code cannot read." };
+    return { ok: false, error: "This link names a repository Stark Code cannot read." };
   }
   return {
     ok: true,
@@ -212,12 +212,12 @@ export function buildNewThreadLink(input: {
   return url.toString();
 }
 
-const APP_SCHEME = /^t3code(?:-[a-z]+)?:$/;
+const APP_SCHEME = /^starkcode(?:-[a-z]+)?:$/;
 const THREAD_PATH = /^\/([^/]+)\/([^/]+)\/?$/;
 
 /**
  * The in-app path a prompt link or thread deep link opens, or null for any other URL.
- * Desktop uses it for links the OS hands over, both `t3code://` ones and, as the default
+ * Desktop uses it for links the OS hands over, both `starkcode://` ones and, as the default
  * browser on macOS, hosted-app ones.
  */
 export function promptLinkAppPath(
@@ -241,8 +241,8 @@ export function promptLinkAppPath(
   return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
 }
 
-/** The `t3code://` link that hands an in-app path to an installed desktop or mobile app. */
-export function promptLinkDeepLink(appPath: string, scheme = "t3code"): string {
+/** The `starkcode://` link that hands an in-app path to an installed desktop or mobile app. */
+export function promptLinkDeepLink(appPath: string, scheme = "starkcode"): string {
   const url = new URL(appPath, "https://app.invalid");
   const host = url.pathname === "/new" ? "new" : `threads${url.pathname}`;
   return `${scheme}://${host}${url.search}`;

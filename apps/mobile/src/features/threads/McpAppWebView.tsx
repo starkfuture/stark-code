@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId, TurnItemId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId, TurnItemId } from "@starkfuture/contracts";
 import {
   makeMcpAppHost,
   McpAppHostRefusal,
@@ -7,16 +7,16 @@ import {
   type McpAppCallToolResult,
   type McpAppHost,
   type McpAppHostContext,
-} from "@t3tools/client-runtime/mcp-apps";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { CommandId, MessageId } from "@t3tools/contracts";
+} from "@starkfuture/client-runtime/mcp-apps";
+import { scopeThreadRef } from "@starkfuture/client-runtime/environment";
+import { squashAtomCommandFailure } from "@starkfuture/client-runtime/state/runtime";
+import { CommandId, MessageId } from "@starkfuture/contracts";
 import {
   mcpAppAllowAttribute,
   mcpAppFileName,
   mcpAppReferencesEqual,
   type McpAppReference,
-} from "@t3tools/shared/mcpApp";
+} from "@starkfuture/shared/mcpApp";
 import * as Predicate from "effect/Predicate";
 import Constants from "expo-constants";
 import { useNavigation } from "@react-navigation/native";
@@ -46,14 +46,14 @@ const ROW_BOTTOM_MARGIN = 8;
 // opaque-origin iframe, as web does, so the app's `window.parent` and the
 // `event.source` of host replies are a real window, which the MCP Apps SDK
 // requires. The outer page only relays: app → React Native, and host
-// replies (injected as `__t3McpAppReceive(...)`) → app.
+// replies (injected as `__starkMcpAppReceive(...)`) → app.
 //
 // Android exposes `ReactNativeWebView` to every frame, so a frame nested in
 // the app could post to React Native directly. The outer page therefore wraps
 // what it relays with a secret only it holds, and React Native drops anything
 // else. The bridge belongs to the captured document: once the app frame loads
 // a second time (it navigated itself), the outer page stops relaying and says
-// so, rather than letting a page T3 never served pose as the app. This is not
+// so, rather than letting a page Stark never served pose as the app. This is not
 // a confidentiality boundary: a frame can always navigate itself, so the app
 // could carry anything it read out in a URL either way.
 function outerDocument(src: string, allow: string, secret: string) {
@@ -64,9 +64,9 @@ function outerDocument(src: string, allow: string, secret: string) {
 <body><iframe id="app" sandbox="allow-scripts allow-forms" allow="${attribute(allow)}"></iframe>
 <script>(function(){var frame=document.getElementById("app"),secret=${JSON.stringify(secret)},loads=0,live=true;
 var send=function(m){window.ReactNativeWebView.postMessage(JSON.stringify({secret:secret,message:m}));};
-frame.addEventListener("load",function(){loads+=1;if(loads>1&&live){live=false;send({t3:"navigated"});}});
+frame.addEventListener("load",function(){loads+=1;if(loads>1&&live){live=false;send({stark:"navigated"});}});
 window.addEventListener("message",function(e){if(live&&e.source===frame.contentWindow)send(e.data);});
-window.__t3McpAppReceive=function(m){live&&frame.contentWindow&&frame.contentWindow.postMessage(m,"*");};
+window.__starkMcpAppReceive=function(m){live&&frame.contentWindow&&frame.contentWindow.postMessage(m,"*");};
 frame.src=${JSON.stringify(src).replace(/</g, "\\u003c")};})();</script></body></html>`;
 }
 
@@ -307,7 +307,7 @@ export function ThreadMcpApp(props: {
         platform: "mobile",
         locale: Intl.DateTimeFormat().resolvedOptions().locale,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        userAgent: `t3-code/${Constants.expoConfig?.version ?? "0.0.0"}`,
+        userAgent: `stark-code/${Constants.expoConfig?.version ?? "0.0.0"}`,
         deviceCapabilities: { touch: true, hover: false },
         // The full-screen modal keeps the top and bottom insets for its
         // header and the home indicator; only the sides reach the app.
@@ -324,7 +324,7 @@ export function ThreadMcpApp(props: {
       hostVersion: Constants.expoConfig?.version ?? "0.0.0",
       post: (message) =>
         webView.current?.injectJavaScript(
-          `window.__t3McpAppReceive&&window.__t3McpAppReceive(${JSON.stringify(message)});true;`,
+          `window.__starkMcpAppReceive&&window.__starkMcpAppReceive(${JSON.stringify(message)});true;`,
         ),
       hostContext,
       callTool: async ({ name, arguments: args }) => {
@@ -360,7 +360,7 @@ export function ThreadMcpApp(props: {
       },
       openLink: async (url) => {
         // A WebView cannot tell whether the reader just tapped the app, so it
-        // asks, rather than letting an app leave T3 on a timer.
+        // asks, rather than letting an app leave Stark on a timer.
         if (!(await confirm(`Open a link from ${app.server}?`, url, "Open"))) {
           throw new McpAppHostRefusal("Declined by the user.");
         }
@@ -589,7 +589,7 @@ export function ThreadMcpApp(props: {
             }
             if (!Predicate.isObject(envelope) || envelope.secret !== secret) return;
             const message = envelope.message;
-            if (Predicate.isObject(message) && message.t3 === "navigated") {
+            if (Predicate.isObject(message) && message.stark - code === "navigated") {
               hostRef.current?.dispose();
               setNavigatedAway(true);
               return;

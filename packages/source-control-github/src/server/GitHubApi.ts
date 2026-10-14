@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@starkfuture/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -11,10 +11,10 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 
-import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
+import { collectUint8StreamText } from "@starkfuture/provider-core/server/collectStreamText";
 import * as GitHubCredentials from "./GitHubCredentials.ts";
 import * as GitHubQuota from "./GitHubQuota.ts";
-import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
+import * as SourceControlRateLimit from "@starkfuture/source-control-core/server/SourceControlRateLimit";
 
 const DEFAULT_TIMEOUT = Duration.seconds(30);
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -31,7 +31,7 @@ export const PinnedGitHubCredential = Context.Reference<{
   readonly host: string;
   readonly token: Redacted.Redacted<string>;
   readonly credentialFingerprint: string;
-} | null>("@t3tools/source-control-github/server/GitHubApi/PinnedGitHubCredential", {
+} | null>("@starkfuture/source-control-github/server/GitHubApi/PinnedGitHubCredential", {
   defaultValue: () => null,
 });
 
@@ -155,7 +155,7 @@ export class GitHubApi extends Context.Service<
       GitHubApiError
     >;
   }
->()("@t3tools/source-control-github/server/GitHubApi") {}
+>()("@starkfuture/source-control-github/server/GitHubApi") {}
 
 function normalizeHost(host: string): string {
   return host.trim().toLowerCase();
@@ -414,7 +414,7 @@ export const make = Effect.gen(function* () {
               HttpClientRequest.bearerToken(Redacted.value(token)),
               HttpClientRequest.setHeaders({
                 "x-github-api-version": API_VERSION,
-                "user-agent": "t3code",
+                "user-agent": "starkcode",
               }),
             ),
           )

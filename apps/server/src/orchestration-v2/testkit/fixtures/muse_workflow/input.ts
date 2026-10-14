@@ -5,7 +5,7 @@ const MUSE_WORKFLOW_PROMPT =
 
 /**
  * Muse ends the turn as soon as the workflow launches, keeps running it in the
- * background, then starts a turn on its own to report the result. T3 shows each
+ * background, then starts a turn on its own to report the result. Stark shows each
  * workflow agent as a native subagent, and runs Muse's report turn as a
  * continuation (run 2) instead of dropping it.
  */

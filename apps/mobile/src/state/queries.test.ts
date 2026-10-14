@@ -1,6 +1,6 @@
-import { filterComposerPullRequestMatches } from "@t3tools/shared/composerPullRequestMatches";
+import { filterComposerPullRequestMatches } from "@starkfuture/shared/composerPullRequestMatches";
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@starkfuture/contracts";
 
 import { buildCheckpointDiffTargets, normalizeComposerPathSearchQuery } from "./queryTargets";
 

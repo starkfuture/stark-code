@@ -1,4 +1,9 @@
-import { EnvironmentId, ThreadId, ScheduledTaskId, type ScheduledTask } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ThreadId,
+  ScheduledTaskId,
+  type ScheduledTask,
+} from "@starkfuture/contracts";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 

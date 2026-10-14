@@ -7,17 +7,17 @@
  * @module textGeneration/OpenCode2TextGeneration
  */
 import { AbsolutePath, Location, Model, Provider, Session } from "@opencode/client/effect";
-import { TextGenerationError } from "@t3tools/contracts";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { TextGenerationError } from "@starkfuture/contracts";
+import { getModelSelectionStringOptionValue } from "@starkfuture/shared/model";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as ProviderHost from "@starkfuture/provider-core/server/ProviderHost";
 import * as OpenCode2Server from "./OpenCode2Server.ts";
 import * as OpenCodeRuntime from "../OpenCodeRuntime.ts";
-import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
+import * as TextGenerationOperations from "@starkfuture/provider-core/server/textGenerationOperations";
 
 const isTextGenerationError = Schema.is(TextGenerationError);
 
@@ -25,7 +25,7 @@ const isTextGenerationError = Schema.is(TextGenerationError);
 const GENERATION_TIMEOUT = "3 minutes";
 
 /**
- * Nothing in a text generation needs a tool, so every tool asks and T3 is not
+ * Nothing in a text generation needs a tool, so every tool asks and Stark is not
  * there to answer. Denying `shell` or `read` outright gets the whole session
  * refused on OpenCode's free models, and an ask that is never answered would
  * hang, so asks are rejected as they arrive.
@@ -127,7 +127,7 @@ const runOnServer = (
       Effect.forkScoped,
     );
     const session = yield* client.session.create({
-      title: `T3 Code ${input.operation}`,
+      title: `Stark Code ${input.operation}`,
       location: Location.PublicRef.make({ directory: AbsolutePath.make(input.cwd) }),
       model: Model.Ref.make({
         providerID: Provider.ID.make(parsed.providerID),

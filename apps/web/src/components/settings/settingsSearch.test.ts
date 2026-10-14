@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@starkfuture/contracts";
 
 import {
   filterAvailableSettingsSearchItems,
@@ -46,16 +46,9 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 
 describe("searchSettings", () => {
   it.each(["OTel", "OTLP", "telemetry export", "Grafana"])(
-    "finds environment telemetry settings for %s",
+    "does not offer external telemetry configuration for %s",
     (query) => {
-      expect(searchSettings(query)).toContainEqual(
-        expect.objectContaining({
-          id: "telemetry-export",
-          to: "/settings/diagnostics",
-          targetId: "telemetry-export",
-          scope: "environment",
-        }),
-      );
+      expect(searchSettings(query).map((item) => item.id)).not.toContain("telemetry-export");
     },
   );
   it.each(["send shortcut", "multiline", "new line"])("finds Send shortcut for %s", (query) => {
@@ -194,7 +187,7 @@ describe("searchSettings", () => {
       "review-guide-model",
       "review-guide-instructions",
       "source-control-writing-style",
-      "t3-connect",
+      "stark-connect",
       "hold-webhooks-while-offline",
       "tailscale-https",
       "wsl-backend",
@@ -239,7 +232,7 @@ describe("searchSettings", () => {
       localEnvironmentDisabled: true,
     }).map((item) => item.id);
     expect(remoteOnly).toContain("local-environment");
-    expect(remoteOnly).not.toContain("t3-connect");
+    expect(remoteOnly).not.toContain("stark-connect");
     expect(remoteOnly).not.toContain("publish-agent-activity");
     expect(remoteOnly).not.toContain("wsl-backend");
     // Browsers without access:write still render CloudLinkRow for their host.
@@ -412,14 +405,8 @@ describe("searchSettings", () => {
 });
 
 describe("settings search targets", () => {
-  it("requires an environment for the resolved telemetry export destination", () => {
-    const result = searchSettings("OpenTelemetry export").find(
-      (item) => item.id === "telemetry-export",
-    )!;
-    const target = getSettingsSearchTargetScope(result.targetId ?? result.id)!;
-    expect(isSettingsSearchScopeAvailable(target.scope, "all")).toBe(false);
-    expect(isSettingsSearchScopeAvailable(target.scope, "project")).toBe(false);
-    expect(isSettingsSearchScopeAvailable(target.scope, "environment")).toBe(true);
+  it("has no telemetry export destination", () => {
+    expect(getSettingsSearchTargetScope("telemetry-export")).toBeNull();
   });
   it.each([
     "auto-settle-inactive-threads",

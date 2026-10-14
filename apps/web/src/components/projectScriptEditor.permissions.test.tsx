@@ -3,7 +3,7 @@ import {
   AuthSettingsWriteScope,
   EnvironmentId,
   type AuthEnvironmentScope,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";

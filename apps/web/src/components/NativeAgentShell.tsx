@@ -2,7 +2,7 @@ import type {
   ProviderInstanceId,
   ResolvedKeybindingsConfig,
   ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import * as Schema from "effect/Schema";
 import { useState } from "react";
 import { TerminalViewport } from "./ThreadTerminalDrawer";

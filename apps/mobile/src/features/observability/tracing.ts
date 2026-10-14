@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import * as RelayTracing from "@t3tools/shared/relayTracing";
+import * as RelayTracing from "@starkfuture/shared/relayTracing";
 
 import { hasTracingPublicConfig, resolveCloudPublicConfig } from "../cloud/publicConfig";
 
@@ -25,7 +25,7 @@ export function resolveTracingConfig(): TracingConfig | null {
 
 export function layerFromConfig(config: TracingConfig | null, resource: TracingResource) {
   return RelayTracing.layer(config, {
-    serviceName: "t3code-mobile",
+    serviceName: "starkcode-mobile",
     serviceVersion: resource.serviceVersion,
     runtime: "react-native",
     client: `mobile-${resource.appVariant}`,

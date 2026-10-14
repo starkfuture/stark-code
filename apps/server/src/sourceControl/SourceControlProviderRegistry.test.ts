@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@starkfuture/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as DateTime from "effect/DateTime";
@@ -7,26 +7,26 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import { ChildProcessSpawner } from "effect/process";
-import { VcsRepositoryDetectionError } from "@t3tools/contracts";
+import { VcsRepositoryDetectionError } from "@starkfuture/contracts";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as ServerConfig from "../config.ts";
 import type * as VcsDriver from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
-import * as AzureDevOpsCli from "@t3tools/source-control-azure-devops/server/AzureDevOpsCli";
-import * as AzureDevOpsPullRequestCli from "@t3tools/source-control-azure-devops/server/AzureDevOpsPullRequestCli";
-import * as BitbucketApi from "@t3tools/source-control-bitbucket/server/BitbucketApi";
-import * as BitbucketPullRequestApi from "@t3tools/source-control-bitbucket/server/BitbucketPullRequestApi";
+import * as AzureDevOpsCli from "@starkfuture/source-control-azure-devops/server/AzureDevOpsCli";
+import * as AzureDevOpsPullRequestCli from "@starkfuture/source-control-azure-devops/server/AzureDevOpsPullRequestCli";
+import * as BitbucketApi from "@starkfuture/source-control-bitbucket/server/BitbucketApi";
+import * as BitbucketPullRequestApi from "@starkfuture/source-control-bitbucket/server/BitbucketPullRequestApi";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
-import * as GitHubPullRequestApi from "@t3tools/source-control-github/server/GitHubPullRequestApi";
-import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
-import * as GitLabCli from "@t3tools/source-control-gitlab/server/GitLabCli";
-import * as GitLabPullRequestCli from "@t3tools/source-control-gitlab/server/GitLabPullRequestCli";
-import * as ForgejoCli from "@t3tools/source-control-forgejo/server/ForgejoCli";
-import * as GitCafeApi from "@t3tools/source-control-gitcafe/server/GitCafeApi";
-import * as GitCafeCredentials from "@t3tools/source-control-gitcafe/server/GitCafeCredentials";
+import * as GitHubApi from "@starkfuture/source-control-github/server/GitHubApi";
+import * as GitHubPullRequestApi from "@starkfuture/source-control-github/server/GitHubPullRequestApi";
+import * as GitHubCredentials from "@starkfuture/source-control-github/server/GitHubCredentials";
+import * as GitLabCli from "@starkfuture/source-control-gitlab/server/GitLabCli";
+import * as GitLabPullRequestCli from "@starkfuture/source-control-gitlab/server/GitLabPullRequestCli";
+import * as ForgejoCli from "@starkfuture/source-control-forgejo/server/ForgejoCli";
+import * as GitCafeApi from "@starkfuture/source-control-gitcafe/server/GitCafeApi";
+import * as GitCafeCredentials from "@starkfuture/source-control-gitcafe/server/GitCafeCredentials";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as ServerSourceControlHost from "./ServerSourceControlHost.ts";
 
@@ -134,7 +134,7 @@ function makeRegistry(input: {
           cliEnv: () => Effect.succeed({}),
         }),
         ServerConfig.layerTest(process.cwd(), {
-          prefix: "t3-source-control-registry-test-",
+          prefix: "stark-source-control-registry-test-",
         }).pipe(Layer.provide(NodeServices.layer)),
       ),
     ),
@@ -144,7 +144,7 @@ function makeRegistry(input: {
 it.effect("routes GitHub remotes to the GitHub provider", () =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry({
-      remotes: [{ name: "origin", url: "git@github.com:pingdotgg/t3code.git" }],
+      remotes: [{ name: "origin", url: "git@github.com:example/stark-code.git" }],
     });
 
     const provider = yield* registry.resolve({ cwd: "/repo" });
@@ -302,7 +302,7 @@ it.effect("routes authenticated self-hosted GitLab remotes on non-standard ports
 it.effect("routes Bitbucket remotes to the Bitbucket provider", () =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry({
-      remotes: [{ name: "origin", url: "git@bitbucket.org:pingdotgg/t3code.git" }],
+      remotes: [{ name: "origin", url: "git@bitbucket.org:example/stark-code.git" }],
     });
 
     const provider = yield* registry.resolve({ cwd: "/repo" });

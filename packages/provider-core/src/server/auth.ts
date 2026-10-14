@@ -4,14 +4,14 @@ import type {
   ProviderAuthRespondInput,
   ProviderAuthState,
   ProviderSetupError,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
 import type * as Stream from "effect/Stream";
 
 export interface ProviderAuthController {
   /** Equal keys mean these instances share credentials on this environment. */
-  readonly credentialBinding?: { readonly owner: "provider" | "t3"; readonly key: string };
+  readonly credentialBinding?: { readonly owner: "provider" | "stark-code"; readonly key: string };
   readonly reconnectProfile?: (
     methodId: string,
   ) => Effect.Effect<ChatGptReconnectProfile | null, ProviderSetupError>;

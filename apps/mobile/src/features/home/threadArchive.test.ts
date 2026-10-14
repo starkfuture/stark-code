@@ -1,7 +1,7 @@
-import { ProviderInstanceId, RunId } from "@t3tools/contracts";
+import { ProviderInstanceId, RunId } from "@starkfuture/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { ThreadRuntimeSummary } from "@t3tools/client-runtime/state/models";
+import type { ThreadRuntimeSummary } from "@starkfuture/client-runtime/state/models";
 import { threadCanArchive } from "./threadArchive";
 
 function runtime(

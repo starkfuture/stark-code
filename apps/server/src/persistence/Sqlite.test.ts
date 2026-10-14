@@ -42,7 +42,7 @@ const spawnWriteLockHolder = (dbPath: string, holdMs: number) =>
   );
 
 it.effect("waits out a concurrent writer instead of failing with SQLITE_BUSY", () => {
-  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sqlite-busy-"));
+  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "stark-sqlite-busy-"));
   const dbPath = NodePath.join(tempDir, "state.sqlite");
 
   return Effect.gen(function* () {
@@ -59,7 +59,7 @@ it.effect("waits out a concurrent writer instead of failing with SQLITE_BUSY", (
 });
 
 it.effect("shrinks the WAL file back to the size limit after a large write", () => {
-  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sqlite-wal-"));
+  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "stark-sqlite-wal-"));
   const dbPath = NodePath.join(tempDir, "state.sqlite");
   const walFileSize = () => NodeFS.statSync(`${dbPath}-wal`).size;
   // About 25% more 4 KB rows than the limit holds, in one transaction.
@@ -85,7 +85,7 @@ it.effect("shrinks the WAL file back to the size limit after a large write", () 
 });
 
 it.effect("collects planner statistics for an existing database on open", () => {
-  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sqlite-stats-"));
+  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "stark-sqlite-stats-"));
   const dbPath = NodePath.join(tempDir, "state.sqlite");
   const persistence = () =>
     SqlitePersistence.layerFromPath(dbPath).pipe(Layer.provide(NodeServices.layer));
@@ -115,7 +115,7 @@ it.effect("collects planner statistics for an existing database on open", () => 
 });
 
 it.effect("only fsyncs the database file at WAL checkpoints", () => {
-  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sqlite-sync-"));
+  const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "stark-sqlite-sync-"));
   const dbPath = NodePath.join(tempDir, "state.sqlite");
 
   return Effect.gen(function* () {

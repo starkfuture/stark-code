@@ -3,9 +3,9 @@ import {
   EnvironmentId,
   ThreadId,
   type AuthEnvironmentScope,
-} from "@t3tools/contracts";
-import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
-import { nextTerminalAttachSeedState } from "@t3tools/client-runtime/state/terminal";
+} from "@starkfuture/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@starkfuture/contracts/settings";
+import { nextTerminalAttachSeedState } from "@starkfuture/client-runtime/state/terminal";
 import { AsyncResult } from "effect/reactivity";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";

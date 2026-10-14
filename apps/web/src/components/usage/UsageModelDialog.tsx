@@ -1,5 +1,5 @@
-import { formatPercent, formatTokens, formatUsd } from "@t3tools/shared/usageFormat";
-import { isModelCostUnknown, type ModelTotals } from "@t3tools/shared/usageMerge";
+import { formatPercent, formatTokens, formatUsd } from "@starkfuture/shared/usageFormat";
+import { isModelCostUnknown, type ModelTotals } from "@starkfuture/shared/usageMerge";
 import { useMemo } from "react";
 
 import { mergeAnsweredUsage, type EnvironmentUsageStatus } from "../../state/usage";

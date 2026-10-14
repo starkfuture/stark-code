@@ -1,12 +1,10 @@
-import Constants from "expo-constants";
-import { relayClerkTokenOptions } from "@t3tools/shared/relayAuth";
-import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
+import { relayClerkTokenOptions } from "@starkfuture/shared/relayAuth";
 import * as Schema from "effect/Schema";
 
 export class CloudPublicConfigMissingError extends Schema.TaggedError<CloudPublicConfigMissingError>()(
   "CloudPublicConfigMissingError",
   {
-    key: Schema.Literal("T3CODE_CLERK_JWT_TEMPLATE"),
+    key: Schema.Literal("STARK_CODE_CLERK_JWT_TEMPLATE"),
   },
 ) {
   override get message(): string {
@@ -39,38 +37,12 @@ type ExpoExtra =
     }
   | undefined;
 
-function trimNonEmpty(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function normalizeSecureUrl(value: unknown): string | null {
-  const raw = trimNonEmpty(value);
-  if (raw === null) {
-    return null;
-  }
-  try {
-    const url = new URL(raw);
-    return url.protocol === "https:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
-export function resolveCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig?.extra) {
+export function resolveCloudPublicConfig(_extra: ExpoExtra = undefined): CloudPublicConfig {
   return {
-    clerk: {
-      publishableKey: trimNonEmpty(extra?.clerk?.publishableKey),
-      jwtTemplate: trimNonEmpty(extra?.clerk?.jwtTemplate),
-    },
-    relay: {
-      url: normalizeSecureRelayUrl(trimNonEmpty(extra?.relay?.url) ?? ""),
-    },
-    observability: {
-      tracesUrl: normalizeSecureUrl(extra?.observability?.tracesUrl),
-      tracesDataset: trimNonEmpty(extra?.observability?.tracesDataset),
-      tracesToken: trimNonEmpty(extra?.observability?.tracesToken),
-    },
-  } satisfies CloudPublicConfig;
+    clerk: { publishableKey: null, jwtTemplate: null },
+    relay: { url: null },
+    observability: { tracesUrl: null, tracesDataset: null, tracesToken: null },
+  };
 }
 
 export function hasCloudPublicConfig(): boolean {
@@ -87,19 +59,15 @@ type TracingPublicConfig = Omit<CloudPublicConfig, "observability"> & {
 };
 
 export function hasTracingPublicConfig(
-  config: CloudPublicConfig = resolveCloudPublicConfig(),
-): config is TracingPublicConfig {
-  return Boolean(
-    config.observability.tracesUrl &&
-    config.observability.tracesDataset &&
-    config.observability.tracesToken,
-  );
+  _config: CloudPublicConfig = resolveCloudPublicConfig(),
+): _config is TracingPublicConfig {
+  return false;
 }
 
 export function resolveRelayClerkTokenOptions() {
   const { jwtTemplate } = resolveCloudPublicConfig().clerk;
   if (!jwtTemplate) {
-    throw new CloudPublicConfigMissingError({ key: "T3CODE_CLERK_JWT_TEMPLATE" });
+    throw new CloudPublicConfigMissingError({ key: "STARK_CODE_CLERK_JWT_TEMPLATE" });
   }
   return relayClerkTokenOptions(jwtTemplate);
 }

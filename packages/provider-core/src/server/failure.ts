@@ -9,7 +9,7 @@ import type {
   ProviderTurnId,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Cause from "effect/Cause";
 
@@ -49,7 +49,7 @@ function causeMessage(cause: unknown): string | undefined {
         case "ClaudeBackgroundWorkBlocksQueryReplacementError":
           return stringField(cause, "message");
         case "ContextHandoffDeliveryUncertainError":
-          return "T3 could not confirm whether conversation history reached the provider. Retry the turn to recover the session.";
+          return "Stark could not confirm whether conversation history reached the provider. Retry the turn to recover the session.";
         case "ProviderAdapterTurnStartError":
           message =
             "The provider could not start this turn. Retry the turn; if it keeps failing, check the provider setup and server logs.";

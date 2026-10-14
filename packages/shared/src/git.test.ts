@@ -1,5 +1,5 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
-import type { VcsStatusRemoteResult, VcsStatusResult } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@starkfuture/contracts";
+import type { VcsStatusRemoteResult, VcsStatusResult } from "@starkfuture/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -18,23 +18,23 @@ import {
 
 describe("normalizeGitRemoteUrl", () => {
   it("canonicalizes equivalent GitHub remotes across protocol variants", () => {
-    expect(normalizeGitRemoteUrl("git@github.com:T3Tools/T3Code.git")).toBe(
-      "github.com/t3tools/t3code",
+    expect(normalizeGitRemoteUrl("git@github.com:StarkFuture/StarkCode.git")).toBe(
+      "github.com/starkfuture/starkcode",
     );
-    expect(normalizeGitRemoteUrl("https://github.com/T3Tools/T3Code.git")).toBe(
-      "github.com/t3tools/t3code",
+    expect(normalizeGitRemoteUrl("https://github.com/StarkFuture/StarkCode.git")).toBe(
+      "github.com/starkfuture/starkcode",
     );
-    expect(normalizeGitRemoteUrl("ssh://git@github.com/T3Tools/T3Code")).toBe(
-      "github.com/t3tools/t3code",
+    expect(normalizeGitRemoteUrl("ssh://git@github.com/StarkFuture/StarkCode")).toBe(
+      "github.com/starkfuture/starkcode",
     );
   });
 
   it("preserves nested group paths for providers like GitLab", () => {
-    expect(normalizeGitRemoteUrl("git@gitlab.com:T3Tools/platform/T3Code.git")).toBe(
-      "gitlab.com/t3tools/platform/t3code",
+    expect(normalizeGitRemoteUrl("git@gitlab.com:StarkFuture/platform/StarkCode.git")).toBe(
+      "gitlab.com/starkfuture/platform/starkcode",
     );
-    expect(normalizeGitRemoteUrl("https://gitlab.com/T3Tools/platform/T3Code.git")).toBe(
-      "gitlab.com/t3tools/platform/t3code",
+    expect(normalizeGitRemoteUrl("https://gitlab.com/StarkFuture/platform/StarkCode.git")).toBe(
+      "gitlab.com/starkfuture/platform/starkcode",
     );
   });
 
@@ -57,34 +57,38 @@ describe("normalizeGitRemoteUrl", () => {
   });
 
   it("gives an Azure DevOps repository the same key over SSH as over HTTPS", () => {
-    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v3/T3Tools/Platform/T3Code")).toBe(
-      "dev.azure.com/t3tools/platform/_git/t3code",
-    );
-    expect(normalizeGitRemoteUrl("ssh://git@ssh.dev.azure.com:22/v3/T3Tools/Platform/T3Code")).toBe(
-      "dev.azure.com/t3tools/platform/_git/t3code",
+    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v3/StarkFuture/Platform/StarkCode")).toBe(
+      "dev.azure.com/starkfuture/platform/_git/starkcode",
     );
     expect(
-      normalizeGitRemoteUrl("https://T3Tools@dev.azure.com/T3Tools/Platform/_git/T3Code"),
-    ).toBe("dev.azure.com/t3tools/platform/_git/t3code");
+      normalizeGitRemoteUrl("ssh://git@ssh.dev.azure.com:22/v3/StarkFuture/Platform/StarkCode"),
+    ).toBe("dev.azure.com/starkfuture/platform/_git/starkcode");
+    expect(
+      normalizeGitRemoteUrl(
+        "https://StarkFuture@dev.azure.com/StarkFuture/Platform/_git/StarkCode",
+      ),
+    ).toBe("dev.azure.com/starkfuture/platform/_git/starkcode");
   });
 
   it("puts the organization back in the host on the name dev.azure.com replaced", () => {
     expect(
-      normalizeGitRemoteUrl("T3Tools@vs-ssh.visualstudio.com:v3/T3Tools/Platform/T3Code"),
-    ).toBe("t3tools.visualstudio.com/platform/_git/t3code");
-    expect(normalizeGitRemoteUrl("https://T3Tools.visualstudio.com/Platform/_git/T3Code")).toBe(
-      "t3tools.visualstudio.com/platform/_git/t3code",
-    );
+      normalizeGitRemoteUrl(
+        "StarkFuture@vs-ssh.visualstudio.com:v3/StarkFuture/Platform/StarkCode",
+      ),
+    ).toBe("starkfuture.visualstudio.com/platform/_git/starkcode");
+    expect(
+      normalizeGitRemoteUrl("https://StarkFuture.visualstudio.com/Platform/_git/StarkCode"),
+    ).toBe("starkfuture.visualstudio.com/platform/_git/starkcode");
   });
 
   it("leaves an Azure SSH host it cannot read as the path it was given", () => {
     // Not `v3`, and not four segments: rewriting either would invent a repository that the web
     // spelling has no name for, so the remote stands as it arrived.
-    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v4/T3Tools/Platform/T3Code")).toBe(
-      "ssh.dev.azure.com/v4/t3tools/platform/t3code",
+    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v4/StarkFuture/Platform/StarkCode")).toBe(
+      "ssh.dev.azure.com/v4/starkfuture/platform/starkcode",
     );
-    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v3/T3Tools/T3Code")).toBe(
-      "ssh.dev.azure.com/v3/t3tools/t3code",
+    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v3/StarkFuture/StarkCode")).toBe(
+      "ssh.dev.azure.com/v3/starkfuture/starkcode",
     );
   });
 });
@@ -97,12 +101,12 @@ describe("parseOriginUrlFromGitConfig", () => {
       '[remote "upstream"]',
       "\turl = https://github.com/other/repo.git",
       '[remote "origin"]',
-      "\turl = git@github.com:pingdotgg/t3code.git",
+      "\turl = git@github.com:example/stark-code.git",
       "\tfetch = +refs/heads/*:refs/remotes/origin/*",
       '[branch "main"]',
       "\tremote = origin",
     ].join("\n");
-    expect(parseOriginUrlFromGitConfig(config)).toBe("git@github.com:pingdotgg/t3code.git");
+    expect(parseOriginUrlFromGitConfig(config)).toBe("git@github.com:example/stark-code.git");
   });
 
   it("strips inline comments and quotes from the url value", () => {
@@ -158,14 +162,16 @@ describe("parseOriginUrlFromGitConfig", () => {
 describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
   it("extracts the owner and repository from common GitHub remote shapes", () => {
     expect(
-      parseGitHubRepositoryNameWithOwnerFromRemoteUrl("git@github.com:T3Tools/T3Code.git"),
-    ).toBe("T3Tools/T3Code");
+      parseGitHubRepositoryNameWithOwnerFromRemoteUrl("git@github.com:StarkFuture/StarkCode.git"),
+    ).toBe("StarkFuture/StarkCode");
     expect(
-      parseGitHubRepositoryNameWithOwnerFromRemoteUrl("https://github.com/T3Tools/T3Code.git"),
-    ).toBe("T3Tools/T3Code");
+      parseGitHubRepositoryNameWithOwnerFromRemoteUrl(
+        "https://github.com/StarkFuture/StarkCode.git",
+      ),
+    ).toBe("StarkFuture/StarkCode");
     expect(
-      parseGitHubRepositoryNameWithOwnerFromRemoteUrl("ssh://github.com/T3Tools/T3Code.git"),
-    ).toBe("T3Tools/T3Code");
+      parseGitHubRepositoryNameWithOwnerFromRemoteUrl("ssh://github.com/StarkFuture/StarkCode.git"),
+    ).toBe("StarkFuture/StarkCode");
   });
 });
 
@@ -193,10 +199,10 @@ describe("isTemporaryWorktreeBranch", () => {
     );
   });
 
-  it("matches legacy t3code temporary worktree refs", () => {
-    expect(isTemporaryWorktreeBranch("t3code/deadbeef")).toBe(true);
-    expect(isTemporaryWorktreeBranch("t3code-deadbeef")).toBe(true);
-    expect(isTemporaryWorktreeBranch("t3code/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12")).toBe(true);
+  it("matches legacy starkcode temporary worktree refs", () => {
+    expect(isTemporaryWorktreeBranch("starkcode/deadbeef")).toBe(true);
+    expect(isTemporaryWorktreeBranch("starkcode-deadbeef")).toBe(true);
+    expect(isTemporaryWorktreeBranch("starkcode/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12")).toBe(true);
     expect(
       isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12`),
     ).toBe(false);
@@ -204,24 +210,24 @@ describe("isTemporaryWorktreeBranch", () => {
 
   it("rejects UUID-shaped refs that are not RFC 4122 v4", () => {
     // version nibble is not 4
-    expect(isTemporaryWorktreeBranch("t3code/f4ae4e0e-f971-1d48-b4f2-9cf0aa54ab12")).toBe(false);
+    expect(isTemporaryWorktreeBranch("starkcode/f4ae4e0e-f971-1d48-b4f2-9cf0aa54ab12")).toBe(false);
     // variant nibble is not [89ab]
-    expect(isTemporaryWorktreeBranch("t3code/f4ae4e0e-f971-4d48-c4f2-9cf0aa54ab12")).toBe(false);
+    expect(isTemporaryWorktreeBranch("starkcode/f4ae4e0e-f971-4d48-c4f2-9cf0aa54ab12")).toBe(false);
   });
 
-  it("matches the flat fallback used when a plain t3 branch exists", () => {
+  it("matches the flat fallback used when a plain stark branch exists", () => {
     const flat = flattenTemporaryWorktreeBranchName(`${WORKTREE_BRANCH_PREFIX}/deadbeef`);
     expect(flat).toBe(`${WORKTREE_BRANCH_PREFIX}-deadbeef`);
     expect(isTemporaryWorktreeBranch(flat)).toBe(true);
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}-deadbeef-extra`)).toBe(false);
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}-feature`)).toBe(false);
-    expect(flattenTemporaryWorktreeBranchName("t3code/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12")).toBe(
-      `${WORKTREE_BRANCH_PREFIX}-f4ae4e0e`,
-    );
-    expect(flattenTemporaryWorktreeBranchName("t3code-deadbeef")).toBe(
+    expect(
+      flattenTemporaryWorktreeBranchName("starkcode/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12"),
+    ).toBe(`${WORKTREE_BRANCH_PREFIX}-f4ae4e0e`);
+    expect(flattenTemporaryWorktreeBranchName("starkcode-deadbeef")).toBe(
       `${WORKTREE_BRANCH_PREFIX}-deadbeef`,
     );
-    expect(flattenTemporaryWorktreeBranchName("t3code/deadbeef")).toBe(
+    expect(flattenTemporaryWorktreeBranchName("starkcode/deadbeef")).toBe(
       `${WORKTREE_BRANCH_PREFIX}-deadbeef`,
     );
   });
@@ -350,10 +356,10 @@ describe("resolveAutoFeatureBranchName", () => {
 });
 
 describe("formatGeneratedBranchName", () => {
-  it.each(["t3code", "t3code/"])("joins static prefix %s with one slash", (prefix) => {
+  it.each(["starkcode", "starkcode/"])("joins static prefix %s with one slash", (prefix) => {
     expect(
       formatGeneratedBranchName("Add Search", { mode: "static", prefix, instructions: "" }),
-    ).toBe("t3code/add-search");
+    ).toBe("starkcode/add-search");
   });
   it("supports an empty prefix and preserves user prefix casing", () => {
     expect(
@@ -381,7 +387,7 @@ describe("formatGeneratedBranchName", () => {
     expect(
       formatGeneratedBranchName("feat/Add Search", {
         mode: "semantic",
-        prefix: "t3code",
+        prefix: "starkcode",
         instructions: "",
       }),
     ).toBe("feat/add-search");

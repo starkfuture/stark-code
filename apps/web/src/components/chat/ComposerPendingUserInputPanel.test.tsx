@@ -1,4 +1,4 @@
-import { EnvironmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, RuntimeRequestId, ThreadId } from "@starkfuture/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -74,7 +74,7 @@ describe("ComposerPendingUserInputPanel", () => {
   });
 
   it("links URLs in the question text", () => {
-    const url = "https://accounts.t3.codes/device?user_code=RTJS-TQGS";
+    const url = "https://accounts.unconfigured.invalid/device?user_code=RTJS-TQGS";
     const question = prompt.questions[0]!;
     const markup = renderPanel({
       ...prompt,

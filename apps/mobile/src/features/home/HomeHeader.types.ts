@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@starkfuture/contracts";
 import type {
   HomeListFilterMenuEnvironment,
   HomeListFilterMenuProject,

@@ -6,7 +6,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -48,23 +48,23 @@ describe("ThreadPullRequestServiceV2 project guard", () => {
           resolve: (root) => {
             resolvedRoot = root;
             return Effect.succeed({
-              canonicalKey: "github.com/pingdotgg/t3code",
+              canonicalKey: "github.com/example/stark-code",
               locator: {
                 source: "git-remote" as const,
                 remoteName: "origin",
-                remoteUrl: "git@github.com:pingdotgg/t3code.git",
+                remoteUrl: "git@github.com:example/stark-code.git",
               },
               provider: "github" as const,
-              displayName: "pingdotgg/t3code",
-              owner: "pingdotgg",
-              name: "t3code",
+              displayName: "example/stark-code",
+              owner: "example",
+              name: "starkcode",
             });
           },
         },
       );
       expect(resolvedRoot).toBe("/workspace/project");
-      expect(result.repository).toBe("pingdotgg/t3code");
-      expect(result.project.repositoryIdentity?.canonicalKey).toBe("github.com/pingdotgg/t3code");
+      expect(result.repository).toBe("example/stark-code");
+      expect(result.project.repositoryIdentity?.canonicalKey).toBe("github.com/example/stark-code");
     }),
   );
 

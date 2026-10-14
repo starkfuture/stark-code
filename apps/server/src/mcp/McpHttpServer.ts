@@ -13,7 +13,7 @@ import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { AiError, McpProtocol, McpSchema, McpServer, Tool, type Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { OrchestratorMcpFailure, PreviewAutomationError } from "@t3tools/contracts";
+import { OrchestratorMcpFailure, PreviewAutomationError } from "@starkfuture/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -66,7 +66,7 @@ const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
   );
 
 /**
- * Agents T3 Code launched carry a registry token and must never be sent into
+ * Agents Stark Code launched carry a registry token and must never be sent into
  * an OAuth flow when it dies: they cannot open a browser, and a sign-in
  * would mint a credential that outlives their session. Only a request that
  * does not look like a provider token is pointed at the OAuth metadata.
@@ -91,7 +91,7 @@ const unauthorized = (input: {
   return HttpServerResponse.jsonUnsafe(
     {
       error: "invalid_mcp_credential",
-      message: "A valid T3 Code MCP credential is required.",
+      message: "A valid Stark Code MCP credential is required.",
     },
     {
       status: 401,
@@ -105,7 +105,7 @@ const unauthorized = (input: {
 
 /**
  * Resolves a bearer token that is not a provider-session token: an OAuth
- * client signed in from outside T3. Undefined when the token is not one.
+ * client signed in from outside Stark. Undefined when the token is not one.
  */
 export class McpClientAuthenticator extends Context.Service<
   McpClientAuthenticator,
@@ -114,7 +114,7 @@ export class McpClientAuthenticator extends Context.Service<
       request: HttpServerRequest.HttpServerRequest,
     ) => Effect.Effect<McpInvocationContext.McpInvocationScope | undefined>;
   }
->()("t3/mcp/McpHttpServer/McpClientAuthenticator") {}
+>()("stark-code/mcp/McpHttpServer/McpClientAuthenticator") {}
 
 type AuthenticatedHttpEffect = Effect.Effect<
   HttpServerResponse.HttpServerResponse,
@@ -162,7 +162,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         : undefined);
     if (!invocation) {
       // Without this the only symptom of a dead credential is the agent
-      // quietly losing the whole `t3-code` toolkit for the rest of its
+      // quietly losing the whole `stark-code` toolkit for the rest of its
       // session, with nothing on the server to explain why.
       yield* Effect.logWarning("rejected MCP request with an unusable credential", {
         reason: token.length === 0 ? "missing_bearer_token" : "unknown_or_expired_token",
@@ -859,7 +859,7 @@ export const layerDeviceToolkit = Layer.mergeAll(
 );
 
 export const layerMcpTransport = McpServer.layerHttp({
-  name: "T3 Code",
+  name: "Stark Code",
   version: packageJson.version,
   path: "/mcp",
   protocols: [McpProtocol.v2025_06_18],

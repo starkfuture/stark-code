@@ -18,7 +18,7 @@ import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import * as HttpApiScalar from "effect/http-api/HttpApiScalar";
 
-import { RelayApi } from "@t3tools/contracts/relay";
+import { RelayApi } from "@starkfuture/contracts/relay";
 
 import {
   RELAY_HTTP_ROUTER_CONFIG,
@@ -484,7 +484,7 @@ export const layer = Api.make(
           Layer.unwrap(
             Effect.map(RelayObservability, (observability) =>
               Axiom.Telemetry({
-                serviceName: "t3code-relay",
+                serviceName: "starkcode-relay",
                 token: observability.workerIngestToken,
                 traces: observability.traces,
               }),

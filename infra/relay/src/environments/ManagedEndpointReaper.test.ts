@@ -13,7 +13,7 @@ import * as ManagedEndpointReaper from "./ManagedEndpointReaper.ts";
 
 const NOW = "2026-08-25T12:00:00.000Z";
 const NOW_MILLIS = DateTime.makeUnsafe(NOW).epochMilliseconds;
-const PREFIX = "t3coderelay-managedendpoint-prod-";
+const PREFIX = "starkcoderelay-managedendpoint-prod-";
 
 function tunnel(input: {
   readonly id: string;
@@ -230,12 +230,12 @@ function harness(input?: {
       teamId: "team-id",
       keyId: "key-id",
       privateKey: Redacted.make("private-key"),
-      bundleId: "com.t3tools.t3code.dev",
+      bundleId: "com.starkfuture.starkcode.dev",
     },
     apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
     clerkSecretKey: Redacted.make("clerk-secret"),
     clerkPublishableKey: "pk_test_test",
-    clerkJwtAudience: "t3-code-relay",
+    clerkJwtAudience: "stark-code-relay",
     cloudMintPrivateKey: Redacted.make("cloud-private-key"),
     cloudMintPublicKey: "cloud-public-key",
     managedEndpointBaseDomain: "example.test",
@@ -603,7 +603,7 @@ describe("ManagedEndpointReaper", () => {
       ({ stage, expected }) => {
         const stageLegacyTunnels = legacyTunnels.map((entry) => ({
           ...entry,
-          name: entry.name!.replace(PREFIX, `t3coderelay-managedendpoint-${stage}-`),
+          name: entry.name!.replace(PREFIX, `starkcoderelay-managedendpoint-${stage}-`),
         }));
         const state = harness({
           namespace: stage,

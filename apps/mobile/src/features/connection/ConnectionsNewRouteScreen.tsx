@@ -9,7 +9,7 @@ import {
   useRoute,
   type StaticScreenProps,
 } from "@react-navigation/native";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@starkfuture/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Linking, Pressable, StyleSheet, View } from "react-native";
@@ -233,7 +233,9 @@ export function ConnectionsNewRouteScreen({
           />
 
           <View collapsable={false} className="gap-2">
-            <Text className="px-4 text-sm font-t3-medium text-foreground-muted">Or enter it</Text>
+            <Text className="px-4 text-sm font-stark-medium text-foreground-muted">
+              Or enter it
+            </Text>
             <View
               collapsable={false}
               className={cn(
@@ -272,7 +274,7 @@ export function ConnectionsNewRouteScreen({
             </Text>
           </View>
 
-          {hasCloudPublicConfig() ? <T3ConnectSection /> : null}
+          {hasCloudPublicConfig() ? <StarkConnectSection /> : null}
         </View>
       </ScrollView>
     </SettingsScreen>
@@ -361,7 +363,10 @@ function PairingScanCard(props: {
                 weight="light"
               />
               <Text
-                className={cn("font-t3-medium text-sm", light ? "text-black/70" : "text-white/80")}
+                className={cn(
+                  "font-stark-medium text-sm",
+                  light ? "text-black/70" : "text-white/80",
+                )}
               >
                 Tap to scan
               </Text>
@@ -369,7 +374,7 @@ function PairingScanCard(props: {
           )}
         </View>
         <Text className={cn("text-center text-sm", light ? "text-black/70" : "text-white/80")}>
-          Scan the code from t3 pair or desktop Connections settings
+          Scan the code from stark-code pair or desktop Connections settings
         </Text>
       </View>
     </Pressable>
@@ -379,9 +384,9 @@ function PairingScanCard(props: {
 /**
  * Managed-relay alternative to manual pairing: signed in, the account's
  * published environments connect with a switch; signed out, one row opens the
- * T3 Account sheet.
+ * Stark Account sheet.
  */
-function T3ConnectSection() {
+function StarkConnectSection() {
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const navigation = useNavigation();
   const { connectedEnvironments, onSetEnvironmentEnabled, onRemoveEnvironmentPress } =
@@ -393,7 +398,7 @@ function T3ConnectSection() {
 
   return (
     <View collapsable={false} className="gap-2">
-      <Text className="px-4 text-sm font-t3-medium text-foreground-muted">
+      <Text className="px-4 text-sm font-stark-medium text-foreground-muted">
         Or use the managed relay
       </Text>
       {isSignedIn ? (
@@ -411,7 +416,7 @@ function T3ConnectSection() {
           className="min-h-13 flex-row items-center gap-3 rounded-[26px] border-continuous bg-grouped-card px-4 active:opacity-70"
         >
           <View className="min-w-0 flex-1 py-3">
-            <Text className="text-base text-foreground">Sign in to T3 Connect</Text>
+            <Text className="text-base text-foreground">Sign in to Stark Connect</Text>
             <Text className="text-sm text-foreground-muted">
               Reach your machines from anywhere, no network setup.
             </Text>

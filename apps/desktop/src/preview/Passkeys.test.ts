@@ -64,7 +64,7 @@ const makeGuest = (origin = "https://accounts.example.com") => {
   return { guest: guest as unknown as Electron.WebContents, mainFrame, handlers, state, call };
 };
 
-const bridgeLayer = layerFor({ t3codeWebAuthn: { browserPasskeys: true } });
+const bridgeLayer = layerFor({ starkcodeWebAuthn: { browserPasskeys: true } });
 
 /** CBOR `{ fmt: "packed", attStmt: { alg: -7, sig }, authData }`, as authenticators encode it. */
 const attestationObject = (authData: ReadonlyArray<number>) => {
@@ -300,8 +300,8 @@ describe("PreviewPasskeys", () => {
       const entitled = yield* PreviewPasskeys.PreviewPasskeys.pipe(
         Effect.provide(
           layerFor({
-            t3codeWebAuthn: {
-              touchIdKeychainAccessGroup: "ABC1234567.com.t3tools.t3code.webauthn",
+            starkcodeWebAuthn: {
+              touchIdKeychainAccessGroup: "ABC1234567.com.starkfuture.starkcode.webauthn",
               browserPasskeys: false,
             },
           }),
@@ -309,7 +309,7 @@ describe("PreviewPasskeys", () => {
       );
       yield* entitled.configure;
       assert.deepStrictEqual(electron.configureWebAuthn.mock.calls, [
-        [{ touchID: { keychainAccessGroup: "ABC1234567.com.t3tools.t3code.webauthn" } }],
+        [{ touchID: { keychainAccessGroup: "ABC1234567.com.starkfuture.starkcode.webauthn" } }],
       ]);
       assert.isFalse(entitled.bridgeEnabled);
       const { guest, handlers } = makeGuest();
@@ -319,7 +319,7 @@ describe("PreviewPasskeys", () => {
       const unpackaged = yield* PreviewPasskeys.PreviewPasskeys.pipe(
         Effect.provide(
           layerFor(
-            { t3codeWebAuthn: { touchIdKeychainAccessGroup: "X", browserPasskeys: true } },
+            { starkcodeWebAuthn: { touchIdKeychainAccessGroup: "X", browserPasskeys: true } },
             false,
           ),
         ),

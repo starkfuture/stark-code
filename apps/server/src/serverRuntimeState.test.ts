@@ -31,7 +31,7 @@ describe("server ownership", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-race-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "stark-owner-race-" });
       const statePath = path.join(root, "server-runtime.json");
       const attempts = yield* Effect.all(
         [
@@ -50,7 +50,7 @@ describe("server ownership", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "stark-owner-" });
       const statePath = path.join(root, "server-runtime.json");
       const state = yield* makeState;
       yield* Effect.scoped(
@@ -74,7 +74,7 @@ describe("server ownership", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-legacy-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "stark-owner-legacy-" });
       const statePath = path.join(root, "server-runtime.json");
       const state = yield* makeState;
       yield* ServerRuntimeState.persistServerRuntimeState({
@@ -98,7 +98,7 @@ describe("server ownership", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-cleanup-" });
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "stark-owner-cleanup-" });
       const statePath = path.join(root, "server-runtime.json");
       const state = yield* makeState;
       yield* Effect.scoped(
@@ -123,7 +123,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "stark-server-runtime-state-test-",
       });
       const statePath = path.join(root, "runtime", "server.json");
       const state: ServerRuntimeState.PersistedServerRuntimeState = {
@@ -185,7 +185,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "stark-server-runtime-state-test-",
       });
 
       const restored = yield* ServerRuntimeState.readPersistedServerRuntimeState(
@@ -209,7 +209,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "stark-server-runtime-state-test-",
       });
       const statePath = path.join(root, "server.json");
       yield* fileSystem.writeFileString(statePath, "{not json");
@@ -246,7 +246,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "stark-server-runtime-state-test-",
       });
       const statePath = path.join(root, "server.json");
       yield* fileSystem.makeDirectory(statePath);
@@ -275,7 +275,7 @@ describe("serverRuntimeState", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-runtime-state-test-",
+        prefix: "stark-server-runtime-state-test-",
       });
       const blockedDirectory = path.join(root, "not-a-directory");
       const statePath = path.join(blockedDirectory, "server.json");

@@ -1,7 +1,7 @@
 import {
   COMPOSER_CONTEXT_REVIEW_DIFF_MAX_CHARS,
   COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import type {
   ComposerContextId,
   ComposerContextRecord,
@@ -18,13 +18,13 @@ import type {
   TerminalContextRecord,
   ThreadContextRecord,
   ThreadId,
-} from "@t3tools/contracts";
-import { upgradeLegacyContextMessage } from "@t3tools/shared/composerContextLegacy";
-import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+} from "@starkfuture/contracts";
+import { upgradeLegacyContextMessage } from "@starkfuture/shared/composerContextLegacy";
+import { encodeComposerContextFragment } from "@starkfuture/shared/composerContextClipboard";
 import {
   collectComposerContextReferences,
   sanitizeComposerContextLabel,
-} from "@t3tools/shared/composerContextReferences";
+} from "@starkfuture/shared/composerContextReferences";
 
 import {
   type ComposerContextReference,

@@ -1,4 +1,4 @@
-import type { PreviewAutomationControlReason } from "@t3tools/contracts";
+import type { PreviewAutomationControlReason } from "@starkfuture/contracts";
 
 export class BrowserControlInterrupted extends Error {
   readonly reason: PreviewAutomationControlReason;

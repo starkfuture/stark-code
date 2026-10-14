@@ -1,5 +1,5 @@
-import { splitThreadSearchText } from "@t3tools/shared/threadSearch";
-import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
+import { splitThreadSearchText } from "@starkfuture/shared/threadSearch";
+import type { EnvironmentThreadSearchMatch } from "@starkfuture/client-runtime/state/thread-search";
 
 import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
@@ -27,7 +27,7 @@ export function ThreadSearchMatchExcerpt(props: {
     >
       <Text
         className={cn(
-          props.compact ? "text-sm font-t3-medium" : "text-xs font-t3-medium",
+          props.compact ? "text-sm font-stark-medium" : "text-xs font-stark-medium",
           props.selected
             ? "text-thread-selected-foreground"
             : isUser
@@ -43,7 +43,7 @@ export function ThreadSearchMatchExcerpt(props: {
         <Text
           className={cn(
             props.compact ? "text-sm" : "text-xs",
-            part.highlighted && "font-t3-bold",
+            part.highlighted && "font-stark-bold",
             props.selected
               ? "text-thread-selected-foreground"
               : part.highlighted

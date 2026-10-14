@@ -1,14 +1,14 @@
 import {
   classifyMarkdownImageSource,
   markdownImageSourceFragment,
-} from "@t3tools/client-runtime/markdown-images";
-import { splitFilePathPosition } from "@t3tools/shared/fileLinks";
+} from "@starkfuture/client-runtime/markdown-images";
+import { splitFilePathPosition } from "@starkfuture/shared/fileLinks";
 import {
   mediaFileReference,
   mediaUrlReference,
   mediaReferenceFileName,
-} from "@t3tools/client-runtime/media-reference";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+} from "@starkfuture/client-runtime/media-reference";
+import type { EnvironmentId, ThreadId } from "@starkfuture/contracts";
 import { normalizeNativeMarkdownUrl } from "./markdownLinks";
 import { resolveMobileMarkdownMediaSource } from "./markdownMediaSource";
 

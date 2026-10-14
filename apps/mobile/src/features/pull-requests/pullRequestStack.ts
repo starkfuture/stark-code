@@ -1,4 +1,8 @@
-import type { PullRequestRef, PullRequestStack, ThreadPullRequestLink } from "@t3tools/contracts";
+import type {
+  PullRequestRef,
+  PullRequestStack,
+  ThreadPullRequestLink,
+} from "@starkfuture/contracts";
 
 /** A stack merge includes the unmerged layers up to the selected PR, in host order. */
 export function pullRequestStackMerge(stack: PullRequestStack, number: number) {

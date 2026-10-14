@@ -1,5 +1,5 @@
-import { BRAND } from "@t3tools/shared/branding";
-import type { RuntimeMode } from "@t3tools/contracts";
+import { BRAND } from "@starkfuture/shared/branding";
+import type { RuntimeMode } from "@starkfuture/contracts";
 import { type LucideIcon, LockIcon, LockOpenIcon, PenLineIcon, SparklesIcon } from "lucide-react";
 
 export const runtimeModeConfig: Record<

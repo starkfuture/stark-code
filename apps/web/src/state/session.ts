@@ -1,11 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import { createEnvironmentSessionAtoms } from "@t3tools/client-runtime/state/session";
+import { createEnvironmentSessionAtoms } from "@starkfuture/client-runtime/state/session";
 import {
   type AuthEnvironmentScope,
   type AuthSessionState,
   type EnvironmentId,
   sessionGrantsScope,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import { useMemo } from "react";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";

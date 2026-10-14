@@ -2,7 +2,7 @@ import {
   ORCHESTRATION_CACHE_SCHEMA_VERSION,
   ORCHESTRATION_THREAD_CACHE_SCHEMA_VERSION,
   StoredOrchestrationShellSnapshot,
-} from "@t3tools/client-runtime/platform";
+} from "@starkfuture/client-runtime/platform";
 import {
   CommandId,
   EnvironmentId,
@@ -13,7 +13,7 @@ import {
   type OrchestrationV2ThreadDetailSnapshot,
   type ThreadPullRequestLink,
   type VcsListRefsResult,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -265,9 +265,9 @@ describe("mobile SQLite environment cache store", () => {
       );
       const link: ThreadPullRequestLink = {
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "example/stark-code",
         number: 42,
-        url: "https://github.com/pingdotgg/t3code/pull/42",
+        url: "https://github.com/example/stark-code/pull/42",
         source: "agent",
         linkedAt: "2026-07-29T12:00:00.000Z",
         snapshot: null,
@@ -299,9 +299,9 @@ describe("mobile SQLite environment cache store", () => {
       );
       const link: ThreadPullRequestLink = {
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "example/stark-code",
         number: 5,
-        url: "https://github.com/pingdotgg/t3code/pull/5",
+        url: "https://github.com/example/stark-code/pull/5",
         source: "agent",
         linkedAt: "2026-07-29T12:00:00.000Z",
         snapshot: null,

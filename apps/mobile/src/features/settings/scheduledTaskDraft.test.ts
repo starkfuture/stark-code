@@ -7,7 +7,7 @@ import {
   ProjectId,
   ScheduledTaskId,
   type ScheduledTask,
-} from "@t3tools/contracts";
+} from "@starkfuture/contracts";
 import {
   scheduledTaskDefaultModel,
   createDraft,

@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@starkfuture/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { ChildProcessSpawner } from "effect/process";
@@ -74,7 +74,7 @@ const withFakeSystemd = <A, E>(
   }) => Effect.Effect<A, E>,
 ) =>
   Effect.gen(function* () {
-    const bin = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-agent-scope-"));
+    const bin = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "stark-agent-scope-"));
     for (const name of ["systemd-run", "systemctl", "agent"]) {
       NodeFS.writeFileSync(NodePath.join(bin, name), "", { mode: 0o755 });
     }
@@ -117,7 +117,7 @@ const withFakeSystemd = <A, E>(
   }).pipe(
     Effect.scoped,
     Effect.provide(
-      ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-scope-" }).pipe(
+      ServerConfig.layerTest(process.cwd(), { prefix: "stark-agent-scope-" }).pipe(
         Layer.provideMerge(NodeServices.layer),
       ),
     ),
@@ -184,7 +184,7 @@ describe("AgentScope service", () => {
           name: "terminal",
           survivesRestart: true,
         });
-        expect(sliceOf(terminal)).toBe("app-t3code-agents.slice");
+        expect(sliceOf(terminal)).toBe("app-starkcode-agents.slice");
         // Only the first launch looks for leftovers.
         expect(calls.filter(([, verb]) => verb === "stop")).toHaveLength(1);
       }),

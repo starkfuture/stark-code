@@ -4,12 +4,12 @@ import {
   buildMenuItems,
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
-} from "@t3tools/client-runtime/state/vcs";
+} from "@starkfuture/client-runtime/state/vcs";
 import {
   resolveThreadPullRequestChains,
   threadPullRequestKeyOf,
-} from "@t3tools/shared/threadPullRequests";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+} from "@starkfuture/shared/threadPullRequests";
+import { EnvironmentId, ThreadId } from "@starkfuture/contracts";
 import {
   CommonActions,
   StackActions,
@@ -356,7 +356,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
 
       {linkedPrChains.length > 0 ? (
         <View className="gap-2">
-          <Text className="px-1 text-xs font-t3-bold text-foreground-muted">
+          <Text className="px-1 text-xs font-stark-bold text-foreground-muted">
             Linked pull requests
           </Text>
           {linkedPrChains.map((chain) => (
@@ -543,10 +543,10 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
               />
             </Pressable>
           )}
-          <Text className="text-xs font-t3-bold tracking-[1px] uppercase text-foreground-muted">
+          <Text className="text-xs font-stark-bold tracking-[1px] uppercase text-foreground-muted">
             Repository
           </Text>
-          <Text className="pr-10 text-xl font-t3-bold">{currentBranchLabel}</Text>
+          <Text className="pr-10 text-xl font-stark-bold">{currentBranchLabel}</Text>
           <Text className="text-foreground-secondary text-sm font-medium leading-normal">
             {currentStatusSummary}
           </Text>

@@ -13,6 +13,7 @@ import {
   NonNegativeInt,
   PositiveInt,
   ProjectId,
+  ProviderSessionId,
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
@@ -114,6 +115,12 @@ export const ServerProviderSlashCommand = Schema.Struct({
   name: TrimmedNonEmptyString,
   description: Schema.optional(TrimmedNonEmptyString),
   input: Schema.optional(ServerProviderSlashCommandInput),
+  source: Schema.optional(
+    Schema.Literals(["app", "builtin", "personal", "project", "plugin", "mcp"]),
+  ),
+  sourceName: Schema.optional(TrimmedNonEmptyString),
+  aliases: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  permissionWarning: Schema.optional(Schema.String),
 });
 export type ServerProviderSlashCommand = typeof ServerProviderSlashCommand.Type;
 
@@ -137,8 +144,140 @@ export const ServerProviderSkill = Schema.Struct({
    * only the agent can start it. Composers must not offer it under `/`.
    */
   userInvocable: Schema.optional(Schema.Boolean),
+  pluginName: Schema.optional(TrimmedNonEmptyString),
+  permissionWarning: Schema.optional(Schema.String),
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
+
+export const ServerProviderMcpSource = Schema.Literals([
+  "sdk",
+  "plugin",
+  "user",
+  "project",
+  "local",
+  "dynamic",
+  "managed",
+  "enterprise",
+  "claudeai",
+  "agent",
+]);
+export type ServerProviderMcpSource = typeof ServerProviderMcpSource.Type;
+
+export const ServerProviderSessionCatalog = Schema.Struct({
+  commands: Schema.Array(ServerProviderSlashCommand),
+  skills: Schema.Array(ServerProviderSkill),
+  mcpServers: Schema.Array(
+    Schema.Struct({
+      name: TrimmedNonEmptyString,
+      status: TrimmedNonEmptyString,
+      source: Schema.optional(ServerProviderMcpSource),
+    }),
+  ),
+  live: Schema.Boolean,
+  providerSessionId: Schema.optional(ProviderSessionId),
+});
+export type ServerProviderSessionCatalog = typeof ServerProviderSessionCatalog.Type;
+
+const ContextTokenRow = Schema.Struct({ name: Schema.String, tokens: NonNegativeInt });
+const ContextTurnTokens = Schema.Struct({
+  inputTokens: NonNegativeInt,
+  cachedInputTokens: NonNegativeInt,
+  outputTokens: NonNegativeInt,
+  reasoningTokens: NonNegativeInt,
+  modelContextWindow: Schema.optional(NonNegativeInt),
+});
+export const ProviderContextBreakdown = Schema.Struct({
+  provider: Schema.Literals(["claudeAgent", "codex"]),
+  kind: Schema.Literals(["breakdown", "tokens-only", "unavailable"]),
+  detail: Schema.Literals(["summary", "full"]),
+  categories: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      tokens: NonNegativeInt,
+      kind: Schema.Literals(["used", "free", "buffer", "deferred"]),
+      isDeferred: Schema.optional(Schema.Boolean),
+    }),
+  ),
+  totalTokens: NonNegativeInt,
+  maxTokens: NonNegativeInt,
+  rawMaxTokens: NonNegativeInt,
+  percentage: Schema.Number,
+  model: Schema.optional(Schema.String),
+  windowLabel: Schema.optional(
+    Schema.Literals(["limit", "compaction window", "context window per Claude Code"]),
+  ),
+  memoryFiles: Schema.Array(
+    Schema.Struct({ path: Schema.String, type: Schema.String, tokens: NonNegativeInt }),
+  ),
+  mcpTools: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      serverName: Schema.String,
+      tokens: NonNegativeInt,
+      isLoaded: Schema.optional(Schema.Boolean),
+    }),
+  ),
+  deferredBuiltinTools: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ name: Schema.String, tokens: NonNegativeInt, isLoaded: Schema.Boolean }),
+    ),
+  ),
+  systemTools: Schema.optional(Schema.Array(ContextTokenRow)),
+  systemPromptSections: Schema.optional(Schema.Array(ContextTokenRow)),
+  agents: Schema.Array(
+    Schema.Struct({ agentType: Schema.String, source: Schema.String, tokens: NonNegativeInt }),
+  ),
+  slashCommands: Schema.optional(
+    Schema.Struct({
+      totalCommands: NonNegativeInt,
+      includedCommands: NonNegativeInt,
+      tokens: NonNegativeInt,
+    }),
+  ),
+  skills: Schema.optional(
+    Schema.Struct({
+      totalSkills: NonNegativeInt,
+      includedSkills: NonNegativeInt,
+      tokens: NonNegativeInt,
+      skillFrontmatter: Schema.Array(
+        Schema.Struct({ name: Schema.String, source: Schema.String, tokens: NonNegativeInt }),
+      ),
+    }),
+  ),
+  autoCompactThreshold: Schema.optional(NonNegativeInt),
+  isAutoCompactEnabled: Schema.optional(Schema.Boolean),
+  messageBreakdown: Schema.optional(
+    Schema.Struct({
+      toolCallTokens: NonNegativeInt,
+      toolResultTokens: NonNegativeInt,
+      attachmentTokens: NonNegativeInt,
+      assistantMessageTokens: NonNegativeInt,
+      userMessageTokens: NonNegativeInt,
+      redirectedContextTokens: NonNegativeInt,
+      unattributedTokens: NonNegativeInt,
+      toolCallsByType: Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          callTokens: NonNegativeInt,
+          resultTokens: NonNegativeInt,
+        }),
+      ),
+      attachmentsByType: Schema.Array(ContextTokenRow),
+    }),
+  ),
+  apiUsage: Schema.NullOr(
+    Schema.Struct({
+      inputTokens: NonNegativeInt,
+      outputTokens: NonNegativeInt,
+      cacheCreationInputTokens: NonNegativeInt,
+      cacheReadInputTokens: NonNegativeInt,
+    }),
+  ),
+  lastTurn: Schema.optional(ContextTurnTokens),
+  threadTotals: Schema.optional(ContextTurnTokens),
+  message: Schema.optional(Schema.String),
+});
+export type ProviderContextBreakdown = typeof ProviderContextBreakdown.Type;
 
 export const ServerProviderWorkspaceSnapshot = Schema.Struct({
   cwd: TrimmedNonEmptyString,

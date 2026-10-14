@@ -81,6 +81,7 @@ import {
   DraftId,
 } from "./composerDraftStore";
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
+
 import { insertInlineContextReference } from "./lib/composerContextReferences";
 import { terminalContextReference, threadContextRecord } from "./lib/composerContextRecords";
 import {
@@ -90,6 +91,62 @@ import {
 } from "./lib/terminalContext";
 import { createDeferredStorage } from "./lib/storage";
 import { applyPreviewServerSnapshot, resetPreviewStateForTests } from "./previewStateStore";
+
+describe("shell command drafts", () => {
+  it("persists selected skill warnings per draft until their exact reference is removed", () => {
+    const target = scopeThreadRef(EnvironmentId.make("warning-env"), ThreadId.make("warning-a"));
+    const other = scopeThreadRef(EnvironmentId.make("warning-env"), ThreadId.make("warning-b"));
+    const store = useComposerDraftStore.getState();
+    const warning = { reference: "$deploy:ship", warning: "Tools can run without a Stark prompt." };
+    store.setPrompt(target, "$deploy:ship ", "human");
+    store.addProviderPermissionWarning(target, warning);
+    store.setPrompt(target, "$deploy:ship the preview", "human");
+    expect(store.getComposerDraft(target)?.providerPermissionWarnings).toEqual([warning]);
+    expect(store.getComposerDraft(other)?.providerPermissionWarnings).toBeUndefined();
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+    expect(
+      persisted.draftsByThreadKey[scopedThreadKey(target)]?.providerPermissionWarnings,
+    ).toEqual([warning]);
+    const merged = useComposerDraftStore.persist.getOptions().merge!(
+      persisted,
+      useComposerDraftStore.getState(),
+    ) as ReturnType<typeof useComposerDraftStore.getState>;
+    expect(merged.draftsByThreadKey[scopedThreadKey(target)]?.providerPermissionWarnings).toEqual([
+      warning,
+    ]);
+    store.setPrompt(target, "$deploy:ship-another", "human");
+    expect(store.getComposerDraft(target)?.providerPermissionWarnings).toBeUndefined();
+  });
+  it("persists mode per thread after sending and keeps code-restored prompts plain", () => {
+    const target = scopeThreadRef(EnvironmentId.make("shell-env"), ThreadId.make("shell-a"));
+    const other = scopeThreadRef(EnvironmentId.make("shell-env"), ThreadId.make("shell-b"));
+    const store = useComposerDraftStore.getState();
+    store.setShellCommandState(target, { shellMode: true, shellCommandRespond: false });
+    store.setPrompt(target, "pwd", "human");
+    store.clearComposerContent(target);
+    expect(store.getComposerDraft(target)).toMatchObject({
+      prompt: "",
+      shellMode: true,
+      shellCommandRespond: false,
+    });
+    expect(store.getComposerDraft(other)?.shellMode ?? false).toBe(false);
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+    expect(persisted.draftsByThreadKey[scopedThreadKey(target)]).toMatchObject({
+      shellMode: true,
+      shellCommandRespond: false,
+    });
+    const merge = useComposerDraftStore.persist.getOptions().merge!;
+    const hydrated = merge(persisted, useComposerDraftStore.getState()) as ReturnType<
+      typeof useComposerDraftStore.getState
+    >;
+    expect(hydrated.draftsByThreadKey[scopedThreadKey(target)]?.shellMode).toBe(true);
+    store.setPrompt(target, "!rm -rf example");
+    expect(store.getComposerDraft(target)).toMatchObject({
+      prompt: "!rm -rf example",
+      shellMode: false,
+    });
+  });
+});
 
 function makeImage(input: {
   id: string;
@@ -1320,7 +1377,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       branch: "feature/test",
       worktreePath: "/tmp/worktree-test",
       envMode: "worktree",
-      runtimeMode: "full-access",
+      runtimeMode: "approval-required",
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
@@ -1331,7 +1388,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       branch: "feature/test",
       worktreePath: "/tmp/worktree-test",
       envMode: "worktree",
-      runtimeMode: "full-access",
+      runtimeMode: "approval-required",
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
     });

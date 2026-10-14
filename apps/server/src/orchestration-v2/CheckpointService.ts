@@ -11,6 +11,10 @@ import {
 } from "@starkfuture/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as Option from "effect/Option";
+import { captureNativeFileStates } from "../checkpointing/NativeFileCheckpointRestore.ts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
@@ -116,6 +120,10 @@ export type CheckpointServiceV2Error = typeof CheckpointServiceV2Error.Type;
 const isCheckpointRestoreError = Schema.is(CheckpointRestoreError);
 
 export interface CheckpointServiceV2Shape {
+  readonly withWorkspaceLock: <A, E, R>(
+    cwd: string,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>;
   readonly prepareRootRunScope: (input: {
     readonly threadId: ThreadId;
     readonly runId: RunId;
@@ -142,6 +150,7 @@ export interface CheckpointServiceV2Shape {
     readonly ordinalWithinScope: number;
     readonly appRunOrdinal: number | null;
     readonly capturedAt: DateTime.Utc;
+    readonly agentWrittenPaths?: ReadonlyArray<string>;
   }) => Effect.Effect<OrchestrationV2Checkpoint, CheckpointServiceV2Error>;
   readonly restore: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
@@ -225,6 +234,8 @@ function makeCheckpoint(input: {
   readonly ref: CheckpointRef;
   readonly status: OrchestrationV2Checkpoint["status"];
   readonly files: OrchestrationV2Checkpoint["files"];
+  readonly agentWrittenPaths?: ReadonlyArray<string>;
+  readonly nativeFileStates?: OrchestrationV2Checkpoint["nativeFileStates"];
   readonly capturedAt: DateTime.Utc;
 }): OrchestrationV2Checkpoint {
   return {
@@ -239,6 +250,10 @@ function makeCheckpoint(input: {
     ref: input.ref,
     status: input.status,
     files: input.files,
+    ...(input.agentWrittenPaths === undefined
+      ? {}
+      : { agentWrittenPaths: input.agentWrittenPaths }),
+    ...(input.nativeFileStates === undefined ? {} : { nativeFileStates: input.nativeFileStates }),
     capturedAt: input.capturedAt,
   };
 }
@@ -252,6 +267,8 @@ export const layer: Layer.Layer<
   Effect.gen(function* () {
     const checkpointStore = yield* CheckpointStore.CheckpointStore;
     const crypto = yield* Crypto.Crypto;
+    const nativeFs = yield* Effect.serviceOption(FileSystem.FileSystem);
+    const nativePath = yield* Effect.serviceOption(Path.Path);
     const checkpointRefFor = (input: Parameters<typeof checkpointRefForScopeOrdinal>[0]) =>
       checkpointRefForScopeOrdinal(input).pipe(Effect.provideService(Crypto.Crypto, crypto));
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -379,6 +396,17 @@ export const layer: Layer.Layer<
           });
 
           if (!(yield* isGitCheckpointable(input.scope.cwd))) {
+            const nativeFileStates =
+              Option.isSome(nativeFs) && Option.isSome(nativePath)
+                ? yield* captureNativeFileStates(
+                    input.scope.cwd,
+                    input.agentWrittenPaths ?? [],
+                  ).pipe(
+                    Effect.provideService(FileSystem.FileSystem, nativeFs.value),
+                    Effect.provideService(Path.Path, nativePath.value),
+                    Effect.provideService(Crypto.Crypto, crypto),
+                  )
+                : undefined;
             return makeCheckpoint({
               id: checkpointId,
               scope: input.scope,
@@ -390,6 +418,8 @@ export const layer: Layer.Layer<
               ref: checkpointRef,
               status: "missing",
               files: [],
+              agentWrittenPaths: input.agentWrittenPaths ?? [],
+              ...(nativeFileStates === undefined ? {} : { nativeFileStates }),
               capturedAt: input.capturedAt,
             });
           }
@@ -496,6 +526,7 @@ export const layer: Layer.Layer<
             ref: checkpointRef,
             status: "ready",
             files,
+            agentWrittenPaths: input.agentWrittenPaths ?? [],
             capturedAt: input.capturedAt,
           });
         }),
@@ -565,6 +596,7 @@ export const layer: Layer.Layer<
       );
 
     return CheckpointServiceV2.of({
+      withWorkspaceLock,
       prepareRootRunScope: (input) =>
         makeRootRunScope({ ...input, idAllocator }).pipe(
           Effect.mapError(

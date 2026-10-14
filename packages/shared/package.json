@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./starkPages": {
+      "types": "./src/starkPages.ts",
+      "import": "./src/starkPages.ts"
+    },
     "./githubMarkdownLinks": {
       "types": "./src/githubMarkdownLinks.ts",
       "import": "./src/githubMarkdownLinks.ts"
@@ -490,6 +494,10 @@
     "./branding": {
       "types": "./src/branding.ts",
       "import": "./src/branding.ts"
+    },
+    "./nativeCodexLaunch": {
+      "types": "./src/nativeCodexLaunch.ts",
+      "import": "./src/nativeCodexLaunch.ts"
     },
     "./providerPrivacy": {
       "types": "./src/providerPrivacy.ts",

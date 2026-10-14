@@ -46,6 +46,17 @@ function scoreSlashCommandItem(item: SlashSearchItem, query: string): number | n
   const description = item.description.toLowerCase();
 
   const scores = [
+    ...(item.type === "provider-slash-command"
+      ? (item.command.aliases ?? []).map((alias) =>
+          scoreQueryMatch({
+            value: alias.toLowerCase(),
+            query,
+            exactBase: 1,
+            prefixBase: 3,
+            includesBase: 7,
+          }),
+        )
+      : []),
     scoreQueryMatch({
       value: primaryValue,
       query,

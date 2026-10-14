@@ -3954,7 +3954,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               WHERE thread_id = ${threadId} AND (
                 message_id IN (SELECT json_extract(payload_json, '$.userMessageId') FROM orchestration_v2_projection_runs
                   WHERE thread_id = ${threadId} AND run_id = ${runId})
-                OR (role = 'user' AND lower(trim(json_extract(payload_json, '$.text'), ${javascriptTrimWhitespace})) = '/compact')
+                OR (role = 'user' AND (lower(trim(json_extract(payload_json, '$.text'), ${javascriptTrimWhitespace})) = '/compact' OR json_type(payload_json, '$.userShell') = 'object'))
               ) ORDER BY created_at ASC, message_id ASC
             `.pipe(Effect.flatMap(decodeRows(decodeMessagePayload, threadId)));
             const conversation = yield* sql<{ present: number }>`
@@ -3962,6 +3962,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 SELECT 1 FROM orchestration_v2_projection_messages
                 WHERE thread_id = ${threadId} AND role = 'user'
                     AND (lower(trim(json_extract(payload_json, '$.text'), ${javascriptTrimWhitespace})) <> '/compact'
+                      OR json_type(payload_json, '$.userShell') = 'object'
                       OR json_array_length(payload_json, '$.attachments') > 0)
               ) AS present
             `;
@@ -6541,7 +6542,8 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             hasConversation: projection.messages.some(
               (message) =>
                 message.role === "user" &&
-                (message.text.trim().toLowerCase() !== "/compact" ||
+                (message.userShell !== undefined ||
+                  message.text.trim().toLowerCase() !== "/compact" ||
                   message.attachments.length > 0),
             ),
             turnItems: projection.turnItems.filter((item) => item.runId === runId),

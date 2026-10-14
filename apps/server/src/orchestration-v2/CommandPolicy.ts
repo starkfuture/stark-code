@@ -116,6 +116,17 @@ type MessageDispatchMode = Extract<
   { readonly type: "message.dispatch" }
 >["dispatchMode"];
 
+/** User shell commands always wait for an active run, irrespective of steering support. */
+export function resolveUserShellCommandDispatchIntent(
+  projection: Pick<OrchestrationV2ThreadProjection, "runs">,
+): { readonly type: "queue_after_active" } | { readonly type: "start_immediately" } {
+  return projection.runs.some((run) =>
+    ["preparing", "starting", "running", "waiting"].includes(run.status),
+  )
+    ? { type: "queue_after_active" }
+    : { type: "start_immediately" };
+}
+
 /** Resolve client intent from the state serialized by the thread dispatch lock. */
 export function resolveMessageDispatchIntent(
   projection: OrchestrationV2ThreadProjection,

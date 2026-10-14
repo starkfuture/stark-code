@@ -49,6 +49,7 @@ import {
   type MessageId,
   type WorktreeSetupSnapshot,
   type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2TurnItem,
   type RunAttemptId,
   RunId,
   type ThreadId,
@@ -134,7 +135,7 @@ function workEntryReadPaths(entry: WorkLogEntry, workspaceRoot: string | undefin
 }
 
 export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string | undefined) {
-  if (entry.itemType === "system_notice") return entry.label;
+  if (entry.itemType === "system_notice" || entry.itemType === "hook_run") return entry.label;
   if (entry.itemType === "reasoning" || entry.tone === "thinking") {
     const thought = entry.detail?.trim().replace(/\s+/g, " ");
     return thought || entry.label;
@@ -182,6 +183,53 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   }
   const heading = normalizeCompactToolLabel(entry.toolTitle || entry.label);
   return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
+}
+
+/** Successful hook activity stays off the normal transcript. Verbose folds per turn. */
+export function filterHookActivity(
+  entries: readonly TimelineEntry[],
+  verbose: boolean,
+): readonly TimelineEntry[] {
+  const hooks = new Map<string, Extract<OrchestrationV2TurnItem, { type: "hook_run" }>[]>();
+  if (verbose)
+    for (const entry of entries) {
+      const item = entry.kind === "work" ? entry.entry.projectedItem?.item : undefined;
+      if (item?.type !== "hook_run") continue;
+      const key = item.providerTurnId ?? item.runId ?? item.id;
+      const group = hooks.get(key) ?? [];
+      group.push(item);
+      hooks.set(key, group);
+    }
+  const seen = new Set<string>();
+  return entries.flatMap((entry): TimelineEntry[] => {
+    const item = entry.kind === "work" ? entry.entry.projectedItem?.item : undefined;
+    if (entry.kind !== "work" || item?.type !== "hook_run") return [entry];
+    if (!verbose) return item.level === "info" || item.outcome === "ran" ? [] : [entry];
+    const key = item.providerTurnId ?? item.runId ?? item.id;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const group = hooks.get(key) ?? [item];
+    const blocked = group.filter((hook) => hook.outcome === "blocked").length;
+    const summary = `Hooks: ${group.length} ran${blocked ? `, ${blocked} blocked` : ""}`;
+    const detail = group
+      .map(
+        (hook) =>
+          `${hook.eventName} · ${hook.hookName}${hook.source ? ` · ${hook.source}` : ""}${hook.durationMs === undefined ? "" : ` · ${Math.round(hook.durationMs)}ms`}\n${hook.summary}${hook.detail ? `\n${hook.detail}` : ""}`,
+      )
+      .join("\n\n");
+    const projectedItem = entry.entry.projectedItem!;
+    return [
+      {
+        ...entry,
+        entry: {
+          ...entry.entry,
+          label: summary,
+          structuredPayload: { ...item, summary, detail },
+          projectedItem: { ...projectedItem, item: { ...item, summary, detail } },
+        },
+      },
+    ];
+  });
 }
 
 /** The trimmed thread id a `stark_thread_read` call targets, or null for any other entry. */
@@ -774,7 +822,9 @@ function completeSupersededReplyEntryIds(
       entry.attempt?.status !== "superseded" ||
       (entry.kind === "message" && entry.message.role === "user") ||
       (entry.kind === "work" &&
-        (entry.entry.itemType === "system_notice" || entry.entry.itemType === "notification")) ||
+        (entry.entry.itemType === "system_notice" ||
+          entry.entry.itemType === "hook_run" ||
+          entry.entry.itemType === "notification")) ||
       (entry.kind !== "message" && entry.kind !== "work")
     ) {
       continue;
@@ -831,7 +881,8 @@ function deriveSupersededAttemptFolds(
       timelineEntryIsPersistentResourceCard(entry) ||
       // A steer supersedes the attempt but leaves its children running.
       liveSubagentEntryIds.has(entry.id) ||
-      (entry.kind === "work" && entry.entry.itemType === "system_notice")
+      (entry.kind === "work" &&
+        (entry.entry.itemType === "system_notice" || entry.entry.itemType === "hook_run"))
     ) {
       continue;
     }
@@ -918,7 +969,11 @@ function liveSubagentCardEntryIds(entries: ReadonlyArray<TimelineEntry>): Readon
 
 /** `runlessKey` stands in for the run of entries that have none. */
 function timelineEntryFoldRunId(entry: TimelineEntry, runlessKey: RunId | null): RunId | null {
-  if (entry.kind === "work" && entry.entry.itemType === "system_notice") return null;
+  if (
+    entry.kind === "work" &&
+    (entry.entry.itemType === "system_notice" || entry.entry.itemType === "hook_run")
+  )
+    return null;
   if (entry.kind === "message" && entry.message.role === "assistant") {
     return entry.message.runId ?? runlessKey;
   }
@@ -1492,6 +1547,7 @@ export function deriveMessagesTimelineRows(input: {
         entry.entry.tone === "error" ||
         entry.entry.sourceActivityKind === "runtime.error" ||
         entry.entry.itemType === "system_notice" ||
+        entry.entry.itemType === "hook_run" ||
         entry.entry.itemType === "notification" ||
         !runIdIsActiveResponse(entry.entry.runId) ||
         entry.entry.sourceActivityKind === "context-compaction" ||
@@ -1662,6 +1718,7 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.entry.tone === "error" ||
         timelineEntry.entry.sourceActivityKind === "runtime.error" ||
         timelineEntry.entry.itemType === "system_notice" ||
+        timelineEntry.entry.itemType === "hook_run" ||
         timelineEntry.entry.itemType === "notification"
       ) {
         nextRows.push({
@@ -1684,6 +1741,7 @@ export function deriveMessagesTimelineRows(input: {
           nextEntry.entry.tone === "error" ||
           nextEntry.entry.sourceActivityKind === "runtime.error" ||
           nextEntry.entry.itemType === "system_notice" ||
+          nextEntry.entry.itemType === "hook_run" ||
           nextEntry.entry.itemType === "notification" ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||

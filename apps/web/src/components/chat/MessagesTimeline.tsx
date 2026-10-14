@@ -221,6 +221,7 @@ import {
   threadReadTargetTitle,
   toolGroupAction,
   workEntryDisplayLabel,
+  filterHookActivity,
   workEntryReadOutput,
   workEntryIsVisibleInGroup,
   worktreeSetupAgentStarted,
@@ -293,6 +294,10 @@ import {
   type HandoffTimelineRun,
 } from "./V2LifecycleRow";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { UserShellCommandRow, type UserShellCommandItem } from "./UserShellCommandRow";
+import { orchestrationEnvironment } from "../../state/orchestration";
+import { useEnvironmentQuery } from "../../state/query";
+import { ChatAttachmentId } from "@starkfuture/contracts";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
 import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
@@ -477,6 +482,7 @@ interface MessagesTimelineProps {
 
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReadonlyArray<TimelineEntry>;
+  showAllHookActivity?: boolean;
   latestRun: TimelineLatestRun | null;
   runningRunId?: RunId | null;
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
@@ -587,7 +593,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   isCompacting = false,
   awaitingUser = false,
   listRef,
-  timelineEntries,
+  timelineEntries: unfilteredTimelineEntries,
+  showAllHookActivity = false,
   findExpanded = false,
   findQuery = "",
   activeFindMatch = null,
@@ -636,6 +643,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
   historyControls,
   loadEarlier = null,
 }: MessagesTimelineProps) {
+  const timelineEntries = useMemo(
+    () => filterHookActivity(unfilteredTimelineEntries, showAllHookActivity),
+    [unfilteredTimelineEntries, showAllHookActivity],
+  );
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   const rememberedPosition = useMemo(
     () => readTimelinePosition(listIdentityKey),
@@ -2142,7 +2153,13 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
-      {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
+      {row.kind === "message" && row.message.role === "user" ? (
+        row.message.userShell ? (
+          <UserShellTimelineRow row={row} />
+        ) : (
+          <UserTimelineRow row={row} />
+        )
+      ) : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
       ) : null}
@@ -2267,6 +2284,63 @@ const MESSAGE_HEADING_LEVEL = 3;
 
 function MessageAuthorHeading({ children }: { children: string }) {
   return <h3 className="sr-only select-none">{children}</h3>;
+}
+
+function UserShellTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const target =
+    ctx.threadRef ??
+    scopeThreadRef(
+      ctx.activeThreadEnvironmentId,
+      row.projectedItem?.item.threadId ?? ThreadId.make("shell-draft"),
+    );
+  const item = useAtomValue(
+    environmentThreadDetails.threadAtom(target),
+    (thread) =>
+      thread?.projection.turnItems.find(
+        (entry) =>
+          entry.type === "command_execution" &&
+          entry.source === "user_shell" &&
+          entry.runId === row.message.runId,
+      ) as UserShellCommandItem | undefined,
+  );
+  const detail = useEnvironmentQuery(
+    item?.outputOmitted
+      ? orchestrationEnvironment.turnItem({
+          environmentId: ctx.activeThreadEnvironmentId,
+          input: {
+            threadId: item.threadId,
+            itemId: item.id,
+            revision: DateTime.formatIso(item.updatedAt),
+          },
+        })
+      : null,
+  );
+  const displayedItem = detail.data?.item?.type === "command_execution" ? detail.data.item : item;
+  const runStatus = useAtomValue(
+    environmentThreadDetails.threadAtom(target),
+    (thread) => thread?.projection.runs.find((run) => run.id === row.message.runId)?.status,
+  );
+  const shell = row.message.userShell!;
+  return (
+    <UserShellCommandRow
+      command={shell.command}
+      respond={shell.respond}
+      item={displayedItem ?? null}
+      {...(runStatus ? { runStatus } : {})}
+      onOpenFullOutput={(path) => {
+        const basename = path.split(/[\\/]/).at(-1)!;
+        if (!basename.endsWith(".log")) return;
+        ctx.onFileOpen({
+          type: "file",
+          id: ChatAttachmentId.make(basename.slice(0, -4)),
+          name: "shell-output.log",
+          mimeType: "text/plain",
+          sizeBytes: 0,
+        });
+      }}
+    />
+  );
 }
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
@@ -5466,6 +5540,27 @@ type WorkEntryRowProps = {
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: WorkEntryRowProps) {
   const ctx = use(TimelineRowCtx);
   const item = props.workEntry.projectedItem?.item;
+  if (item?.type === "hook_run")
+    return (
+      <details
+        className="my-1 rounded-md px-2 py-1 text-xs text-muted-foreground"
+        data-hook-outcome={item.outcome}
+      >
+        <summary
+          className={cn(
+            "cursor-pointer select-none",
+            (item.level === "warning" || item.level === "suggestion") && "text-warning",
+          )}
+        >
+          {item.summary}
+          {item.source ? <span className="ml-2 opacity-70">{item.source}</span> : null}
+        </summary>
+        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
+          {item.detail ||
+            `${item.eventName} · ${item.hookName}${item.durationMs === undefined ? "" : ` · ${Math.round(item.durationMs)}ms`}`}
+        </pre>
+      </details>
+    );
   const childThreadId =
     item?.type === "notification" ? notificationChildThreadId(item.source) : undefined;
   if (item?.type !== "notification" || childThreadId === undefined) {

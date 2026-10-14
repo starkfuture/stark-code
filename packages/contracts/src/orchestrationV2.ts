@@ -428,6 +428,14 @@ export const OrchestrationV2AppThread = Schema.Struct({
   ),
   /** Latest accepted rollback. Only its failure is recorded in `rollbackFailure`. */
   rollbackRequestId: Schema.optional(CommandId),
+  lastFileRestore: Schema.optional(
+    Schema.Struct({
+      restored: NonNegativeInt,
+      kept: NonNegativeInt,
+      undoId: Schema.optional(Schema.String),
+      createdAt: Schema.DateTimeUtc,
+    }),
+  ),
   /** Latest rollback that failed after every retry; cleared when the next rollback starts. */
   rollbackFailure: Schema.optional(
     Schema.NullOr(
@@ -922,6 +930,14 @@ export const OrchestrationV2ProviderThreadNativeMetadata = Schema.Struct({
   updatedAt: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Version 2 scopes provider-derived item ids by provider instance. */
   itemIdentityVersion: Schema.optional(Schema.Literal(2)),
+  /** Local commands awaiting the next Claude query after an idle/offline append. */
+  pendingUserShellContext: Schema.optional(Schema.Array(Schema.String)),
+  /** Claude bare-user append boundaries that rewind/fork must retain. */
+  userShellAppends: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ uuid: TrimmedNonEmptyString, providerTurnOrdinal: NonNegativeInt }),
+    ),
+  ),
 });
 export type OrchestrationV2ProviderThreadNativeMetadata =
   typeof OrchestrationV2ProviderThreadNativeMetadata.Type;
@@ -1089,6 +1105,7 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
   tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
   turnTokenUsage: Schema.optional(TurnTokenUsage),
+  nativeMetadata: Schema.optional(Schema.Struct({ userMessageId: Schema.optional(Schema.String) })),
 });
 export type OrchestrationV2ProviderTurn = typeof OrchestrationV2ProviderTurn.Type;
 
@@ -1201,7 +1218,19 @@ export const OrchestrationV2Notification = Schema.Struct({
 });
 export type OrchestrationV2Notification = typeof OrchestrationV2Notification.Type;
 
+/** Only the dedicated, human-origin dispatch command can create this metadata. */
+export const OrchestrationV2UserShellCommand = Schema.Struct({
+  commandId: Schema.optional(CommandId),
+  command: TrimmedNonEmptyString.check(Schema.isMaxLength(10_000)),
+  respond: Schema.Boolean,
+  timeoutMs: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 3_600_000 })),
+  ),
+});
+export type OrchestrationV2UserShellCommand = typeof OrchestrationV2UserShellCommand.Type;
+
 export const OrchestrationV2ConversationMessage = Schema.Struct({
+  userShell: Schema.optional(OrchestrationV2UserShellCommand),
   notification: Schema.optional(OrchestrationV2Notification),
   ...OrchestrationV2CreationFields,
   scheduledTaskId: Schema.optional(ScheduledTaskId),
@@ -1290,6 +1319,13 @@ export const OrchestrationV2CheckpointFileSummary = Schema.Struct({
 });
 export type OrchestrationV2CheckpointFileSummary = typeof OrchestrationV2CheckpointFileSummary.Type;
 
+export const OrchestrationV2NativeFileState = Schema.Struct({
+  path: Schema.String,
+  sha256: Schema.NullOr(Schema.String),
+  mode: NonNegativeInt,
+});
+export type OrchestrationV2NativeFileState = typeof OrchestrationV2NativeFileState.Type;
+
 export const OrchestrationV2Checkpoint = Schema.Struct({
   id: CheckpointId,
   threadId: ThreadId,
@@ -1302,6 +1338,10 @@ export const OrchestrationV2Checkpoint = Schema.Struct({
   ref: CheckpointRef,
   status: Schema.Literals(["ready", "missing", "error", "stale"]),
   files: Schema.Array(OrchestrationV2CheckpointFileSummary),
+  /** Paths reported by this run's own edit tools; absent on older checkpoints. */
+  agentWrittenPaths: Schema.optional(Schema.Array(Schema.String)),
+  /** Post-edit fingerprints preserve edits made after a non-Git Claude turn. */
+  nativeFileStates: Schema.optional(Schema.Array(OrchestrationV2NativeFileState)),
   capturedAt: Schema.DateTimeUtc,
 });
 export type OrchestrationV2Checkpoint = typeof OrchestrationV2Checkpoint.Type;
@@ -1474,6 +1514,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     senderThreadId: Schema.optional(ThreadId),
     inputIntent: OrchestrationV2UserMessageInputIntent,
+    userShell: Schema.optional(OrchestrationV2UserShellCommand),
     text: Schema.String,
     context: Schema.optional(OrchestrationMessageContext),
     attachments: Schema.Array(ChatAttachment),
@@ -1524,10 +1565,16 @@ export const OrchestrationV2TurnItem = Schema.Union([
     oldStr: Schema.optional(Schema.String),
     newStr: Schema.optional(Schema.String),
     changes: Schema.optional(Schema.Array(OrchestrationV2FileChangeDetail)),
+    agentWrittenPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
     type: Schema.Literal("command_execution"),
+    source: Schema.optional(Schema.Literals(["agent", "user_shell"])),
+    durationMs: Schema.optional(NonNegativeInt),
+    timedOut: Schema.optional(Schema.Boolean),
+    interrupted: Schema.optional(Schema.Boolean),
+    fullOutputPath: Schema.optional(Schema.String),
     input: Schema.String,
     output: Schema.optional(Schema.String),
     /** Set on the wire when output was withheld; fetch it with getTurnItem. */
@@ -1579,6 +1626,21 @@ export const OrchestrationV2TurnItem = Schema.Union([
     ...OrchestrationV2TurnItemBaseFields,
     type: Schema.Literal("system_notice"),
     message: Schema.String,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    type: Schema.Literal("hook_run"),
+    provider: ProviderDriverKind,
+    eventName: Schema.String,
+    hookName: Schema.String,
+    matcher: Schema.optional(Schema.String),
+    source: Schema.optional(Schema.String),
+    outcome: Schema.Literals(["blocked", "failed", "notice", "ran"]),
+    level: Schema.Literals(["info", "notice", "suggestion", "warning"]),
+    summary: Schema.String.check(Schema.isMaxLength(300)),
+    detail: Schema.String.check(Schema.isMaxLength(8192)),
+    exitCode: Schema.optional(Schema.Int),
+    durationMs: Schema.optional(Schema.Number),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2258,6 +2320,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     senderThreadId: Schema.optional(ThreadId),
     inputIntent: OrchestrationV2UserMessageInputIntent,
+    userShell: Schema.optional(OrchestrationV2UserShellCommand),
     text: Schema.String,
     context: Schema.optional(OrchestrationMessageContext),
     attachments: Schema.Array(ChatAttachment),
@@ -2308,10 +2371,16 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     oldStr: Schema.optional(Schema.String),
     newStr: Schema.optional(Schema.String),
     changes: Schema.optional(Schema.Array(OrchestrationV2FileChangeDetail)),
+    agentWrittenPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
     type: Schema.Literal("command_execution"),
+    source: Schema.optional(Schema.Literals(["agent", "user_shell"])),
+    durationMs: Schema.optional(NonNegativeInt),
+    timedOut: Schema.optional(Schema.Boolean),
+    interrupted: Schema.optional(Schema.Boolean),
+    fullOutputPath: Schema.optional(Schema.String),
     input: Schema.String,
     output: Schema.optional(Schema.String),
     /** Set on the wire when output was withheld; fetch it with getTurnItem. */
@@ -2363,6 +2432,21 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     ...OrchestrationV2TurnItemJsonBaseFields,
     type: Schema.Literal("system_notice"),
     message: Schema.String,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
+    type: Schema.Literal("hook_run"),
+    provider: ProviderDriverKind,
+    eventName: Schema.String,
+    hookName: Schema.String,
+    matcher: Schema.optional(Schema.String),
+    source: Schema.optional(Schema.String),
+    outcome: Schema.Literals(["blocked", "failed", "notice", "ran"]),
+    level: Schema.Literals(["info", "notice", "suggestion", "warning"]),
+    summary: Schema.String.check(Schema.isMaxLength(300)),
+    detail: Schema.String.check(Schema.isMaxLength(8192)),
+    exitCode: Schema.optional(Schema.Int),
+    durationMs: Schema.optional(Schema.Number),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
@@ -2937,6 +3021,20 @@ export const OrchestrationV2Command = Schema.Union([
     reason: Schema.optional(Schema.String),
   }),
   Schema.Struct({
+    type: Schema.Literal("thread.shell-command.dispatch"),
+    ...OrchestrationV2CreationFields,
+    commandId: CommandId,
+    threadId: ThreadId,
+    messageId: MessageId,
+    command: OrchestrationV2UserShellCommand.fields.command,
+    respond: OrchestrationV2UserShellCommand.fields.respond,
+    timeoutMs: OrchestrationV2UserShellCommand.fields.timeoutMs,
+    dispatchMode: Schema.Union([
+      Schema.Struct({ type: Schema.Literal("queue_after_active") }),
+      Schema.Struct({ type: Schema.Literal("start_immediately") }),
+    ]),
+  }),
+  Schema.Struct({
     type: Schema.Literal("message.dispatch"),
     notification: Schema.optional(OrchestrationV2Notification),
     ...OrchestrationV2CreationFields,
@@ -3084,6 +3182,8 @@ export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("checkpoint.rollback"),
     restoreFiles: Schema.optional(Schema.Boolean),
+    restoreScope: Schema.optional(Schema.Literals(["checkout", "agent-files"])),
+    conversation: Schema.optional(Schema.Boolean),
     commandId: CommandId,
     threadId: ThreadId,
     scopeId: CheckpointScopeId,
@@ -3164,6 +3264,11 @@ export const OrchestrationV2Command = Schema.Union([
   }),
 ]);
 export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
+/** Agent, schedule, and continuation producers cannot request a human shell command. */
+export type OrchestrationV2ServerProducerCommand = Exclude<
+  OrchestrationV2Command,
+  { readonly type: "thread.shell-command.dispatch" }
+>;
 
 /**
  * Commands only the server dispatches. They stay out of

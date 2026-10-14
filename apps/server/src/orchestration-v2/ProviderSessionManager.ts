@@ -180,6 +180,13 @@ export const ProviderSessionManagerV2Error = Schema.Union([
 export type ProviderSessionManagerV2Error = typeof ProviderSessionManagerV2Error.Type;
 
 export interface ProviderSessionManagerV2Shape {
+  /** Read-only session inspection must not keep an otherwise idle runtime alive. */
+  readonly peek: (
+    providerSessionId: ProviderSessionId,
+  ) => Effect.Effect<
+    Option.Option<ProviderAdapter.ProviderAdapterV2SessionRuntime>,
+    ProviderSessionManagerV2Error
+  >;
   readonly shutdown: Effect.Effect<void>;
   readonly open: (input: {
     readonly threadId: ThreadId;
@@ -2352,6 +2359,12 @@ export const layerWithOptions = (
               yield* scheduleIdleRelease(input.providerSessionId);
               return exposedRuntime;
             }),
+          ),
+        peek: (providerSessionId) =>
+          Ref.get(sessions).pipe(
+            Effect.map((entries) =>
+              Option.fromNullishOr(entries.get(sessionKey(providerSessionId))?.exposedRuntime),
+            ),
           ),
         get: (providerSessionId) =>
           Effect.gen(function* () {

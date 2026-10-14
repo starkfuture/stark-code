@@ -130,6 +130,23 @@ export const ProviderUploadFeedbackResult = Schema.Struct({
 });
 export type ProviderUploadFeedbackResult = typeof ProviderUploadFeedbackResult.Type;
 
+export const ProviderReadSessionCatalogInput = Schema.Struct({ threadId: ThreadId });
+export type ProviderReadSessionCatalogInput = typeof ProviderReadSessionCatalogInput.Type;
+export const ProviderReadContextUsageInput = Schema.Struct({
+  threadId: ThreadId,
+  detail: Schema.Literals(["summary", "full"]),
+});
+export type ProviderReadContextUsageInput = typeof ProviderReadContextUsageInput.Type;
+
+export class ProviderSessionReadError extends Schema.TaggedError<ProviderSessionReadError>()(
+  "ProviderSessionReadError",
+  { threadId: ThreadId, cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return `Failed to read the provider session for thread ${this.threadId}.`;
+  }
+}
+
 export class ProviderUploadFeedbackError extends Schema.TaggedError<ProviderUploadFeedbackError>()(
   "ProviderUploadFeedbackError",
   {

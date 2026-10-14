@@ -23,6 +23,7 @@ const KNOWN_SHARED_DIRECTORIES = [
   "worktrees",
   "skills",
   "plugins",
+  "rules",
   "cache",
   "logs",
   "mcp-oauth-locks",

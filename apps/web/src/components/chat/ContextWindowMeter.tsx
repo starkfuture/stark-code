@@ -7,6 +7,9 @@ import {
 } from "./ContextWindowMeter.logic";
 import { Minimize2Icon } from "lucide-react";
 import { composerFloatingLayerProps } from "./composerEventScope";
+import { useState } from "react";
+import type { ScopedThreadRef } from "@starkfuture/contracts";
+import { ContextBreakdownPanel } from "./ContextBreakdownPanel";
 
 function formatPercentage(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -24,8 +27,10 @@ export function ContextWindowMeter(props: {
   onCompact?: (() => void) | undefined;
   compactDisabled?: boolean | undefined;
   compactDisabledReason?: string | null | undefined;
+  threadRef?: ScopedThreadRef | undefined;
 }) {
   const { usage, modelDisplayName, onCompact, compactDisabled, compactDisabledReason } = props;
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
   const radius = 9.75;
@@ -96,6 +101,23 @@ export function ContextWindowMeter(props: {
         className="text-left whitespace-normal"
       >
         <div className="flex flex-col gap-2 p-(--floating-content-inset)">
+          {props.threadRef ? (
+            <Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
+              <PopoverTrigger
+                render={
+                  <Button size="xs" variant="ghost">
+                    Details
+                  </Button>
+                }
+              />
+              <PopoverPopup side="top" align="end" padding="none" width="auto">
+                <ContextBreakdownPanel
+                  key={`${props.threadRef.environmentId}:${props.threadRef.threadId}`}
+                  threadRef={props.threadRef}
+                />
+              </PopoverPopup>
+            </Popover>
+          ) : null}
           <div className="flex items-center justify-between gap-3">
             <div className="font-medium text-muted-foreground text-xs">Context Window</div>
             {usage.maxTokens !== null && usedPercentage ? (

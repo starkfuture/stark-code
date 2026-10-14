@@ -127,6 +127,34 @@ export const layer: Layer.Layer<
         ordinalWithinScope: run.ordinal,
         appRunOrdinal: run.ordinal,
         capturedAt,
+        agentWrittenPaths: yield* projections
+          .getThreadRecords(input.threadId, ["turnItems"], {
+            turnItemRunId: run.id,
+            turnItemTypes: ["file_change"],
+            turnItemStatuses: ["completed"],
+          })
+          .pipe(
+            Effect.map((records) => {
+              const paths = new Set<string>();
+              for (const item of records.turnItems) {
+                if (
+                  item.type !== "file_change" ||
+                  item.status !== "completed" ||
+                  item.nodeId !== rootNode.id
+                )
+                  continue;
+                if (item.agentWrittenPaths?.length) {
+                  for (const path of item.agentWrittenPaths) paths.add(path);
+                } else if (item.changes?.length) {
+                  for (const change of item.changes) {
+                    paths.add(change.path);
+                    if (change.oldPath) paths.add(change.oldPath);
+                  }
+                } else paths.add(item.fileName);
+              }
+              return [...paths];
+            }),
+          ),
       });
       // Match RunExecutionService: capture loaded the waiting run before
       // materializing baselines. Omit delegatedCompletion so a newer cohort

@@ -16,6 +16,36 @@ const entries = buildComposerPromptHistoryEntries([
   { id: "m3", role: "user", text: "third" },
 ]);
 
+describe("shell prompt history", () => {
+  it("filters shell entries and carries mode when recalled from normal history", () => {
+    const messages = [
+      { id: "normal", role: "user", text: "hello" },
+      { id: "shell-one", role: "user", text: "pwd", userShell: { command: "pwd", respond: true } },
+      { id: "shell-two", role: "user", text: "ls", userShell: { command: "ls", respond: false } },
+    ];
+    const shells = buildComposerPromptHistoryEntries(messages, "shell");
+    expect(shells.map((entry) => entry.prompt)).toEqual(["pwd", "ls"]);
+    const last = stepComposerPromptHistory({
+      direction: "backward",
+      entries: shells,
+      position: null,
+      currentPrompt: "",
+    });
+    expect(last).toMatchObject({ prompt: "ls", userShell: { command: "ls", respond: false } });
+    expect(
+      buildComposerPromptHistoryEntries(messages, "prompt").map((entry) => entry.prompt),
+    ).toEqual(["hello"]);
+    expect(
+      stepComposerPromptHistory({
+        direction: "backward",
+        entries: buildComposerPromptHistoryEntries(messages),
+        position: null,
+        currentPrompt: "",
+      })?.userShell?.command,
+    ).toBe("ls");
+  });
+});
+
 function backward(position: ComposerPromptHistoryPosition | null, currentPrompt: string) {
   return stepComposerPromptHistory({ direction: "backward", entries, position, currentPrompt });
 }

@@ -5,7 +5,7 @@ import {
   type OrchestrationV2ThreadProjection,
   type RunId,
   OrchestratorMcpFailure,
-  type OrchestrationV2Command,
+  type OrchestrationV2ServerProducerCommand,
 } from "@starkfuture/contracts";
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@starkfuture/shared/model";
@@ -40,7 +40,10 @@ function queueEntry(
 }
 const dispatch = Effect.fn("mcp.dispatchThreadCommand")(function* (
   threadId: ThreadId | undefined,
-  command: (common: { commandId: CommandId; threadId: ThreadId }) => OrchestrationV2Command,
+  command: (common: {
+    commandId: CommandId;
+    threadId: ThreadId;
+  }) => OrchestrationV2ServerProducerCommand,
 ) {
   const { threads, projection } = yield* readThread(threadId);
   const result = yield* threads
@@ -299,7 +302,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
           .settleThread({ ...common, byOwnAgent: caller?.id === projection.thread.id })
           .pipe(Effect.mapError(dispatchFailure));
       }
-      let command: OrchestrationV2Command;
+      let command: OrchestrationV2ServerProducerCommand;
       switch (input.action) {
         case "snooze":
           if (input.snoozedUntil === undefined) {

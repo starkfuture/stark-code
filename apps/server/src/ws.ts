@@ -112,6 +112,7 @@ import {
 import { RpcSerialization, RpcServer } from "effect/rpc";
 
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import * as CheckpointFileRestore from "./checkpointing/CheckpointFileRestore.ts";
 import * as ServerConfig from "./config.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -119,6 +120,9 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
 import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
+import * as ProviderSessionInspector from "./provider/ProviderSessionInspector.ts";
+import * as McpServerRequests from "./provider/McpServerRequests.ts";
+import * as PermissionRulesService from "./provider/PermissionRulesService.ts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as IdAllocator from "@starkfuture/provider-core/server/IdAllocator";
@@ -1223,6 +1227,13 @@ const layerWsRpc = (
       const threadSearch = yield* ThreadSearch.ThreadSearch;
 
       const providerSessionsV2 = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const providerSessionInspector = yield* ProviderSessionInspector.make;
+      const mcpServerRequests = yield* McpServerRequests.make;
+      const mcpControlClient = {
+        desktopHost:
+          currentSession.subject === "desktop-bootstrap" && clientOrigin.surface === "desktop",
+      };
+      const permissionRules = yield* PermissionRulesService.make;
       const mcpAppRequests = yield* McpAppRequests.McpAppRequests;
       const analytics = yield* AnalyticsService.AnalyticsService;
       // Client-origin attribution (#7774): every thread/turn the connecting
@@ -1273,6 +1284,7 @@ const layerWsRpc = (
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+      const checkpointFiles = yield* CheckpointFileRestore.CheckpointFileRestore;
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
@@ -1906,6 +1918,9 @@ const layerWsRpc = (
                 }),
             ),
           ),
+        [WS_METHODS.checkpointRollbackPreview]: (input) => checkpointFiles.preview(input),
+        [WS_METHODS.checkpointRestoreFiles]: (input) => checkpointFiles.restore(input),
+        [WS_METHODS.checkpointUndoRestore]: (input) => checkpointFiles.undo(input),
         [ORCHESTRATION_V2_WS_METHODS.getFullThreadDiff]: (input) =>
           checkpointDiffQuery.getFullThreadDiff(input).pipe(
             Effect.mapError(
@@ -2273,6 +2288,22 @@ const layerWsRpc = (
         [WS_METHODS.mcpAppsToolInfo]: (input) => mcpAppRequests.toolInfo(input),
         [WS_METHODS.mcpAppsUpdateModelContext]: (input) => mcpAppRequests.updateModelContext(input),
         [WS_METHODS.mcpAppsReadResource]: (input) => mcpAppRequests.readResource(input),
+        [WS_METHODS.providerReadSessionCatalog]: (input) =>
+          providerSessionInspector.readCatalog(input),
+        [WS_METHODS.providerReadPermissionRules]: (input) => permissionRules.read(input),
+        [WS_METHODS.providerForgetPermissionRule]: (input) => permissionRules.forget(input),
+        [WS_METHODS.providerReadContextUsage]: (input) =>
+          providerSessionInspector.readContext(input),
+        [WS_METHODS.mcpServersList]: (input) => mcpServerRequests.list(input, mcpControlClient),
+        [WS_METHODS.mcpServerReconnect]: (input) =>
+          mcpServerRequests.reconnect(input, mcpControlClient),
+        [WS_METHODS.mcpServerSetEnabled]: (input) =>
+          mcpServerRequests.setEnabled(input, mcpControlClient),
+        [WS_METHODS.mcpServerSignIn]: (input) => mcpServerRequests.signIn(input, mcpControlClient),
+        [WS_METHODS.mcpServerSubmitCallback]: (input) =>
+          mcpServerRequests.submitCallback(input, mcpControlClient),
+        [WS_METHODS.mcpServerSignOut]: (input) =>
+          mcpServerRequests.signOut(input, mcpControlClient),
         [WS_METHODS.providerUploadFeedback]: (input) =>
           Effect.gen(function* () {
             const projection = yield* threadManagement.getThreadRecords(input.threadId, [

@@ -12,6 +12,7 @@ import type { MigrationError } from "effect/sql/Migrator";
 import type { SqlError } from "effect/sql/SqlError";
 
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import * as CheckpointFileRestore from "../../checkpointing/CheckpointFileRestore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ServerSettings from "../../serverSettings.ts";
@@ -408,6 +409,20 @@ export function layerWithRegistry<Error>(
     Layer.provide(
       Layer.mergeAll(
         layerCheckpointServiceProvided,
+        CheckpointFileRestore.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              layerCheckpointStore,
+              layerCheckpointServiceProvided,
+              layerEventSinkProvided,
+              IdAllocator.layer,
+              layerStores,
+              ThreadCommandExecutor.layer,
+              layerServerConfig,
+              layerProviderSessionManagerProvided,
+            ).pipe(Layer.provideMerge(NodeServices.layer)),
+          ),
+        ),
         layerEventSinkProvided,
         IdAllocator.layer,
         layerStores,

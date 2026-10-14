@@ -265,6 +265,7 @@ const moveProject = (projectId: ProjectId, workspaceRoot: string, updatedAt: str
     }),
   );
 
+const layerRuntimeSettingsTest = ServerSettings.layerTest();
 const layerTest = Layer.mergeAll(
   RuntimeLayer.layer,
   RuntimeLayer.layerEventSink,
@@ -278,7 +279,7 @@ const layerTest = Layer.mergeAll(
   Layer.provide(SqlitePersistence.layerMemory),
   Layer.provide(layerCheckpointStoreTest),
   Layer.provide(layerServerConfig),
-  Layer.provide(ServerSettings.layerTest()),
+  Layer.provide(layerRuntimeSettingsTest),
   Layer.provide(layerTestProviderInstanceRegistry),
   Layer.provide(layerGitWorkflowTest),
   Layer.provide(layerProjectServiceTest),
@@ -599,6 +600,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
       });
       return {
         threadId,
+        checkpointId,
+        scopeId: scope.id,
         rollback: (commandId: CommandId) =>
           orchestrator.dispatch({
             type: "checkpoint.rollback",
@@ -610,6 +613,49 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
           }),
       };
     });
+
+  it.effect(
+    "admits code-only restoration without a native session and leaves chat state untouched",
+    () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const eventSink = yield* EventSink.EventSinkV2;
+        const outbox = yield* EffectOutbox.EffectOutboxV2;
+        const target = yield* seedFailingRollbackThread("runtime-code-only");
+        const before = yield* orchestrator.getThreadProjection(target.threadId);
+        yield* eventSink.write({
+          events: [
+            {
+              id: EventId.make("runtime-code-only-no-provider"),
+              type: "thread.metadata-updated",
+              threadId: target.threadId,
+              occurredAt: yield* DateTime.now,
+              payload: { ...before.thread, activeProviderThreadId: null },
+            },
+          ],
+        });
+        const commandId = CommandId.make("runtime-code-only-restore");
+        const result = yield* orchestrator.dispatch({
+          type: "checkpoint.rollback",
+          commandId,
+          threadId: target.threadId,
+          checkpointId: target.checkpointId,
+          scopeId: target.scopeId,
+          conversation: false,
+        });
+        assert.deepEqual(
+          result.storedEvents.map((item) => item.event.type),
+          ["checkpoint.rollback-requested"],
+        );
+        assert.deepEqual(
+          (yield* outbox.listByCommandId(commandId)).map((effect) => effect.request.type),
+          ["checkpoint.files.restore"],
+        );
+        const after = yield* orchestrator.getThreadProjection(target.threadId);
+        assert.deepEqual(after.messages, before.messages);
+        assert.deepEqual(after.runs, before.runs);
+      }),
+  );
 
   it.effect("projects a rollback that fails every attempt and clears it on the next one", () =>
     Effect.gen(function* () {
@@ -2088,7 +2134,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           commandId: CommandId.make(`branch-pr-link-${index}`),
           threadId,
           host: "GitHub.com",
-          repository: "Pingdotgg/T3code",
+          repository: "example/stark-code",
           number,
           url: `https://github.com/example/stark-code/pull/${number}`,
           source: "manual",
@@ -2143,7 +2189,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         branch: null,
         worktreePath: null,
       });
-      const key = { host: "GitHub.com", repository: "Pingdotgg/T3code" };
+      const key = { host: "GitHub.com", repository: "example/stark-code" };
       for (const number of [1, 2]) {
         yield* orchestrator.dispatch({
           type: "thread.pull-request.link",
@@ -2673,7 +2719,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
             "#9: closed, stopped watching",
           ]);
         }
-      }),
+      }).pipe(Effect.provide(Layer.fresh(layerTest))),
   );
 
   it.effect("reports how long an ended watch was quiet", () =>
@@ -5826,6 +5872,121 @@ it.layer(layerQueueResumeDisabledInstanceTest)(
             "a refused resume re-holds the queue instead of leaving it looking resumable",
           );
         }),
+    );
+  },
+);
+
+it.layer(Layer.merge(layerTest, layerRuntimeSettingsTest))(
+  "human shell command orchestration",
+  (it) => {
+    const create = (id: string) => ({
+      type: "thread.create" as const,
+      commandId: CommandId.make(`${id}:create`),
+      createdBy: "user" as const,
+      creationSource: "web" as const,
+      threadId: ThreadId.make(id),
+      projectId: ProjectId.make(`${id}:project`),
+      title: "Shell test",
+      modelSelection,
+      runtimeMode: "full-access" as const,
+      interactionMode: "default" as const,
+      branch: null,
+      worktreePath: process.cwd(),
+    });
+    const shell = (id: string, suffix: string) => ({
+      type: "thread.shell-command.dispatch" as const,
+      commandId: CommandId.make(`${id}:${suffix}`),
+      threadId: ThreadId.make(id),
+      messageId: MessageId.make(`${id}:${suffix}`),
+      createdBy: "user" as const,
+      creationSource: "web" as const,
+      command: "pwd",
+      respond: false,
+      dispatchMode: { type: "start_immediately" as const },
+    });
+    it.effect("preserves human shell metadata in durable immediate and queued projections", () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const id = "human-shell-durable";
+        yield* orchestrator.dispatch(create(id));
+        const first = shell(id, "first");
+        yield* orchestrator.dispatch(first);
+        yield* orchestrator.dispatch(shell(id, "second"));
+        const projection = yield* orchestrator.getThreadProjection(ThreadId.make(id));
+        assert.deepEqual(
+          projection.runs.map((run) => run.status),
+          ["starting", "queued"],
+        );
+        assert.deepEqual(
+          projection.messages.map((message) => message.userShell),
+          [
+            { commandId: first.commandId, command: "pwd", respond: false, timeoutMs: 600_000 },
+            {
+              commandId: CommandId.make(`${id}:second`),
+              command: "pwd",
+              respond: false,
+              timeoutMs: 600_000,
+            },
+          ],
+        );
+        assert.deepEqual(
+          projection.messages.map((message) => message.text),
+          ["pwd", "pwd"],
+        );
+        const item = projection.turnItems.find((item) => item.type === "user_message");
+        assert.isTrue(item?.type === "user_message");
+        if (item?.type === "user_message")
+          assert.deepEqual(item.userShell, projection.messages[0]?.userShell);
+        const failedPromotion = yield* orchestrator
+          .dispatch({
+            type: "queued-message.promote-to-steer",
+            commandId: CommandId.make(`${id}:steer`),
+            threadId: ThreadId.make(id),
+            queuedRunId: projection.runs[1]!.id,
+            targetRunId: projection.runs[0]!.id,
+          })
+          .pipe(Effect.flip);
+        assert.include(JSON.stringify(failedPromotion), "Queued shell commands cannot");
+      }),
+    );
+    it.effect(
+      "rejects agent/system provenance and ordinary-dispatch metadata before committing a shell run",
+      () =>
+        Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const id = "human-shell-provenance";
+          yield* orchestrator.dispatch(create(id));
+          for (const createdBy of ["agent", "system"] as const) {
+            const failure = yield* orchestrator
+              .dispatch({ ...shell(id, createdBy), createdBy, creationSource: "mcp" })
+              .pipe(Effect.flip);
+            assert.include(JSON.stringify(failure), "Only a user");
+          }
+          const smuggled = {
+            ...shell(id, "smuggle"),
+            type: "message.dispatch" as const,
+            text: "pwd",
+            attachments: [],
+            userShell: { command: "pwd", respond: true },
+          };
+          const failure = yield* orchestrator.dispatch(smuggled).pipe(Effect.flip);
+          assert.include(JSON.stringify(failure), "dedicated user dispatch");
+          const projection = yield* orchestrator.getThreadProjection(ThreadId.make(id));
+          assert.deepEqual(projection.runs, []);
+          assert.deepEqual(projection.messages, []);
+        }),
+    );
+    it.effect("honors the environment shell-command off switch", () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const settings = yield* ServerSettings.ServerSettingsService;
+        const id = "human-shell-disabled";
+        yield* orchestrator.dispatch(create(id));
+        yield* settings.updateSettings({ allowUserShellCommands: false });
+        const failure = yield* orchestrator.dispatch(shell(id, "blocked")).pipe(Effect.flip);
+        assert.include(JSON.stringify(failure), "disabled");
+        assert.deepEqual((yield* orchestrator.getThreadProjection(ThreadId.make(id))).runs, []);
+      }),
     );
   },
 );

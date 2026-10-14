@@ -20,6 +20,7 @@ import * as Layer from "effect/Layer";
 
 import type { CheckpointStoreError } from "./Errors.ts";
 import type { VcsCheckpointOps } from "../vcs/VcsDriver.ts";
+import type { VcsRestorePathsInput, VcsRestorePathsResult } from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 export interface CaptureCheckpointInput {
@@ -84,6 +85,9 @@ export class CheckpointStore extends Context.Service<
     readonly restoreCheckpoint: (
       input: RestoreCheckpointInput,
     ) => Effect.Effect<boolean, CheckpointStoreError>;
+    readonly restorePaths: (
+      input: VcsRestorePathsInput,
+    ) => Effect.Effect<VcsRestorePathsResult, CheckpointStoreError>;
 
     /**
      * Compute a diff between two checkpoint refs. Defaults to a full patch.
@@ -189,6 +193,16 @@ export const make = Effect.gen(function* () {
   });
 
   return CheckpointStore.of({
+    restorePaths: Effect.fn("CheckpointStore.restorePaths")(function* (input) {
+      const checkpoints = yield* resolveCheckpoints("CheckpointStore.restorePaths", input.cwd);
+      if (!checkpoints.restorePaths)
+        return yield* new VcsUnsupportedOperationError({
+          operation: "CheckpointStore.restorePaths",
+          kind: "git",
+          detail: "The VCS driver cannot restore selected paths.",
+        });
+      return yield* checkpoints.restorePaths(input);
+    }),
     isGitRepository,
     captureCheckpoint,
     hasCheckpointRef,

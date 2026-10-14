@@ -1067,6 +1067,58 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:provider:install-remove",
       tag: WS_METHODS.providerInstallRemove,
     }),
+    readSessionCatalog: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:session-catalog",
+      tag: WS_METHODS.providerReadSessionCatalog,
+    }),
+    mcpServers: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:mcp-servers",
+      tag: WS_METHODS.mcpServersList,
+    }),
+    reconnectMcpServer: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-reconnect",
+      tag: WS_METHODS.mcpServerReconnect,
+    }),
+    setMcpServerEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-set-enabled",
+      tag: WS_METHODS.mcpServerSetEnabled,
+    }),
+    signInMcpServer: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-sign-in",
+      tag: WS_METHODS.mcpServerSignIn,
+    }),
+    submitMcpServerCallback: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-submit-callback",
+      tag: WS_METHODS.mcpServerSubmitCallback,
+    }),
+    signOutMcpServer: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-sign-out",
+      tag: WS_METHODS.mcpServerSignOut,
+    }),
+    readPermissionRules: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:provider:permission-rules",
+      tag: WS_METHODS.providerReadPermissionRules,
+    }),
+    forgetPermissionRule: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:forget-permission-rule",
+      tag: WS_METHODS.providerForgetPermissionRule,
+    }),
+    checkpointRestorePreview: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "server:checkpoint-restore-preview",
+      tag: WS_METHODS.checkpointRollbackPreview,
+    }),
+    restoreCheckpointFiles: createEnvironmentRpcCommand(runtime, {
+      label: "server:restore-checkpoint-files",
+      tag: WS_METHODS.checkpointRestoreFiles,
+    }),
+    undoCheckpointRestore: createEnvironmentRpcCommand(runtime, {
+      label: "server:undo-checkpoint-restore",
+      tag: WS_METHODS.checkpointUndoRestore,
+    }),
+    readContextUsage: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:context-usage",
+      tag: WS_METHODS.providerReadContextUsage,
+    }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,

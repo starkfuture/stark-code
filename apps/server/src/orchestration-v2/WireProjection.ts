@@ -100,6 +100,10 @@ export function projectTurnItemForWire(item: OrchestrationV2TurnItem): Orchestra
       return projected;
     }
     case "command_execution": {
+      if (item.source === "user_shell") {
+        const output = truncateDetail(item.output);
+        return { ...item, output, ...(output !== item.output ? { outputOmitted: true } : {}) };
+      }
       const { output, ...projected } = item;
       // Clients used this preview to recognize provider-reported failures. Keep
       // the outcome without retaining or serializing the output that proved it.

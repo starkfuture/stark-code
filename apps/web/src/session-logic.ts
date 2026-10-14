@@ -515,6 +515,13 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
         label: item.message,
         sourceActivityKind: "runtime.warning",
       };
+    case "hook_run":
+      return {
+        ...common,
+        label: item.summary,
+        sourceActivityKind: "runtime.warning",
+        toolData: item,
+      };
     case "error": {
       const presentation = providerErrorPresentation(item);
       return {
@@ -629,6 +636,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
   );
   for (const row of input.visibleTurnItems) {
     const { item } = row;
+    if (item.type === "command_execution" && item.source === "user_shell") continue;
     if (turnItemIsWorkspacePreparation(item)) continue;
     // Task progress belongs in the composer, not between conversation entries.
     if (item.type === "todo_list" || item.type === "checkpoint") continue;
@@ -661,6 +669,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         role: item.type === "user_message" ? "user" : "assistant",
         text: item.text,
         ...(item.type === "user_message" && item.context ? { context: item.context } : {}),
+        ...(item.type === "user_message" && item.userShell ? { userShell: item.userShell } : {}),
         ...((item.attachments?.length ?? 0) > 0
           ? {
               attachments: (item.attachments ?? []).map((attachment) => {

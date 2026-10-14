@@ -1,4 +1,22 @@
-# Terminal history
+# Terminals and native agent shells
+
+## Native shell mode
+
+On web and desktop, choose native shell mode in a Codex or Claude thread to use
+the installed command-line program inside Stark Code. Its commands, plugins, and
+terminal interaction come from that program. The terminal session keeps its
+working directory and shell state until it exits.
+
+Codex native shells start read-only and ask for approval. An explicit
+`--sandbox workspace-write` provider launch argument permits workspace writes;
+full-access bypass flags and unknown launch arguments are refused. Configure
+launch arguments in **Settings → Providers**.
+
+On macOS, **Settings → General → Native shell** controls extra non-secret login
+shell variables imported when the app starts. `AGENT_WORKSPACE` is included by
+default. Restart Stark Code after changing this list.
+
+## Terminal history
 
 Each terminal keeps up to 5,000 lines and 8 MiB of scrollback on its environment
 server. Stark Code removes the oldest output when either limit is reached. A long

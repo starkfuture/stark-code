@@ -192,6 +192,8 @@ export const layer: Layer.Layer<
       ) =>
         Effect.suspend(() => {
           if (deliver !== undefined) return deliver(input, compact);
+          if (input.message.userShell !== undefined)
+            return RunExecutionService.dispatchProviderTurn(session, input);
           return compact && session.compactThread !== undefined
             ? session.compactThread(input)
             : session.startTurn(input);
@@ -207,6 +209,11 @@ export const layer: Layer.Layer<
       return {
         ...session,
         startTurn: (input: Parameters<typeof session.startTurn>[0]) => start(input),
+        ...(session.runUserShellCommand === undefined
+          ? {}
+          : {
+              runUserShellCommand: (input: Parameters<typeof session.startTurn>[0]) => start(input),
+            }),
         ...(session.compactThread === undefined
           ? {}
           : {
@@ -254,8 +261,9 @@ export const layer: Layer.Layer<
                       projection.messages.some(
                         (message) =>
                           message.id === source.userMessageId &&
-                          message.attachments.length === 0 &&
-                          message.text.trim().toLowerCase() === "/compact",
+                          (message.userShell !== undefined ||
+                            (message.attachments.length === 0 &&
+                              message.text.trim().toLowerCase() === "/compact")),
                       ))),
               ))),
       );
@@ -370,7 +378,11 @@ export const layer: Layer.Layer<
           });
         },
       );
-      if (message.attachments.length === 0 && message.text.trimStart().startsWith("/")) {
+      if (
+        message.userShell === undefined &&
+        message.attachments.length === 0 &&
+        message.text.trimStart().startsWith("/")
+      ) {
         const isEmptyCompaction =
           message.text.trim().toLowerCase() === "/compact" && !projection.hasConversation;
         // Preparing a run may already point the thread at a newly selected
@@ -1094,6 +1106,14 @@ export const layer: Layer.Layer<
         compact = false,
       ) =>
         Effect.gen(function* () {
+          // A human command must remain literal. Leave pending handoffs for the
+          // next normal prompt instead of consuming context the shell cannot use.
+          if (turnInput.message.userShell !== undefined) {
+            if (!(yield* isCurrentAttemptInStatus("running"))) return;
+            yield* RunExecutionService.dispatchProviderTurn(session, turnInput);
+            return;
+          }
+
           // A failed turn/start can leave the requested turn absent from
           // native history even when its preceding handoff was injected.
           const retryHandoff =
@@ -1265,6 +1285,7 @@ export const layer: Layer.Layer<
           attachments: message.attachments,
           createdBy: message.createdBy,
           creationSource: message.creationSource,
+          ...(message.userShell === undefined ? {} : { userShell: message.userShell }),
           ...(message.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: message.scheduledTaskId }),

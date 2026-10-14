@@ -842,6 +842,9 @@ function turnItemText(item: OrchestrationV2TurnItem): string | null {
     case "run_interrupt_result":
     case "system_notice":
       return item.message;
+    case "hook_run":
+      // Hook diagnostics are UI-only and may contain private local output.
+      return null;
     case "error":
       return item.failure.message;
     case "compaction":

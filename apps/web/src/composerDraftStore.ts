@@ -79,6 +79,10 @@ import { createDeferredStorage, createMemoryStorage } from "./lib/storage";
 import { getDefaultServerModel } from "./providerModels";
 import { replaceComposerContextReferences } from "@starkfuture/shared/composerContextReferences";
 import { UnifiedSettings } from "@starkfuture/contracts/settings";
+import {
+  activeComposerPermissionWarnings,
+  type ComposerPermissionWarning,
+} from "./composerPermissionWarnings";
 import { ReviewCommentContextSchema, type ReviewCommentContext } from "./reviewCommentContext";
 const isRuntimeMode = Schema.is(RuntimeMode);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
@@ -234,6 +238,11 @@ type PersistedTerminalContextDraft = typeof PersistedTerminalContextDraft.Type;
 
 const PersistedComposerThreadDraftState = Schema.Struct({
   prompt: Schema.String,
+  shellMode: Schema.optionalKey(Schema.Boolean),
+  shellCommandRespond: Schema.optionalKey(Schema.Boolean),
+  providerPermissionWarnings: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ reference: Schema.String, warning: Schema.String })),
+  ),
   attachments: Schema.Array(PersistedComposerImageAttachment),
   files: Schema.optionalKey(Schema.Array(PersistedComposerDraftFileAttachment)),
   terminalContexts: Schema.optionalKey(Schema.Array(PersistedTerminalContextDraft)),
@@ -387,6 +396,9 @@ const contextInsertionHandlers = new Map<string, ComposerContextInsertionHandler
 
 export interface ComposerThreadDraftState {
   prompt: string;
+  shellMode?: boolean;
+  shellCommandRespond?: boolean;
+  providerPermissionWarnings?: ReadonlyArray<ComposerPermissionWarning>;
   images: ComposerImageAttachment[];
   files: ComposerFileAttachment[];
   nonPersistedImageIds: string[];
@@ -590,7 +602,15 @@ interface ComposerDraftStoreState {
   finalizePromotedDraftThread: (threadRef: ComposerThreadTarget) => void;
   clearDraftThread: (threadRef: ComposerThreadTarget) => void;
   setStickyModelSelection: (modelSelection: ModelSelection | null | undefined) => void;
-  setPrompt: (threadRef: ComposerThreadTarget, prompt: string) => void;
+  setPrompt: (threadRef: ComposerThreadTarget, prompt: string, source?: "human") => void;
+  setShellCommandState: (
+    threadRef: ComposerThreadTarget,
+    options: { shellMode?: boolean; shellCommandRespond?: boolean },
+  ) => void;
+  addProviderPermissionWarning: (
+    threadRef: ComposerThreadTarget,
+    entry: ComposerPermissionWarning,
+  ) => void;
   setTerminalContexts: (threadRef: ComposerThreadTarget, contexts: TerminalContextDraft[]) => void;
   setModelSelection: (
     threadRef: ComposerThreadTarget,
@@ -983,7 +1003,9 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
     draft.activeProvider === null &&
     draft.runtimeMode === null &&
-    draft.interactionMode === null
+    draft.interactionMode === null &&
+    !draft.shellMode &&
+    draft.shellCommandRespond === undefined
   );
 }
 
@@ -2091,7 +2113,9 @@ function normalizePersistedDraftsByThreadId(
       threadContexts.length === 0 &&
       !hasModelData &&
       !runtimeMode &&
-      !interactionMode
+      !interactionMode &&
+      draftCandidate.shellMode !== true &&
+      typeof draftCandidate.shellCommandRespond !== "boolean"
     ) {
       continue;
     }
@@ -2109,6 +2133,28 @@ function normalizePersistedDraftsByThreadId(
             })();
     nextDraftsByThreadKey[normalizedThreadKey] = {
       prompt,
+      ...(typeof draftCandidate.shellMode === "boolean"
+        ? { shellMode: draftCandidate.shellMode }
+        : {}),
+      ...(typeof draftCandidate.shellCommandRespond === "boolean"
+        ? { shellCommandRespond: draftCandidate.shellCommandRespond }
+        : {}),
+      ...(Array.isArray(draftCandidate.providerPermissionWarnings)
+        ? {
+            providerPermissionWarnings: activeComposerPermissionWarnings(
+              prompt,
+              draftCandidate.providerPermissionWarnings
+                .filter(
+                  (entry) =>
+                    typeof entry?.reference === "string" && typeof entry?.warning === "string",
+                )
+                .map((entry) => ({
+                  reference: entry.reference.slice(0, 200),
+                  warning: entry.warning.slice(0, 1000),
+                })),
+            ),
+          }
+        : {}),
       attachments,
       ...(files.length > 0 ? { files } : {}),
       ...(terminalContexts.length > 0 ? { terminalContexts } : {}),
@@ -2227,12 +2273,21 @@ export function partializeComposerDraftStoreState(
       draft.threadContexts.length === 0 &&
       !hasModelData &&
       draft.runtimeMode === null &&
-      draft.interactionMode === null
+      draft.interactionMode === null &&
+      !draft.shellMode &&
+      draft.shellCommandRespond === undefined
     ) {
       continue;
     }
     const persistedDraft: DeepMutable<PersistedComposerThreadDraftState> = {
       prompt: draft.prompt,
+      ...(draft.shellMode !== undefined ? { shellMode: draft.shellMode } : {}),
+      ...(draft.shellCommandRespond !== undefined
+        ? { shellCommandRespond: draft.shellCommandRespond }
+        : {}),
+      ...(draft.providerPermissionWarnings?.length
+        ? { providerPermissionWarnings: [...draft.providerPermissionWarnings] }
+        : {}),
       attachments: draft.persistedAttachments,
       ...(draft.files.length > 0
         ? {
@@ -2545,6 +2600,13 @@ function toHydratedThreadDraft(
 
   return {
     // Files predating inline references get a chip appended; images stay shelf-only.
+    ...(persistedDraft.shellMode !== undefined ? { shellMode: persistedDraft.shellMode } : {}),
+    ...(persistedDraft.shellCommandRespond !== undefined
+      ? { shellCommandRespond: persistedDraft.shellCommandRespond }
+      : {}),
+    ...(persistedDraft.providerPermissionWarnings?.length
+      ? { providerPermissionWarnings: [...persistedDraft.providerPermissionWarnings] }
+      : {}),
     prompt: ensureInlineContextReferences(persistedDraft.prompt, [
       ...(persistedDraft.reviewComments ?? []).map(reviewCommentContextReference),
       ...(persistedDraft.previewAnnotations ?? []).map(previewAnnotationContextReference),
@@ -3089,16 +3151,52 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
-        setPrompt: (threadRef, prompt) => {
+        setShellCommandState: (threadRef, options) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef);
+          if (!threadKey) return;
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            const nextDraft = { ...existing, ...options };
+            const drafts = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) delete drafts[threadKey];
+            else drafts[threadKey] = nextDraft;
+            return { draftsByThreadKey: drafts };
+          });
+        },
+        addProviderPermissionWarning: (threadRef, entry) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef);
+          if (!threadKey) return;
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey];
+            if (!existing) return state;
+            const warnings = activeComposerPermissionWarnings(existing.prompt, [
+              ...(existing.providerPermissionWarnings ?? []).filter(
+                (warning) => warning.reference !== entry.reference,
+              ),
+              entry,
+            ]);
+            return {
+              draftsByThreadKey: {
+                ...state.draftsByThreadKey,
+                [threadKey]: { ...existing, providerPermissionWarnings: warnings },
+              },
+            };
+          });
+        },
+        setPrompt: (threadRef, prompt, source) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) {
             return;
           }
           set((state) => {
             const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            const { providerPermissionWarnings: previousWarnings, ...restExisting } = existing;
+            const warnings = activeComposerPermissionWarnings(prompt, previousWarnings);
             const nextDraft: ComposerThreadDraftState = {
-              ...existing,
+              ...restExisting,
               prompt,
+              ...(warnings.length ? { providerPermissionWarnings: warnings } : {}),
+              ...(source !== "human" && existing.shellMode ? { shellMode: false } : {}),
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {

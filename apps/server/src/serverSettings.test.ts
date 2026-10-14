@@ -99,6 +99,37 @@ const recordProviderUsage = (provider: string, instanceId: string | null = provi
   });
 
 it.layer(NodeServices.layer)("server settings", (it) => {
+  it.effect("refuses unsafe Codex launch arguments before account or settings persistence", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const instanceId = ProviderInstanceId.make("codex-policy-test");
+      const instance = (launchArgs: string) => ({
+        driver: ProviderDriverKind.make("codex"),
+        config: { launchArgs },
+      });
+      const refusal = yield* service
+        .updateProviderInstance({
+          operation: "upsert",
+          instanceId,
+          instance: instance("-s danger-full-access"),
+        })
+        .pipe(Effect.flip);
+      assert.include(refusal.message, "-s danger-full-access");
+      assert.isUndefined((yield* service.getSettings).providerInstances[instanceId]);
+      yield* service.updateProviderInstance({
+        operation: "upsert",
+        instanceId,
+        instance: instance("-p work -a untrusted"),
+      });
+      const directPatch = yield* service
+        .updateSettings({ providerInstances: { [instanceId]: instance("--some-future-flag") } })
+        .pipe(Effect.flip);
+      assert.include(directPatch.message, "--some-future-flag");
+      assert.deepEqual((yield* service.getSettings).providerInstances[instanceId]?.config, {
+        launchArgs: "-p work -a untrusted",
+      });
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
   it.effect("serializes concurrent model preference edits without cancelling duplicate adds", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;

@@ -26,6 +26,7 @@ import {
   ChatAttachmentId,
   ChatFileAttachment,
   ChatImageAttachment,
+  CheckpointId,
   ClaudeSettings,
   EnvironmentId,
   MessageId,
@@ -33,6 +34,7 @@ import {
   NodeId,
   type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2ProviderTurn,
   ProjectId,
   ProviderInstanceId,
   type ProviderInstanceEnvironment,
@@ -69,6 +71,8 @@ import { formatClaudeResumeCompactionQuestion } from "@starkfuture/shared/claude
 import * as HostProcess from "@starkfuture/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@starkfuture/shared/model";
 import { SpawnExecutableResolution } from "@starkfuture/shared/shell";
+import { PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/providerPrivacy";
+import { STARK_PAGES_ENV } from "@starkfuture/shared/starkPages";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
@@ -87,6 +91,10 @@ import * as ProviderAdapter from "@starkfuture/provider-core/server/ProviderAdap
 import type * as ProviderContinuationRequests from "@starkfuture/provider-core/server/ProviderContinuationRequests";
 import { makeProviderFailure } from "@starkfuture/provider-core/server/failure";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
+import {
+  UserShellCommandRunner,
+  type UserShellCommandResult,
+} from "../../shell/UserShellCommandRunner.ts";
 import * as IdAllocator from "@starkfuture/provider-core/server/IdAllocator";
 import { ClaudeOrchestratorReplayHarness } from "./ClaudeAdapterV2.testkit.ts";
 import { provideDeterministicTestRuntime } from "../testkit/DeterministicRuntime.ts";
@@ -934,6 +942,54 @@ describe("ClaudeAdapterV2 context usage", () => {
 });
 
 describe("ClaudeAdapterV2 session permissions", () => {
+  it("maps an explicit remembered approval to local settings and refuses forged broad or publish grants", () => {
+    const input = {
+      toolName: "Bash",
+      toolInput: { command: "npm test" },
+      toolUseID: "remember-test",
+      suggestions: [
+        {
+          type: "addRules" as const,
+          rules: [{ toolName: "Bash", ruleContent: "npm test" }],
+          behavior: "allow" as const,
+          destination: "session" as const,
+        },
+      ],
+    };
+    const result = ClaudeAdapterV2.permissionResultFromDecision({
+      ...input,
+      decision: "acceptAlways",
+    });
+    assert.equal(result.behavior, "allow");
+    if (result.behavior === "allow")
+      assert.deepEqual(result.updatedPermissions, [
+        { ...input.suggestions[0]!, destination: "localSettings" },
+      ]);
+    assert.equal(
+      ClaudeAdapterV2.permissionResultFromDecision({
+        ...input,
+        decision: "acceptAlways",
+        suggestions: [{ ...input.suggestions[0]!, rules: [{ toolName: "Bash" }] }],
+      }).behavior,
+      "deny",
+    );
+    assert.equal(
+      ClaudeAdapterV2.permissionResultFromDecision({
+        ...input,
+        decision: "acceptAlways",
+        matchedAskRule: { source: "projectSettings", toolName: "Bash" },
+      }).behavior,
+      "deny",
+    );
+    assert.equal(
+      ClaudeAdapterV2.permissionResultFromDecision({
+        ...input,
+        decision: "acceptForSession",
+        toolInput: { command: "spage publish page" },
+      }).behavior,
+      "deny",
+    );
+  });
   it("keeps explicit user refusals classified as user_reject", () => {
     const result = ClaudeAdapterV2.permissionResultFromDecision({
       toolName: "Bash",
@@ -1002,7 +1058,11 @@ describe("ClaudeAdapterV2 session permissions", () => {
 });
 
 describe("ClaudeAdapterV2 Auto-accept edits", () => {
-  it.effect("asks before a command instead of allowing it", () =>
+  it.effect.each([
+    { runtimeMode: "auto-accept-edits", hook: false, nativeHookType: false },
+    { runtimeMode: "full-access", hook: true, nativeHookType: true },
+    { runtimeMode: "full-access", hook: true, nativeHookType: false },
+  ] as const)("asks before a command with runtime $runtimeMode, hook=$hook", (scenario) =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -1041,7 +1101,7 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
           },
         });
         const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode: "auto-accept-edits",
+          runtimeMode: scenario.runtimeMode,
           interactionMode: "default",
           cwd: "/workspace",
         });
@@ -1069,21 +1129,36 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
             runtimePolicy,
           }),
         );
-        assert.equal(openedOptions?.permissionMode, "acceptEdits");
+        assert.equal(openedOptions?.permissionMode, "default");
         const canUseTool = openedOptions?.canUseTool;
         assert.isFunction(canUseTool);
 
-        const requestEvent = yield* runtime.events.pipe(
-          Stream.filter((event) => event.type === "runtime_request.updated"),
-          Stream.runHead,
+        const requestReady =
+          yield* Deferred.make<
+            Option.Option<
+              Extract<ProviderAdapter.ProviderAdapterV2Event, { type: "runtime_request.updated" }>
+            >
+          >();
+        const promptReady = yield* Deferred.make<string>();
+        yield* runtime.events.pipe(
+          Stream.runForEach((event) => {
+            if (event.type === "runtime_request.updated")
+              return Deferred.succeed(requestReady, Option.some(event)).pipe(Effect.asVoid);
+            if (event.type === "turn_item.updated" && event.turnItem.type === "approval_request")
+              return Deferred.succeed(promptReady, event.turnItem.prompt ?? "").pipe(Effect.asVoid);
+            return Effect.void;
+          }),
           Effect.forkScoped,
         );
+        const requestEvent = yield* Deferred.await(requestReady).pipe(Effect.forkScoped);
         const command = { command: "node -e 'console.log(42)'" };
         const decision = yield* Effect.promise(() =>
           canUseTool!("Bash", command, {
             signal: new AbortController().signal,
             toolUseID: "tool-bash-accept-edits",
             requestId: "request-bash-accept-edits",
+            ...(scenario.hook ? { decisionReason: "A PreToolUse hook requested approval." } : {}),
+            ...(scenario.nativeHookType ? { decision_reason_type: "hook" as const } : {}),
           }),
         ).pipe(Effect.forkScoped);
         // Without a callback that asks, the command is allowed before any
@@ -1101,6 +1176,8 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
         const event = first.event;
         if (Option.isNone(event) || event.value.type !== "runtime_request.updated") return;
         assert.equal(event.value.runtimeRequest.kind, "command");
+        if (scenario.nativeHookType)
+          assert.include(yield* Deferred.await(promptReady), "Asked by a hook");
 
         yield* runtime.respondToRuntimeRequest({
           requestId: event.value.runtimeRequest.id,
@@ -2318,6 +2395,21 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     });
 
   const makeWakeHarnessWithOptions = (options?: {
+    readonly acknowledgeShellAppends?: boolean;
+    readonly queryMethods?: Partial<
+      Pick<
+        ClaudeAdapterV2.ClaudeAgentSdkQuerySession,
+        | "supportedCommands"
+        | "mcpServerStatus"
+        | "getContextUsage"
+        | "rewindFiles"
+        | "reconnectMcpServer"
+        | "toggleMcpServer"
+        | "authenticateMcpServer"
+        | "submitMcpCallback"
+        | "clearMcpAuth"
+      >
+    >;
     readonly close?: (sdkMessages: Queue.Queue<SDKMessage>) => Effect.Effect<void>;
     readonly interrupt?: Effect.Effect<void>;
     readonly stopTask?: (
@@ -2330,6 +2422,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     // A CLI process opened after the first streams from its own queue, so the
     // first one can exit (Queue.shutdown) and a later turn can start another.
     readonly freshQueueOnReopen?: boolean;
+    readonly forkSession?: Parameters<
+      typeof ClaudeAdapterV2.makeClaudeAdapterV2
+    >[0]["queryRunner"]["forkSession"];
   }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -2351,6 +2446,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         yield* Deferred.await(processed);
       });
       const offeredMessages: Array<SDKUserMessage> = [];
+      const offeredMessageReceipts = yield* Queue.unbounded<SDKUserMessage>();
+      const hookItemReceipts = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
       const permissionModeChanges: Array<string> = [];
       const continuationRequests: Array<ProviderContinuationRequests.ProviderContinuationRequest> =
         [];
@@ -2397,16 +2494,21 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   offer: (message: SDKUserMessage) =>
                     Effect.sync(() => {
                       offeredMessages.push(message);
-                    }),
+                    }).pipe(
+                      Effect.andThen(Queue.offer(offeredMessageReceipts, message)),
+                      Effect.asVoid,
+                    ),
                   setModel: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   stopTask: options?.stopTask ?? (() => Effect.void),
                   interrupt: Effect.void,
                   close: Queue.shutdown(processMessages),
+                  ...options?.queryMethods,
                 };
               }
               processQueues.push(sdkMessages);
               return {
+                ...options?.queryMethods,
                 messages: Stream.fromQueue(sdkMessages).pipe(
                   Stream.flatMap((message) =>
                     Stream.make(message).pipe(
@@ -2425,8 +2527,47 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   ),
                 ),
                 offer: (message) =>
-                  Effect.sync(() => {
+                  Effect.gen(function* () {
                     offeredMessages.push(message);
+                    yield* Queue.offer(offeredMessageReceipts, message);
+                    if (
+                      message.shouldQuery === false &&
+                      options?.acknowledgeShellAppends !== false
+                    ) {
+                      yield* Queue.offer(
+                        sdkMessages,
+                        claudeSdkFrame({
+                          type: "command_lifecycle",
+                          state: "started",
+                          command_uuid: message.uuid,
+                          uuid: `append-start-${message.uuid}`,
+                          session_id: WAKE_NATIVE_SESSION,
+                        }),
+                      );
+                      yield* Queue.offer(
+                        sdkMessages,
+                        claudeSdkFrame({
+                          ...makeResultFrame({
+                            uuid: `append-result-${message.uuid}`,
+                            result: "",
+                            numTurns: 0,
+                          }),
+                          user_message_uuid: message.uuid,
+                          user_message_uuids: [message.uuid],
+                          duration_api_ms: 0,
+                        }),
+                      );
+                      yield* Queue.offer(
+                        sdkMessages,
+                        claudeSdkFrame({
+                          type: "command_lifecycle",
+                          state: "completed",
+                          command_uuid: message.uuid,
+                          uuid: `append-end-${message.uuid}`,
+                          session_id: WAKE_NATIVE_SESSION,
+                        }),
+                      );
+                    }
                   }),
                 setModel: () => Effect.void,
                 setPermissionMode: (mode) =>
@@ -2438,7 +2579,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 close: options?.close?.(sdkMessages) ?? Effect.void,
               };
             }),
-          forkSession: () => Effect.die("unused forkSession"),
+          forkSession: options?.forkSession ?? (() => Effect.die("unused forkSession")),
           subagentLaunchToolUseId: () => Effect.succeed(options?.subagentLaunchToolUseId ?? null),
           assertComplete: Effect.void,
         },
@@ -2469,6 +2610,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             if (event.type === "turn_item.updated" && event.turnItem.type === "system_notice") {
               yield* Queue.offer(systemNoticeReceipts, event);
             }
+            if (event.type === "turn_item.updated" && event.turnItem.type === "hook_run")
+              yield* Queue.offer(hookItemReceipts, event);
           }),
         ),
         Effect.forkScoped,
@@ -2485,6 +2628,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             event.type === "turn.terminal",
         );
       return {
+        adapter,
         runtime,
         providerThread,
         threadId,
@@ -2492,6 +2636,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         processQueues,
         offerAndWait,
         offeredMessages,
+        offeredMessageReceipts,
+        hookItemReceipts,
         // The uuid Claude echoes on the turn answering the nth offered prompt.
         promptUuid: (index: number) => {
           const uuid = offeredMessages[index]?.uuid;
@@ -2511,6 +2657,617 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       };
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
+
+  const localShellResult: UserShellCommandResult = {
+    stdout: "/workspace\n",
+    stderr: "",
+    output: "/workspace\n",
+    outputOmitted: false,
+    exitCode: 0,
+    signal: null,
+    durationMs: 25,
+    timedOut: false,
+    interrupted: false,
+  };
+  const localShellRunner = (result: UserShellCommandResult = localShellResult) =>
+    UserShellCommandRunner.of({
+      run: (input) => (input.onOutput?.(result.output) ?? Effect.void).pipe(Effect.as(result)),
+      cancel: () => Effect.void,
+      saveOutput: ({ output }) => Effect.succeed({ output, outputOmitted: false }),
+    });
+  const shellInput = (
+    harness: {
+      readonly threadId: ThreadId;
+      readonly providerThread: OrchestrationV2ProviderThread;
+    },
+    now: DateTime.Utc,
+    respond: boolean,
+  ) => {
+    const input = makeClaudeTestTurnInput({
+      threadId: harness.threadId,
+      providerThread: harness.providerThread,
+      now,
+      attemptId: RunAttemptId.make("user-shell"),
+      text: "pwd",
+      attachments: [],
+    });
+    return { ...input, message: { ...input.message, userShell: { command: "pwd", respond } } };
+  };
+
+  it("formats user shell context with the exact bash tags and failure code", () => {
+    assert.deepEqual(
+      ClaudeAdapterV2.claudeUserShellBlocks("exit 3", {
+        ...localShellResult,
+        stdout: "out",
+        stderr: "err",
+        exitCode: 3,
+      }),
+      [
+        "<bash-input>exit 3</bash-input>",
+        "<bash-stdout>out</bash-stdout><bash-stderr>err\nExit code 3</bash-stderr>",
+      ],
+    );
+    assert.equal(
+      ClaudeAdapterV2.USER_SHELL_CAVEAT,
+      "<local-command-caveat>The command below was run directly in Stark Code, not sent to you as a request, and its output goes straight to the user. It's recorded here as context for later messages.</local-command-caveat>",
+    );
+  });
+
+  it.effect("reports hook blocks without ending the provider turn", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("hook-run"),
+          text: "inspect files",
+          attachments: [],
+        }),
+      );
+      assert.isTrue(harness.getOpenedOptions()?.includeHookEvents);
+      assert.isTrue(harness.getOpenedOptions()?.enableFileCheckpointing);
+      assert.property(harness.getOpenedOptions()?.extraArgs, "replay-user-messages");
+      yield* harness.offerAndWait(
+        claudeSdkFrame({
+          type: "system",
+          subtype: "hook_started",
+          hook_id: "project-guard",
+          hook_name: "publish guard",
+          hook_event: "PreToolUse",
+          uuid: "hook-start",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+      );
+      yield* harness.offerAndWait(
+        claudeSdkFrame({
+          type: "system",
+          subtype: "hook_response",
+          hook_id: "project-guard",
+          hook_name: "publish guard",
+          hook_event: "PreToolUse",
+          stdout:
+            '{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"approval required"}}',
+          stderr: "",
+          output: "",
+          exit_code: 0,
+          outcome: "success",
+          uuid: "hook-stop",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+      );
+      yield* Queue.take(harness.hookItemReceipts);
+      const hooks = harness.events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "hook_run"
+          ? [event.turnItem]
+          : [],
+      );
+      assert.equal(hooks.length, 1);
+      assert.equal(hooks[0]?.outcome, "blocked");
+      assert.equal(harness.terminalEvents().length, 0);
+      yield* harness.offerAndWait(makeResultFrame({ uuid: "hook-result", result: "done" }));
+      yield* Queue.take(harness.terminalReceipts);
+      const turn = harness.events
+        .flatMap((event) => (event.type === "provider_turn.updated" ? [event.providerTurn] : []))
+        .at(-1);
+      assert.equal(turn?.nativeMetadata?.userMessageId, harness.promptUuid(0));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+      provideDeterministicTestRuntime,
+    ),
+  );
+
+  it.effect("reads context and MCP controls through the existing query without another offer", () =>
+    Effect.gen(function* () {
+      const calls: unknown[] = [];
+      const harness = yield* makeWakeHarnessWithOptions({
+        queryMethods: {
+          getContextUsage: (input) => {
+            calls.push(input);
+            return Effect.succeed({
+              categories: [],
+              totalTokens: 15,
+              maxTokens: 100,
+              rawMaxTokens: 100,
+              percentage: 15,
+              gridRows: [],
+              model: "claude",
+              memoryFiles: [],
+              mcpTools: [],
+              agents: [],
+              isAutoCompactEnabled: true,
+              apiUsage: null,
+            });
+          },
+          mcpServerStatus: () =>
+            Effect.succeed([
+              { name: "stark-code", status: "connected", source: "dynamic" },
+              { name: "pages", status: "needs-auth", source: "plugin" },
+            ]),
+          reconnectMcpServer: (name) =>
+            Effect.sync(() => {
+              calls.push(["reconnect", name]);
+            }),
+          toggleMcpServer: (name, enabled) =>
+            Effect.sync(() => {
+              calls.push(["toggle", name, enabled]);
+            }),
+          authenticateMcpServer: (name) =>
+            Effect.sync(() => {
+              calls.push(["auth", name]);
+              return {
+                authUrl: "https://example.test/oauth",
+                callbackExpected: true,
+                redirectScheme: "localhost",
+                state: "test-state",
+                callbackPort: 3344,
+              };
+            }),
+          submitMcpCallback: (name, url) =>
+            Effect.sync(() => {
+              calls.push(["callback", name, url]);
+            }),
+          clearMcpAuth: (name) =>
+            Effect.sync(() => {
+              calls.push(["logout", name]);
+            }),
+          rewindFiles: (userMessageId, { dryRun }) =>
+            Effect.sync(() => {
+              calls.push(["rewind", userMessageId, dryRun]);
+              return {
+                canRewind: true,
+                filesChanged: ["a.ts"],
+                insertions: 1,
+                deletions: 2,
+                skippedLinks: 3,
+              };
+            }),
+        },
+      });
+      assert.equal(
+        (yield* harness.runtime.readContextUsage!({ detail: "summary" })).kind,
+        "unavailable",
+      );
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("read-controls"),
+          text: "inspect",
+          attachments: [],
+        }),
+      );
+      yield* harness.offerAndWait(
+        makeResultFrame({ uuid: "read-controls-result", result: "done" }),
+      );
+      assert.equal(
+        (yield* harness.runtime.readContextUsage!({ detail: "summary" })).totalTokens,
+        15,
+      );
+      assert.equal((yield* harness.runtime.readContextUsage!({ detail: "full" })).detail, "full");
+      const mcp = harness.runtime.mcpServers!;
+      const servers = yield* mcp.list();
+      assert.isTrue(servers[0]?.locked);
+      assert.equal(servers[1]?.status, "needs-auth");
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(mcp.setEnabled("stark-code", false))));
+      yield* mcp.reconnect("pages");
+      yield* mcp.setEnabled("pages", false);
+      const auth = yield* mcp.startSignIn("pages");
+      assert.equal(auth.callbackPort, 3344);
+      assert.equal(auth.redirectScheme, "localhost");
+      yield* mcp.submitCallback(
+        "pages",
+        "http://localhost:3344/callback?state=test-state&code=test",
+      );
+      yield* mcp.signOut("pages");
+      const preview = yield* harness.runtime.rewindFiles!({
+        providerThread: harness.providerThread,
+        userMessageId: harness.promptUuid(0),
+        dryRun: true,
+      });
+      assert.isUndefined(preview.skippedLinks);
+      const restored = yield* harness.runtime.rewindFiles!({
+        providerThread: harness.providerThread,
+        userMessageId: harness.promptUuid(0),
+        dryRun: false,
+      });
+      assert.equal(restored.skippedLinks, 3);
+      assert.equal(harness.offeredMessages.length, 1);
+      assert.deepEqual(calls.slice(0, 2), [{ detail: "summary" }, { detail: "full" }]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+      provideDeterministicTestRuntime,
+    ),
+  );
+
+  it.effect("opens a dedicated Settings MCP query with hooks disabled and no model prompt", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarnessWithOptions({
+        queryMethods: { mcpServerStatus: () => Effect.succeed([]) },
+      });
+      yield* harness.adapter.mcpServersForCwd!("/workspace").list();
+      assert.equal(harness.offeredMessages.length, 0);
+      assert.isFalse(harness.getOpenedOptions()?.includeHookEvents);
+      const settings = harness.getOpenedOptions()?.settings;
+      assert.isTrue(
+        typeof settings === "object" && settings !== null && settings.disableAllHooks === true,
+      );
+      assert.isUndefined(harness.getOpenedOptions()?.strictMcpConfig);
+      assert.isUndefined(harness.getOpenedOptions()?.mcpServers);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+      provideDeterministicTestRuntime,
+    ),
+  );
+
+  it.effect("user shell reply offers bash blocks once and stays on the shell root turn", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness.pipe(
+        Effect.provideService(UserShellCommandRunner, localShellRunner()),
+      );
+      const input = shellInput(harness, yield* DateTime.now, true);
+      yield* harness.runtime.runUserShellCommand!(input);
+      yield* Queue.take(harness.offeredMessageReceipts);
+      assert.equal(harness.offeredMessages.length, 1);
+      assert.isUndefined(harness.offeredMessages[0]!.shouldQuery);
+      assert.deepEqual(
+        harness.offeredMessages[0]!.message.content,
+        ClaudeAdapterV2.claudeUserShellBlocks("pwd", localShellResult).map((text) => ({
+          type: "text",
+          text,
+        })),
+      );
+      assert.equal(harness.terminalEvents().length, 0);
+      yield* harness.offerAndWait(
+        makeAssistantTextFrame({ uuid: "shell-answer", text: "The folder is /workspace." }),
+      );
+      yield* harness.offerAndWait(
+        makeResultFrame({ uuid: "shell-result", result: "The folder is /workspace." }),
+      );
+      const terminal = yield* Queue.take(harness.terminalReceipts);
+      const items = harness.events.flatMap((event) =>
+        event.type === "turn_item.updated" ? [event.turnItem] : [],
+      );
+      const command = items.find(
+        (item) => item.type === "command_execution" && item.status === "completed",
+      )!;
+      const assistant = items.find((item) => item.type === "assistant_message")!;
+      assert.equal(command.providerTurnId, terminal.providerTurnId);
+      assert.equal(assistant.providerTurnId, terminal.providerTurnId);
+      assert.isAbove(assistant.ordinal, command.ordinal);
+      assert.equal(terminal.status, "completed");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
+  it.effect("user shell just-run without a query persists context for the next normal prompt", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness.pipe(
+        Effect.provideService(UserShellCommandRunner, localShellRunner()),
+      );
+      yield* harness.runtime.runUserShellCommand!(shellInput(harness, yield* DateTime.now, false));
+      yield* Queue.take(harness.terminalReceipts);
+      assert.isUndefined(harness.getOpenedOptions());
+      assert.equal(harness.offeredMessages.length, 0);
+      const saved = harness.events
+        .flatMap((event) =>
+          event.type === "provider_thread.updated" ? [event.providerThread] : [],
+        )
+        .at(-1)!;
+      const expected = [
+        ClaudeAdapterV2.USER_SHELL_CAVEAT,
+        ...ClaudeAdapterV2.claudeUserShellBlocks("pwd", localShellResult),
+      ];
+      assert.deepEqual(saved.nativeMetadata?.pendingUserShellContext, expected);
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: saved,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("after-user-shell"),
+          text: "What was the folder?",
+          attachments: [],
+          providerTurnOrdinal: 2,
+        }),
+      );
+      assert.deepEqual(
+        harness.offeredMessages[0]!.message.content,
+        [...expected, "Ultrathink:\nWhat was the folder?"].map((text) => ({ type: "text", text })),
+      );
+      yield* harness.offerAndWait(
+        makeAssistantTextFrame({ uuid: "pending-shell-answer", text: "/workspace" }),
+      );
+      yield* harness.offerAndWait(
+        makeResultFrame({ uuid: "pending-shell-result", result: "/workspace" }),
+      );
+      yield* Queue.take(harness.terminalReceipts);
+      const completed = harness.events
+        .flatMap((event) =>
+          event.type === "provider_thread.updated" ? [event.providerThread] : [],
+        )
+        .at(-1)!;
+      assert.deepEqual(completed.nativeMetadata?.pendingUserShellContext, []);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
+  it.effect(
+    "user shell just-run acknowledges native zero-turn results without an orphan wake",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness.pipe(
+          Effect.provideService(UserShellCommandRunner, localShellRunner()),
+        );
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("before-shell"),
+            text: "Warm up",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(makeAssistantTextFrame({ uuid: "warm-answer", text: "Ready" }));
+        yield* harness.offerAndWait(makeResultFrame({ uuid: "warm-result", result: "Ready" }));
+        yield* Queue.take(harness.terminalReceipts);
+        yield* harness.runtime.runUserShellCommand!({
+          ...shellInput(harness, yield* DateTime.now, false),
+          providerTurnOrdinal: 2,
+        });
+        yield* Queue.take(harness.terminalReceipts);
+        const message = harness.offeredMessages.at(-1)!;
+        assert.equal(harness.offeredMessages.length, 2);
+        assert.equal(message.shouldQuery, false);
+        assert.deepEqual(
+          message.message.content,
+          [
+            ClaudeAdapterV2.USER_SHELL_CAVEAT,
+            ...ClaudeAdapterV2.claudeUserShellBlocks("pwd", localShellResult),
+          ].map((text) => ({ type: "text", text })),
+        );
+        const recorded = harness.events
+          .flatMap((event) =>
+            event.type === "provider_thread.updated" ? [event.providerThread] : [],
+          )
+          .at(-1)!;
+        assert.equal(recorded.nativeMetadata?.userShellAppends?.at(-1)?.uuid, message.uuid);
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "user",
+            uuid: message.uuid,
+            session_id: WAKE_NATIVE_SESSION,
+            parent_tool_use_id: null,
+            message: message.message,
+          }),
+        );
+        assert.equal(harness.continuationRequests.length, 0);
+        assert.equal(harness.terminalEvents().length, 2);
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: recorded,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("after-append"),
+            providerTurnOrdinal: 3,
+            text: "Continue",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            ...makeResultFrame({ uuid: "delayed-append-result", result: "", numTurns: 0 }),
+            user_message_uuid: message.uuid,
+            user_message_uuids: [message.uuid],
+            duration_api_ms: 0,
+          }),
+        );
+        assert.isTrue(
+          Exit.isFailure(
+            yield* Effect.exit(
+              harness.runtime.runUserShellCommand!({
+                ...shellInput(harness, yield* DateTime.now, false),
+                providerTurnOrdinal: 4,
+              }),
+            ),
+          ),
+          "The newer user turn must still own the adapter",
+        );
+        assert.equal(
+          harness.terminalEvents().length,
+          2,
+          "A delayed append result must not settle the newer user turn",
+        );
+        assert.equal(harness.continuationRequests.length, 0);
+        yield* harness.offerAndWait(
+          makeAssistantTextFrame({ uuid: "after-append-answer", text: "Continuing" }),
+        );
+        yield* harness.offerAndWait(
+          makeResultFrame({ uuid: "after-append-result", result: "Continuing" }),
+        );
+        yield* Queue.take(harness.terminalReceipts);
+        assert.equal(harness.terminalEvents().length, 3);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+
+  it.effect("user shell timeout records context without querying the model", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness.pipe(
+        Effect.provideService(
+          UserShellCommandRunner,
+          localShellRunner({ ...localShellResult, exitCode: null, timedOut: true }),
+        ),
+      );
+      yield* harness.runtime.runUserShellCommand!(shellInput(harness, yield* DateTime.now, true));
+      yield* Queue.take(harness.terminalReceipts);
+      assert.isUndefined(harness.getOpenedOptions());
+      const item = harness.events
+        .flatMap((event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "command_execution"
+            ? [event.turnItem]
+            : [],
+        )
+        .at(-1)!;
+      assert.isTrue(item.timedOut);
+      const saved = harness.events
+        .flatMap((event) =>
+          event.type === "provider_thread.updated" ? [event.providerThread] : [],
+        )
+        .at(-1)!;
+      assert.include(saved.nativeMetadata!.pendingUserShellContext!.join(""), "Command timed out");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
+  it.effect("user shell Stop cancels the runner and never starts an SDK query", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const stopped = yield* Deferred.make<void>();
+      const base = localShellRunner();
+      const runner = UserShellCommandRunner.of({
+        ...base,
+        run: (input) =>
+          (input.onOutput?.("partial") ?? Effect.void).pipe(
+            Effect.andThen(Deferred.succeed(started, undefined)),
+            Effect.andThen(Deferred.await(stopped)),
+            Effect.as({
+              ...localShellResult,
+              output: "partial",
+              stdout: "partial",
+              interrupted: true,
+            }),
+          ),
+        cancel: () => Deferred.succeed(stopped, undefined).pipe(Effect.asVoid),
+      });
+      const harness = yield* makeWakeHarness.pipe(
+        Effect.provideService(UserShellCommandRunner, runner),
+      );
+      yield* harness.runtime.runUserShellCommand!(shellInput(harness, yield* DateTime.now, true));
+      yield* Deferred.await(started);
+      for (
+        let i = 0;
+        i < 1000 && !harness.events.some((event) => event.type === "provider_turn.updated");
+        i++
+      )
+        yield* Effect.yieldNow;
+      const turn = harness.events.flatMap((event) =>
+        event.type === "provider_turn.updated" ? [event.providerTurn] : [],
+      )[0]!;
+      yield* harness.runtime.interruptTurn({
+        providerThread: harness.providerThread,
+        providerTurnId: turn.id,
+      });
+      const terminal = yield* Queue.take(harness.terminalReceipts);
+      assert.equal(terminal.status, "interrupted");
+      assert.isUndefined(harness.getOpenedOptions());
+      assert.equal(harness.offeredMessages.length, 0);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
+  it.effect("user shell append boundaries are retained by rewind and fork", () =>
+    Effect.gen(function* () {
+      const forks: Array<string | undefined> = [];
+      const harness = yield* makeWakeHarnessWithOptions({
+        forkSession: ({ options }) =>
+          Effect.sync(() => {
+            forks.push(options.upToMessageId);
+            return { sessionId: "fork-after-shell" };
+          }),
+      });
+      const now = yield* DateTime.now;
+      const thread = {
+        ...harness.providerThread,
+        nativeMetadata: {
+          userShellAppends: [{ uuid: "last-shell-append", providerTurnOrdinal: 2 }],
+        },
+      };
+      const earlier: OrchestrationV2ProviderTurn = {
+        id: ProviderTurnId.make("earlier-turn"),
+        providerThreadId: thread.id,
+        nodeId: NodeId.make("earlier-node"),
+        runAttemptId: RunAttemptId.make("earlier-attempt"),
+        nativeTurnRef: {
+          driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+          nativeId: "old-assistant-cursor",
+          strength: "weak",
+        },
+        ordinal: 1,
+        status: "completed",
+        startedAt: now,
+        completedAt: now,
+      };
+      const rewind = yield* harness.runtime.rollbackThread({
+        providerThread: thread,
+        target: {
+          type: "provider_turn",
+          checkpointId: CheckpointId.make("before-shell"),
+          appRunOrdinal: 1,
+          providerTurn: earlier,
+        },
+        providerThreadTurns: [earlier],
+      });
+      assert.equal(rewind.providerThread.nativeConversationHeadRef?.nativeId, "last-shell-append");
+      yield* harness.runtime.forkThread({
+        sourceProviderThread: thread,
+        sourceProviderTurns: [earlier],
+        providerTurnId: earlier.id,
+        targetThreadId: ThreadId.make("shell-fork"),
+      });
+      assert.deepEqual(forks, ["last-shell-append"]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
 
   it.effect.each([
     { isError: false, title: "Check weather" },
@@ -3987,7 +4744,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.equal(proposedPlan?.status, "active");
         // The second prompt reuses the live process, which is still in the
         // plan mode Claude entered, so it is put back in the thread's mode.
-        assert.deepEqual(harness.permissionModeChanges, ["bypassPermissions"]);
+        assert.deepEqual(harness.permissionModeChanges, ["default"]);
       }).pipe(
         Effect.provide(
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
@@ -4125,9 +4882,13 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               options: {
                 model: "claude-sonnet-4-6",
                 tools: { type: "preset", preset: "claude_code" },
-                permissionMode: "bypassPermissions",
-                allowDangerouslySkipPermissions: true,
-                settings: { showThinkingSummaries: true },
+                permissionMode: "default",
+                settings: {
+                  env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
+                  disableAutoMode: "disable",
+                  permissions: { disableBypassPermissionsMode: "disable" },
+                  showThinkingSummaries: true,
+                },
                 sessionId: WAKE_NATIVE_SESSION,
               },
             },

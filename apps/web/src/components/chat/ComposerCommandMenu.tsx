@@ -1,4 +1,3 @@
-import { formatProviderSkillDisplayName } from "@starkfuture/shared/inlineSkills";
 import {
   resolveProviderSkillSourceKind,
   type ProviderSkillSourceKind,
@@ -26,9 +25,11 @@ import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../compo
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { ComposerBanner } from "./ComposerBanner";
 import { resolvePullRequestState } from "../pullRequest/pullRequestPresentation";
+import { permissionWarningForCatalogEntry } from "../../composerPermissionWarnings";
 
 export type ComposerCommandItem =
   | {
@@ -84,6 +85,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   isLoading: boolean;
   triggerKind: ComposerTriggerKind | null;
   emptyStateText?: string;
+  footerText?: string | undefined;
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
@@ -152,6 +154,9 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             </p>
           </div>
         )}
+        {props.footerText ? (
+          <p className="border-t px-5 py-2 text-secondary-label text-xs">{props.footerText}</p>
+        ) : null}
       </ComposerBanner.Surface>
     </Command>
   );
@@ -168,10 +173,15 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
 }) {
   const skillSourceKind =
     props.item.type === "skill" ? resolveProviderSkillSourceKind(props.item.skill) : null;
-  const isSlashSkill =
-    props.triggerKind === "slash-command" && props.item.type === "skill" ? props.item.skill : null;
+  const commandSource =
+    props.item.type === "slash-command"
+      ? "app"
+      : props.item.type === "provider-slash-command"
+        ? (props.item.command.source ?? "builtin")
+        : null;
   const pullRequestPresentation =
     props.item.type === "pull-request" ? resolvePullRequestState(props.item.pullRequest) : null;
+  const permissionWarning = permissionWarningForCatalogEntry(props.item);
 
   return (
     <CommandItem
@@ -209,22 +219,36 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       ) : null}
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className="min-w-0 max-w-[45%] shrink-0 truncate font-sans text-xs font-medium">
-          {isSlashSkill ? (
-            <>
-              <span className="text-secondary-label">/skill:</span>
-              {formatProviderSkillDisplayName(isSlashSkill)}
-            </>
-          ) : (
-            props.item.label
-          )}
+          {props.item.label}
         </span>
-        <span className="min-w-0 flex-1 truncate text-left text-secondary-label text-xs">
-          {props.item.description}
+        <span className="min-w-0 flex-1 text-left text-secondary-label text-xs">
+          <span className="block truncate">{props.item.description}</span>
+          {permissionWarning ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="block whitespace-normal text-warning text-3xs">
+                    May run tools without a Stark approval prompt.
+                  </span>
+                }
+              />
+              <TooltipPopup>{permissionWarning}</TooltipPopup>
+            </Tooltip>
+          ) : null}
         </span>
         {skillSourceKind ? (
           <SkillSourceBadge
             kind={skillSourceKind}
-            showSkillSuffix={props.triggerKind === "skill"}
+            sourceName={props.item.type === "skill" ? props.item.skill.pluginName : undefined}
+          />
+        ) : commandSource ? (
+          <SkillSourceBadge
+            kind={commandSource}
+            sourceName={
+              props.item.type === "provider-slash-command"
+                ? props.item.command.sourceName
+                : undefined
+            }
           />
         ) : null}
       </span>
@@ -244,8 +268,12 @@ const LISTBOX_LABEL_BY_TRIGGER: Record<ComposerTriggerKind, string> = {
   skill: "Skills",
 };
 
-const SKILL_SOURCE_ICON_BY_KIND: Record<ProviderSkillSourceKind, LucideIcon> = {
+type CatalogSourceKind = ProviderSkillSourceKind | "app" | "builtin";
+const SKILL_SOURCE_ICON_BY_KIND: Record<CatalogSourceKind, LucideIcon> = {
   app: BlocksIcon,
+  builtin: SettingsIcon,
+  plugin: PackageIcon,
+  mcp: BlocksIcon,
   repo: FolderIcon,
   project: FolderIcon,
   personal: UserRoundIcon,
@@ -253,22 +281,38 @@ const SKILL_SOURCE_ICON_BY_KIND: Record<ProviderSkillSourceKind, LucideIcon> = {
   other: PackageIcon,
 };
 
-const SKILL_SOURCE_LABEL_BY_KIND: Record<ProviderSkillSourceKind, string> = {
+const SKILL_SOURCE_LABEL_BY_KIND: Record<CatalogSourceKind, string> = {
   app: "App",
+  builtin: "Built-in",
+  plugin: "Plugin",
+  mcp: "MCP",
   repo: "Repo",
   project: "Project",
   personal: "Personal",
-  system: "System",
+  system: "Built-in",
   other: "Provider",
 };
 
-function SkillSourceBadge(props: { kind: ProviderSkillSourceKind; showSkillSuffix: boolean }) {
+export function CatalogSourceBadge(props: {
+  kind: CatalogSourceKind;
+  sourceName?: string | undefined;
+}) {
   const Icon = SKILL_SOURCE_ICON_BY_KIND[props.kind];
+  const label = `${SKILL_SOURCE_LABEL_BY_KIND[props.kind]}${props.sourceName ? ` ${props.sourceName}` : ""}`;
   return (
-    <Badge className="ms-auto" variant="secondary">
-      <Icon aria-hidden="true" className="text-current" />
-      {SKILL_SOURCE_LABEL_BY_KIND[props.kind]}
-      {props.showSkillSuffix ? " Skill" : null}
-    </Badge>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="ms-auto inline-flex min-w-0 max-w-48">
+            <Badge className="max-w-full" variant="secondary">
+              <Icon aria-hidden="true" className="text-current" />
+              <span className="min-w-0 truncate">{label}</span>
+            </Badge>
+          </span>
+        }
+      />
+      <TooltipPopup>{label}</TooltipPopup>
+    </Tooltip>
   );
 }
+const SkillSourceBadge = CatalogSourceBadge;

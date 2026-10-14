@@ -1217,6 +1217,14 @@ export interface DesktopBridge {
   receiveProviderAuthCallback?: (authorizationUrl: string) => Promise<string>;
   cancelProviderAuthCallback?: (authorizationUrl: string) => Promise<void>;
   openExternal: (url: string) => Promise<boolean>;
+  getStarkPagesMirror?: (
+    projectRoot: string,
+  ) => Promise<{ readonly root: string; readonly port: number } | null>;
+  openStarkPagesExternal?: (input: {
+    readonly projectRoot: string;
+    readonly url: string;
+  }) => Promise<boolean>;
+  openStarkPagesLink?: (url: string) => Promise<boolean>;
   /**
    * Open a System Settings pane by identifier. Optional: older desktop builds
    * lack it, and callers no-op when it is missing.

@@ -629,3 +629,27 @@ layer("CommandPolicyV2", (it) => {
     }),
   );
 });
+
+it("queues human shell commands behind every active phase without steering or restarting", () => {
+  for (const status of ["preparing", "starting", "running", "waiting"] as const) {
+    const projection = dispatchProjection(baseCapabilities);
+    assert.deepEqual(
+      CommandPolicy.resolveUserShellCommandDispatchIntent({
+        runs: projection.runs.map((run) => ({ ...run, status })),
+      }),
+      { type: "queue_after_active" },
+    );
+  }
+  assert.deepEqual(CommandPolicy.resolveUserShellCommandDispatchIntent({ runs: [] }), {
+    type: "start_immediately",
+  });
+  assert.deepEqual(
+    CommandPolicy.resolveUserShellCommandDispatchIntent({
+      runs: dispatchProjection(baseCapabilities).runs.map((run) => ({
+        ...run,
+        status: "completed",
+      })),
+    }),
+    { type: "start_immediately" },
+  );
+});

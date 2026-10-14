@@ -45,6 +45,10 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it("finds saved permission rules and the MCP server screen", () => {
+    expect(searchSettings("saved approval rules")[0]?.to).toBe("/settings/permissions");
+    expect(searchSettings("MCP servers")[0]?.to).toBe("/settings/mcp-servers");
+  });
   it.each(["OTel", "OTLP", "telemetry export", "Grafana"])(
     "does not offer external telemetry configuration for %s",
     (query) => {
@@ -99,7 +103,9 @@ describe("searchSettings", () => {
   it("finds settings that used to be reachable only through their section", () => {
     expect(searchSettings("pull request template")[0]?.id).toBe("follow-change-request-templates");
     expect(searchSettings("git security keys")[0]?.id).toBe("git-fetch-interval");
-    expect(searchSettings("push notifications")[0]?.id).toBe("publish-agent-activity");
+    expect(searchSettings("push notifications").map((item) => item.id)).not.toContain(
+      "publish-agent-activity",
+    );
     expect(searchSettings("battery saver")[0]?.id).toBe("background-activity");
     expect(searchSettings("binary path")[0]?.id).toBe("providers");
     expect(searchSettings("Antigravity")[0]?.id).toBe("providers");
@@ -235,12 +241,12 @@ describe("searchSettings", () => {
     expect(remoteOnly).not.toContain("stark-connect");
     expect(remoteOnly).not.toContain("publish-agent-activity");
     expect(remoteOnly).not.toContain("wsl-backend");
-    // Browsers without access:write still render CloudLinkRow for their host.
+    // This build has no external activity publishing service.
     const browser = filterAvailableSettingsSearchItems(availability).map((item) => item.id);
-    expect(browser).toContain("publish-agent-activity");
+    expect(browser).not.toContain("publish-agent-activity");
   });
 
-  it("offers webhook holding only while the managed tunnel is on, like its row", () => {
+  it("does not offer the removed managed tunnel's webhook controls", () => {
     const availability = {
       hasCloudPublicConfig: true,
       hasEnvironment: true,
@@ -255,7 +261,7 @@ describe("searchSettings", () => {
         (item) => item.id,
       );
     expect(itemIds(false)).not.toContain("hold-webhooks-while-offline");
-    expect(itemIds(true)).toContain("hold-webhooks-while-offline");
+    expect(itemIds(true)).not.toContain("hold-webhooks-while-offline");
   });
 
   it("shows automatic settlement settings when the server supports them", () => {

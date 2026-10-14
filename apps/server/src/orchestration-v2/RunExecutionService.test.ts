@@ -877,7 +877,7 @@ it.effect("fails the run when its ownership check cannot be read before calling 
 );
 
 it.effect(
-  "dispatches only attachment-free compact commands through the native compaction path",
+  "routes explicit human shell commands before compaction while leaving bang text as a prompt",
   () =>
     Effect.gen(function* () {
       const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
@@ -893,6 +893,19 @@ it.effect(
         { text: " /compact ", attachments: [], expected: "compact" },
         { text: "/compact", attachments: [attachment], expected: "prompt" },
         { text: "Continue the work", attachments: [], expected: "prompt" },
+        { text: "!pwd", attachments: [], expected: "prompt" },
+        {
+          text: "/compact",
+          attachments: [],
+          userShell: { command: "/compact", respond: false },
+          expected: "shell",
+        },
+        {
+          text: "pwd",
+          attachments: [],
+          userShell: { command: "pwd", respond: true },
+          expected: "shell",
+        },
       ];
       for (const [index, testCase] of cases.entries()) {
         const threadId = ThreadId.make(`thread:compact-routing:${index}`);
@@ -910,6 +923,10 @@ it.effect(
             compactThread: () =>
               Effect.sync(() => {
                 calls.push("compact");
+              }),
+            runUserShellCommand: () =>
+              Effect.sync(() => {
+                calls.push("shell");
               }),
           } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
           run: {
@@ -934,6 +951,7 @@ it.effect(
           message: {
             messageId: MessageId.make(`message:compact-routing:${index}`),
             text: testCase.text,
+            ...(testCase.userShell === undefined ? {} : { userShell: testCase.userShell }),
             attachments: testCase.attachments,
             createdBy: "user",
             creationSource: "web",
@@ -4478,4 +4496,38 @@ it.effect("releases ingestion after idle subagent rows and items settle", () =>
       "root-finalized",
     ]);
   }),
+);
+
+it.effect(
+  "refuses human shell commands when the adapter has no implementation without treating them as prompts",
+  () =>
+    Effect.gen(function* () {
+      let prompts = 0;
+      const session = {
+        driver,
+        startTurn: () =>
+          Effect.sync(() => {
+            prompts++;
+          }),
+      } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime;
+      const input = {
+        threadId: ThreadId.make("shell-unsupported"),
+        runId: RunId.make("shell-unsupported"),
+        providerThread: { id: ProviderThreadId.make("shell-unsupported") },
+        message: {
+          messageId: MessageId.make("shell-unsupported"),
+          createdBy: "user",
+          creationSource: "web",
+          text: "pwd",
+          attachments: [],
+          userShell: { command: "pwd", respond: true },
+        },
+      } as unknown as ProviderAdapter.ProviderAdapterV2TurnInput;
+      const error = yield* RunExecutionService.dispatchProviderTurn(session, input).pipe(
+        Effect.flip,
+      );
+      assert.equal(error._tag, "ProviderAdapterTurnStartError");
+      assert.equal(error.cause, "This provider does not support ! commands.");
+      assert.equal(prompts, 0);
+    }),
 );

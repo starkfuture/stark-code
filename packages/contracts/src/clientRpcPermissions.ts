@@ -2,6 +2,8 @@ import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
   AuthOrchestrationOperateScope,
+  AuthTerminalOperateScope,
+  AuthProvidersManageScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   type AuthEnvironmentScope,
@@ -11,6 +13,15 @@ import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  [WS_METHODS.mcpServerReconnect]: AuthOrchestrationOperateScope,
+  [WS_METHODS.mcpServerSetEnabled]: AuthProvidersManageScope,
+  [WS_METHODS.mcpServerSignIn]: AuthProvidersManageScope,
+  [WS_METHODS.mcpServerSubmitCallback]: AuthProvidersManageScope,
+  [WS_METHODS.mcpServerSignOut]: AuthProvidersManageScope,
+  [WS_METHODS.providerForgetPermissionRule]: AuthSettingsWriteScope,
+  [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,
+  [WS_METHODS.checkpointRestoreFiles]: AuthOrchestrationOperateScope,
+  [WS_METHODS.checkpointUndoRestore]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,
   // Endpoint checks exist to configure exports, so they need the same grant as saving them.
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,
@@ -56,6 +67,24 @@ export function clientRpcRequiredScopes(
   method: string,
   input: unknown,
 ): readonly AuthEnvironmentScope[] {
+  if (
+    method === ORCHESTRATION_V2_WS_METHODS.dispatchCommand &&
+    typeof input === "object" &&
+    input !== null &&
+    "type" in input &&
+    input.type === "runtime-request.respond" &&
+    "decision" in input &&
+    input.decision === "acceptAlways"
+  )
+    return [AuthOrchestrationOperateScope, AuthSettingsWriteScope];
+  if (
+    method === ORCHESTRATION_V2_WS_METHODS.dispatchCommand &&
+    typeof input === "object" &&
+    input !== null &&
+    "type" in input &&
+    input.type === "thread.shell-command.dispatch"
+  )
+    return [AuthOrchestrationOperateScope, AuthTerminalOperateScope];
   if (method === WS_METHODS.gitPreparePullRequestThread && input !== undefined) {
     const payload = decodePrepareThread(input);
     if (payload.mode === "worktree" && payload.threadId !== undefined)

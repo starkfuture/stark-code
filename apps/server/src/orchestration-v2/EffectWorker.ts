@@ -414,6 +414,23 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
+          case "checkpoint.files.restore":
+            return checkpointRollback
+              .restoreFiles({
+                threadId: effect.threadId,
+                checkpointId: effect.request.checkpointId,
+                scopeId: effect.request.scopeId,
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationEffectExecutionError({
+                      effectId: effect.id,
+                      effectType: effect.request.type,
+                      cause,
+                    }),
+                ),
+              );
           case "provider-thread.rollback":
             return checkpointRollback
               .execute({
@@ -421,6 +438,12 @@ export const layerExecutor: Layer.Layer<
                 providerThreadId: effect.request.providerThreadId,
                 checkpointId: effect.request.checkpointId,
                 scopeId: effect.request.scopeId,
+                ...(effect.request.restoreScope === undefined
+                  ? {}
+                  : { restoreScope: effect.request.restoreScope }),
+                ...(effect.request.conversation === undefined
+                  ? {}
+                  : { conversation: effect.request.conversation }),
                 ...(effect.request.restoreFiles === undefined
                   ? {}
                   : { restoreFiles: effect.request.restoreFiles }),

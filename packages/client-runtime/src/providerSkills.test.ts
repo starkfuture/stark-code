@@ -193,13 +193,20 @@ describe("getProviderSlashCommandsForSlashMenu", () => {
 });
 
 describe("resolveProviderSkillSourceKind", () => {
-  it("marks plugin-backed skills as app installs", () => {
+  it("uses the CLI's plugin identity instead of guessing from a path", () => {
     expect(
       resolveProviderSkillSourceKind({
         path: "/Users/julius/.codex/plugins/cache/openai-curated/github/skills/gh-fix-ci/SKILL.md",
         scope: "user",
+        pluginName: "github",
       }),
-    ).toBe("app");
+    ).toBe("plugin");
+    expect(
+      resolveProviderSkillSourceKind({
+        path: "/Users/julius/.codex/plugins/cache/github/SKILL.md",
+        scope: "user",
+      }),
+    ).toBe("personal");
   });
 
   it("maps standard scopes to source kinds", () => {

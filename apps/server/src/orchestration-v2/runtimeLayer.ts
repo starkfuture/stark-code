@@ -16,6 +16,7 @@ import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as CheckpointCaptureService from "./CheckpointCaptureService.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as CheckpointRollbackService from "./CheckpointRollbackService.ts";
+import * as CheckpointFileRestore from "../checkpointing/CheckpointFileRestore.ts";
 import * as CommandPolicy from "./CommandPolicy.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
@@ -173,11 +174,24 @@ const layerProviderTurnControlServiceProvided = ProviderTurnControlService.layer
 const layerRuntimeRequestServiceProvided = RuntimeRequestService.layer.pipe(
   Layer.provide(Layer.merge(ProjectionStore.layer, layerProviderSessionManagerProvided)),
 );
+const layerCheckpointFileRestoreProvided = CheckpointFileRestore.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      ProjectionStore.layer,
+      layerCheckpointServiceProvided,
+      ThreadCommandExecutor.layer,
+      layerEventSinkProvided,
+      IdAllocator.layer,
+      layerProviderSessionManagerProvided,
+    ),
+  ),
+);
 const layerCheckpointRollbackServiceProvided = CheckpointRollbackService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       ProjectStore.layer,
       layerCheckpointServiceProvided,
+      layerCheckpointFileRestoreProvided,
       layerEventSinkProvided,
       IdAllocator.layer,
       ProjectionStore.layer,
@@ -337,6 +351,7 @@ const layerMcpAppRequestsProvided = McpAppRequests.layer.pipe(
 );
 
 export const layer = Layer.mergeAll(
+  layerCheckpointFileRestoreProvided,
   layerOrchestratorProvided,
   layerMcpAppRequestsProvided,
   layerThreadManagementProvided,

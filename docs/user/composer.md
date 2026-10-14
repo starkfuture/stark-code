@@ -143,14 +143,20 @@ into a normal draft.
 ## Edit an earlier prompt
 
 On web and desktop, choose **Edit from here** beneath a sent message to rewind
-the conversation to before that message. Choose **Revert and keep changes** to
-leave workspace files as they are, or **Revert files too** to restore them as well.
-File restore is only offered for threads running in a worktree, and it is
-refused when another thread or agent session also uses that directory, a folder
-inside it, or a folder that contains it, since
-restoring would erase their changes. A thread that works in the project directory
-rewinds the conversation only. The selected prompt and its attachments return to the composer for editing and
-resending. Any unsent draft stays above the restored prompt.
+the conversation to before that message. Choose **Restore chat only** to keep
+workspace files, **Restore code and chat** to restore both, or **Restore code only**
+to keep the conversation. The selected prompt returns to the composer when you
+restore chat; any unsent draft stays above it.
+
+In a shared project directory, file restore previews the agent's recorded edits
+and keeps files changed since, links, and unrelated files. Shell-command edits
+and background-agent edits are not tracked. Restore is unavailable while the
+workspace has an active turn. A non-Git Claude project needs native file
+checkpoints. After restoring files, use **Undo restore** to return eligible files
+to their prior contents; files changed since the restore are kept.
+
+An isolated worktree can also restore its whole checkpoint. Do this only when you
+want the worktree to return to that earlier state.
 
 This removes the selected message and later conversation from the active thread
 and provider history. It does not undo external actions or separate provider
@@ -222,15 +228,44 @@ provider. On mobile, both are also available before starting a thread on
 The slash menu also includes skills unless you turn off **Settings → General →
 Show skills in slash menu**. Only skills enabled for the provider are listed.
 
-After you add or change skills, plugins, or MCP servers, use **Restart agent
-session** in the command palette on web and desktop. The conversation continues,
-and your next message starts the agent again with the new setup.
+In a live Claude session, the menu uses Claude's current commands, skills, and MCP
+prompts, including plugin commands. Before a session starts, it shows the available
+filesystem catalog. If installed commands have changed but the session still lists
+the old set, use **Restart agent session** in the command palette. Opening the menu
+does not start an agent session.
 
 Provider commands must start the message to run. Stark Code commands such as
 `/model` and `/plan`, and skill mentions, work on any line.
 
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it. Web and desktop also offer compaction from the context meter.
+
+## Run a shell command
+
+On web and desktop, type `!` at the start of an empty Codex or Claude composer,
+then enter a command. It runs in a fresh login shell in the thread's working
+directory. Shell commands do not retain directory changes or shell variables
+between runs; use the terminal for a continuing shell session.
+
+**Respond** runs the command and asks the agent to use its output. **Just run**
+records the output for later context without requesting a reply. Hold Option on
+macOS or Alt elsewhere while sending to use the other choice for that command.
+Use Stop to cancel a running command. Long output is saved as a file; the message
+shows a limited preview and a link to the full output.
+
+Queued shell commands run in order and cannot be edited or promoted to a steer.
+The environment can disable this feature or change its ten-minute timeout in
+server settings.
+
+## View Stark Pages
+
+In the local Mac app, open **Pages** from a thread to view the project's Stark
+Pages mirror beside the conversation. Start the mirror through your Stark
+Workbench setup first. The panel reports when no mirror is running.
+
+With the Stark Workbench plugin available in Claude native shell mode, Publish
+prepares its command in the terminal for you to review and submit. It does not
+submit the command automatically. Other modes keep publishing unavailable.
 
 ## Goals
 

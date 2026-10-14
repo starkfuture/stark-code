@@ -9,8 +9,8 @@ import { PLAN_IMPLEMENTATION_PROMPT_PREFIX } from "../../proposedPlan";
  * composer walks back through the active thread's sent prompts, ArrowDown
  * walks forward and restores the unsent draft past the newest entry.
  *
- * History is per thread and text only. It is derived from the thread's user
- * messages on every keypress, so there is no store to persist or sync.
+ * Prompt history comes from the current thread. The caller also supplies
+ * project shell history, and shell entries retain their explicit command mode.
  */
 
 const CLAUDE_ULTRATHINK_PREFIX = "Ultrathink:\n";
@@ -22,11 +22,13 @@ export interface ComposerPromptHistoryMessage {
   readonly id: string;
   readonly role: string;
   readonly text: string;
+  readonly userShell?: { readonly command: string; readonly respond: boolean };
 }
 
 export interface ComposerPromptHistoryEntry {
   readonly id: string;
   readonly prompt: string;
+  readonly userShell?: { readonly command: string; readonly respond: boolean };
 }
 
 /**
@@ -58,6 +60,7 @@ function findActive(
 export interface ComposerPromptHistoryStep {
   readonly position: ComposerPromptHistoryPosition | null;
   readonly prompt: string;
+  readonly userShell?: { readonly command: string; readonly respond: boolean };
 }
 
 /**
@@ -168,18 +171,29 @@ export function recallableComposerPrompt(messageText: string): string {
  */
 export function buildComposerPromptHistoryEntries(
   messages: ReadonlyArray<ComposerPromptHistoryMessage>,
+  kind?: "shell" | "prompt",
 ): ComposerPromptHistoryEntry[] {
   const entries: ComposerPromptHistoryEntry[] = [];
   for (const message of messages) {
     if (message.role !== "user") continue;
-    const prompt = recallableComposerPrompt(message.text);
+    if (kind === "shell" && !message.userShell) continue;
+    if (kind === "prompt" && message.userShell) continue;
+    const prompt = message.userShell?.command ?? recallableComposerPrompt(message.text);
     if (prompt.length === 0) continue;
     const previous = entries[entries.length - 1];
     if (previous && previous.prompt === prompt) {
-      entries[entries.length - 1] = { id: message.id, prompt };
+      entries[entries.length - 1] = {
+        id: message.id,
+        prompt,
+        ...(message.userShell ? { userShell: message.userShell } : {}),
+      };
       continue;
     }
-    entries.push({ id: message.id, prompt });
+    entries.push({
+      id: message.id,
+      prompt,
+      ...(message.userShell ? { userShell: message.userShell } : {}),
+    });
   }
   return entries;
 }
@@ -205,11 +219,19 @@ export function stepComposerPromptHistory(input: {
     if (activeIndex < 0 && currentPrompt.length > 0) return null;
     const entry = entries[activeIndex < 0 ? entries.length - 1 : activeIndex - 1];
     if (!entry) return null;
-    return { position: { entryId: entry.id, recalled: entry.prompt }, prompt: entry.prompt };
+    return {
+      position: { entryId: entry.id, recalled: entry.prompt },
+      prompt: entry.prompt,
+      ...(entry.userShell ? { userShell: entry.userShell } : {}),
+    };
   }
 
   if (activeIndex < 0) return null;
   const entry = entries[activeIndex + 1];
   if (!entry) return { position: null, prompt: "" };
-  return { position: { entryId: entry.id, recalled: entry.prompt }, prompt: entry.prompt };
+  return {
+    position: { entryId: entry.id, recalled: entry.prompt },
+    prompt: entry.prompt,
+    ...(entry.userShell ? { userShell: entry.userShell } : {}),
+  };
 }

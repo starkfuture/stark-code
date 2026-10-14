@@ -1,4 +1,5 @@
 import { CODEX_PRIVACY_ARGS, PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/providerPrivacy";
+import { STARK_PAGES_ENV } from "@starkfuture/shared/starkPages";
 import { describe, expect, it } from "@effect/vitest";
 import { nativeAgentLaunch } from "./NativeAgentLaunch.ts";
 
@@ -6,13 +7,12 @@ const defaultCodexPolicy = [
   "--ask-for-approval",
   "on-request",
   "--sandbox",
-  "workspace-write",
-  "-c",
-  'approval_policy="on-request"',
-  "-c",
-  'sandbox_mode="workspace-write"',
+  "read-only",
   "-c",
   'approvals_reviewer="user"',
+  "-c",
+  "sandbox_workspace_write.network_access=false",
+  "--no-daemon",
 ];
 
 describe("native agent shell launch", () => {
@@ -41,7 +41,7 @@ describe("native agent shell launch", () => {
         "default",
         "--settings",
         JSON.stringify({
-          env: PROVIDER_PRIVACY_ENV,
+          env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
           disableAutoMode: "disable",
           permissions: { disableBypassPermissionsMode: "disable" },
         }),
@@ -69,19 +69,7 @@ describe("native agent shell launch", () => {
     expect(
       nativeAgentLaunch({ driver: "codex", home: "/tmp", config: { launchArgs: "-a untrusted" } })
         .args,
-    ).toEqual([
-      "--ask-for-approval",
-      "untrusted",
-      "--sandbox",
-      "workspace-write",
-      "-c",
-      'approval_policy="untrusted"',
-      "-c",
-      'sandbox_mode="workspace-write"',
-      "-c",
-      'approvals_reviewer="user"',
-      ...CODEX_PRIVACY_ARGS,
-    ]);
+    ).toEqual([...defaultCodexPolicy, ...CODEX_PRIVACY_ARGS]);
     expect(
       nativeAgentLaunch({
         driver: "claudeAgent",
@@ -160,10 +148,9 @@ describe("native agent shell launch", () => {
       "-sread-only",
       "-s=read-only",
       "--sandbox=read-only",
-      "-c 'sandbox_mode=\"read-only\"'",
     ]) {
       const { args } = nativeAgentLaunch({ driver: "codex", config: { launchArgs }, home: "/tmp" });
-      expect(args).toContain('sandbox_mode="read-only"');
+      expect(args).toEqual([...defaultCodexPolicy, ...CODEX_PRIVACY_ARGS]);
       expect(args.slice(args.indexOf("--sandbox"), args.indexOf("--sandbox") + 2)).toEqual([
         "--sandbox",
         "read-only",
@@ -186,25 +173,14 @@ describe("native agent shell launch", () => {
     ]);
     expect(args.slice(6)).toEqual([...defaultCodexPolicy, ...CODEX_PRIVACY_ARGS]);
   });
-  it("puts enforced policy and privacy before a prompt delimiter", () => {
-    const { args } = nativeAgentLaunch({
-      driver: "codex",
-      home: "/tmp",
-      config: {
-        launchArgs: '--profile company -- "explain these flags" --yolo -s danger-full-access',
-      },
-    });
-    expect(args).toEqual([
-      "--profile",
-      "company",
-      ...defaultCodexPolicy,
-      ...CODEX_PRIVACY_ARGS,
-      "--",
-      "explain these flags",
-      "--yolo",
-      "-s",
-      "danger-full-access",
-    ]);
+  it("refuses prompts after an options delimiter", () => {
+    expect(() =>
+      nativeAgentLaunch({
+        driver: "codex",
+        home: "/tmp",
+        config: { launchArgs: '--profile company -- "explain these flags"' },
+      }),
+    ).toThrow("Remove --");
   });
   it("normalises repeated safe policy flags without duplicate CLI options", () => {
     const { args } = nativeAgentLaunch({
@@ -217,8 +193,7 @@ describe("native agent shell launch", () => {
     });
     expect(args.filter((arg) => arg === "--sandbox")).toHaveLength(1);
     expect(args.filter((arg) => arg === "--ask-for-approval")).toHaveLength(1);
-    expect(args).toContain('sandbox_mode="read-only"');
-    expect(args).toContain('approval_policy="untrusted"');
+    expect(args).toEqual([...defaultCodexPolicy, ...CODEX_PRIVACY_ARGS]);
   });
   it("rejects unsupported providers instead of launching a different agent", () => {
     expect(() => nativeAgentLaunch({ driver: "unknown", config: {}, home: "/Users/test" })).toThrow(

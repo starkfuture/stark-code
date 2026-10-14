@@ -21,6 +21,8 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/snap-shot"
   | "/settings/providers"
+  | "/settings/permissions"
+  | "/settings/mcp-servers"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
@@ -100,6 +102,8 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
+  "/settings/permissions": "Permissions",
+  "/settings/mcp-servers": "MCP servers",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Scheduled Tasks",
   "/settings/source-control": "Source Control",
@@ -164,6 +168,20 @@ const SOURCE_CONTROL_HOST_SEARCH_ITEMS = sourceControlClients.definitions.flatMa
  * that may not be mounted point at their nearest stable section instead.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "permission-rules",
+    title: "Saved approval rules",
+    to: "/settings/permissions",
+    searchTerms: ["permissions always allow remember forget Claude Codex project worktree sandbox"],
+    environmentOnly: true,
+  },
+  {
+    id: "mcp-servers",
+    title: "MCP servers",
+    to: "/settings/mcp-servers",
+    searchTerms: ["tools connector plugin status reconnect enable disable OAuth sign in"],
+    environmentOnly: true,
+  },
   {
     id: "storage-worktree-keep-when",
     targetId: "storage-worktrees",
@@ -978,6 +996,8 @@ export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
 const SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item] as const));
 
 const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScope | null>> = {
+  "/settings/mcp-servers": null,
+  "/settings/permissions": null,
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,

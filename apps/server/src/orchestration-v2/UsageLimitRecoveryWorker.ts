@@ -1,4 +1,8 @@
-import { CommandId, MessageId, type OrchestrationV2Command } from "@starkfuture/contracts";
+import {
+  CommandId,
+  MessageId,
+  type OrchestrationV2ServerProducerCommand,
+} from "@starkfuture/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -13,7 +17,7 @@ export function limitRecoveryCommand(
   autoResume: boolean,
   nowMs: number,
   snooze = false,
-): OrchestrationV2Command | null {
+): OrchestrationV2ServerProducerCommand | null {
   if (
     thread.status !== "failed" ||
     thread.lastErrorClass !== "usage_limit" ||

@@ -1,6 +1,29 @@
 import { assert, it } from "@effect/vitest";
 
-import { applyPreferredCodexDefaultModel, mapCodexModelCapabilities } from "./CodexProvider.ts";
+import {
+  applyPreferredCodexDefaultModel,
+  mapCodexModelCapabilities,
+  parseCodexSkillsListResponse,
+} from "./CodexProvider.ts";
+import type * as CodexSchema from "effect-codex-app-server/schema";
+
+it("preserves native Codex plugin identity without guessing from its installation path", () => {
+  const skill = {
+    name: "deploy",
+    path: "/arbitrary/location/SKILL.md",
+    enabled: true,
+    description: "Deploy",
+    scope: "user",
+    pluginId: "deployment@marketplace",
+  };
+  const response = {
+    data: [{ cwd: "/workspace", skills: [skill], errors: [] }],
+  } as CodexSchema.V2SkillsListResponse;
+  assert.equal(
+    parseCodexSkillsListResponse(response, "/workspace")[0]?.pluginName,
+    "deployment@marketplace",
+  );
+});
 
 it("maps current Codex model capability fields", () => {
   const capabilities = mapCodexModelCapabilities({

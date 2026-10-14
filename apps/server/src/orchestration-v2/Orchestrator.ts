@@ -84,7 +84,11 @@ import {
   SHARED_WORKSPACE_RESTORE_MESSAGE,
 } from "./CheckpointRestoreSafety.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
-import { CommandPolicyV2, resolveMessageDispatchIntent } from "./CommandPolicy.ts";
+import {
+  CommandPolicyV2,
+  resolveMessageDispatchIntent,
+  resolveUserShellCommandDispatchIntent,
+} from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "@starkfuture/provider-core/server/notification";
@@ -423,12 +427,21 @@ function wakeWorkStartedAt(
 }
 
 /** A native /compact or /logout turn: provider maintenance, not agent work. */
+type InternalMessageDispatch = Extract<
+  OrchestrationV2Command,
+  { readonly type: "message.dispatch" }
+> & {
+  readonly userShell?: OrchestrationV2ConversationMessage["userShell"];
+};
+
 export function isNativeMaintenanceCommand(message: {
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly context?: import("@starkfuture/contracts").OrchestrationMessageContext | undefined;
+  readonly userShell?: OrchestrationV2ConversationMessage["userShell"];
 }): boolean {
   return (
+    message.userShell === undefined &&
     message.attachments.length === 0 &&
     ["/compact", "/logout"].includes(message.text.trim().toLowerCase())
   );
@@ -475,6 +488,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.model-selection.set":
     case "provider-session.detach":
     case "message.dispatch":
+    case "thread.shell-command.dispatch":
     case "notification.delivery.accept":
     case "prepared-run.release":
     case "prepared-run.progress":
@@ -1357,6 +1371,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (
         worktreeMissing ||
         instanceDisabledForProject ||
+        (settings.allowUserShellCommands === false &&
+          projection.messages.some(
+            (message) => message.id === queuedRun.userMessageId && message.userShell !== undefined,
+          )) ||
         (failureClass !== undefined &&
           failureClass !== "validation_error" &&
           failedRun?.providerInstanceId === queuedRun.providerInstanceId)
@@ -1685,6 +1703,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           type: "user_message",
           messageId: queuedMessage.id,
           text: queuedMessage.text,
+          ...(queuedMessage.userShell === undefined ? {} : { userShell: queuedMessage.userShell }),
           attachments: queuedMessage.attachments,
           ...(queuedMessage.context ? { context: queuedMessage.context } : {}),
           createdBy: queuedMessage.createdBy,
@@ -4560,7 +4579,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
 
   const dispatchMessage = (
-    command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
+    command: InternalMessageDispatch,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
   ) =>
@@ -4711,6 +4730,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const onlyMaintenanceHistory =
         userMessages.length > 0 && userMessages.every(isNativeMaintenanceCommand);
       if (
+        command.userShell === undefined &&
         !isNativeMaintenanceCommand(command) &&
         ((command.titleSeed !== undefined &&
           (yield* projectionStore
@@ -4745,11 +4765,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         projection = yield* getProjectionWithPendingEvents(command.threadId, events);
       }
       const modelSelection = command.modelSelection ?? projection.thread.modelSelection;
-      let dispatchMode = resolveMessageDispatchIntent(
-        projection,
-        command.dispatchMode,
-        command.deliveryIntent,
-      );
+      let dispatchMode =
+        command.userShell !== undefined
+          ? resolveUserShellCommandDispatchIntent(projection)
+          : resolveMessageDispatchIntent(projection, command.dispatchMode, command.deliveryIntent);
       if (dispatchMode.type === "steer_active") {
         const targetRunId = dispatchMode.targetRunId;
         const target = projection.runs.find((run) => run.id === targetRunId);
@@ -4934,6 +4953,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           targetRunId: dispatchMode.targetRunId,
           messageId: command.messageId,
           text: dispatchText,
+          ...(command.userShell === undefined ? {} : { userShell: command.userShell }),
           ...(command.context ? { context: command.context } : {}),
           attachments: command.attachments,
           createdBy: command.createdBy,
@@ -5149,6 +5169,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           nodeId: rootNodeId,
           role: "user",
           text: dispatchText,
+          ...(command.userShell === undefined ? {} : { userShell: command.userShell }),
           ...(command.context ? { context: command.context } : {}),
           attachments: command.attachments,
           streaming: false,
@@ -5493,6 +5514,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           nodeId: rootNodeId,
           role: "user",
           text: dispatchText,
+          ...(command.userShell === undefined ? {} : { userShell: command.userShell }),
           ...(command.context ? { context: command.context } : {}),
           attachments: command.attachments,
           streaming: false,
@@ -5528,6 +5550,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           messageId: command.messageId,
           inputIntent: "turn_start",
           text: dispatchText,
+          ...(command.userShell === undefined ? {} : { userShell: command.userShell }),
           ...(command.context ? { context: command.context } : {}),
           attachments: command.attachments,
         };
@@ -6185,6 +6208,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         nodeId: rootNodeId,
         role: "user",
         text: dispatchText,
+        ...(command.userShell === undefined ? {} : { userShell: command.userShell }),
         ...(command.context ? { context: command.context } : {}),
         attachments: command.attachments,
         streaming: false,
@@ -6218,6 +6242,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         messageId: command.messageId,
         inputIntent: "turn_start",
         text: dispatchText,
+        ...(command.userShell === undefined ? {} : { userShell: command.userShell }),
         ...(command.context ? { context: command.context } : {}),
         attachments: command.attachments,
       };
@@ -7678,6 +7703,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Queued run ${queuedRun.id} is missing message or execution state.`,
         });
       }
+      if (queuedMessage.userShell !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause:
+            "Queued shell commands cannot be edited or promoted to Steer. Remove it and send a new shell command.",
+        });
+      }
       if (
         queuedMessage.delegatedCompletion !== undefined ||
         queuedMessage.notification !== undefined
@@ -7976,6 +8009,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           commandId: command.commandId,
           commandType: command.type,
           cause: `Queued run ${queuedRun.id} has no user message.`,
+        });
+      }
+      if (queuedMessage.userShell !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause:
+            "Queued shell commands cannot be edited or promoted to Steer. Remove it and send a new shell command.",
         });
       }
       if (
@@ -9668,6 +9709,53 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ["providerThreads", "checkpoints", "checkpointScopes", "runs", "providerTurns", "attempts"],
         { turnItemTypes: [], messageRoles: ["user"] },
       );
+      if (command.conversation === false) {
+        if (command.restoreFiles === false)
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "Choose files or conversation to restore.",
+          });
+        const checkpoint = projection.checkpoints.find(
+          (candidate) =>
+            candidate.id === command.checkpointId && candidate.scopeId === command.scopeId,
+        );
+        if (
+          !checkpoint ||
+          !["ready", "missing"].includes(checkpoint.status) ||
+          !projection.checkpointScopes.some((scope) => scope.id === command.scopeId)
+        )
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "The file checkpoint is unavailable.",
+          });
+        const now = yield* DateTime.now;
+        yield* emit(
+          events,
+          command,
+        )({
+          type: "checkpoint.rollback-requested",
+          threadId: command.threadId,
+          providerInstanceId: projection.thread.providerInstanceId,
+          occurredAt: now,
+          payload: { scopeId: command.scopeId, checkpointId: checkpoint.id, requestedAt: now },
+        });
+        yield* Ref.update(effects, (current) => [
+          ...current,
+          {
+            id: `effect:${command.commandId}:checkpoint.files.restore:${checkpoint.id}`,
+            commandId: command.commandId,
+            threadId: command.threadId,
+            request: {
+              type: "checkpoint.files.restore",
+              checkpointId: checkpoint.id,
+              scopeId: command.scopeId,
+            },
+          } satisfies PendingOrchestrationEffectV2,
+        ]);
+        return;
+      }
       const providerThread = projection.providerThreads.find(
         (candidate) => candidate.id === projection.thread.activeProviderThreadId,
       );
@@ -9717,7 +9805,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Checkpoint ${command.checkpointId} was not found.`,
         });
       }
-      if (targetCheckpoint.status !== "ready") {
+      if (
+        !(
+          targetCheckpoint.status === "ready" ||
+          (targetCheckpoint.status === "missing" && providerThread.driver === "claudeAgent")
+        )
+      ) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
@@ -9757,7 +9850,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               }),
           ),
         );
-        if (!isolated)
+        if (!isolated && command.restoreScope === "checkout")
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
             commandType: command.type,
@@ -9826,6 +9919,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           request: {
             type: "provider-thread.rollback",
             ...(command.restoreFiles === undefined ? {} : { restoreFiles: command.restoreFiles }),
+            ...(command.restoreScope === undefined ? {} : { restoreScope: command.restoreScope }),
+            ...(command.conversation === undefined ? {} : { conversation: command.conversation }),
             providerThreadId: providerThread.id,
             checkpointId: targetCheckpoint.id,
             scopeId: targetScope.id,
@@ -10846,7 +10941,76 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);
         break;
+      case "thread.shell-command.dispatch": {
+        if (command.createdBy !== "user") {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "Only a user can dispatch a shell command.",
+          });
+        }
+        const settings = yield* serverSettings.getSettings.pipe(mapDispatchError(command));
+        if (settings.allowUserShellCommands === false) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "User shell commands are disabled for this environment.",
+          });
+        }
+        const thread = yield* projectionStore
+          .getThread(command.threadId)
+          .pipe(
+            Effect.mapError(
+              (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+            ),
+          );
+        if (isProviderNativeSubagentThread(thread)) {
+          return yield* new OrchestratorSubagentThreadReadOnlyError({
+            commandId: command.commandId,
+            threadId: command.threadId,
+          });
+        }
+        const adapter = yield* providerAdapters
+          .get(thread.modelSelection.instanceId)
+          .pipe(mapDispatchError(command));
+        if (adapter.driver !== "codex" && adapter.driver !== "claudeAgent") {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "This provider does not support ! commands.",
+          });
+        }
+        yield* dispatchMessage(
+          {
+            type: "message.dispatch",
+            createdBy: command.createdBy,
+            creationSource: command.creationSource,
+            commandId: command.commandId,
+            threadId: command.threadId,
+            messageId: command.messageId,
+            text: command.command,
+            attachments: [],
+            dispatchMode: command.dispatchMode,
+            userShell: {
+              commandId: command.commandId,
+              command: command.command,
+              respond: command.respond,
+              timeoutMs: command.timeoutMs ?? settings.shellCommandTimeoutMs,
+            },
+          },
+          events,
+          effects,
+        );
+        break;
+      }
       case "message.dispatch": {
+        if ("userShell" in command) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "Shell commands require the dedicated user dispatch command.",
+          });
+        }
         // The provider owns a native subagent's conversation, so a sent
         // message has nowhere to go. Answers to a subagent's questions never
         // target it either: adapters ask them on the top-level parent thread.
@@ -11236,7 +11400,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         dispatchWithReceiptEffect(command),
       );
       if (
-        command.type !== "message.dispatch" ||
+        (command.type !== "message.dispatch" && command.type !== "thread.shell-command.dispatch") ||
         (command.createdBy !== "user" && command.creationSource !== "mcp")
       )
         return yield* dispatch;

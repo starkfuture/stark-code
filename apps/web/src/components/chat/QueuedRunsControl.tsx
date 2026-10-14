@@ -57,7 +57,7 @@ export function QueuedRunsControl({
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly optimisticMessages: ReadonlyArray<
-    Pick<ChatMessage, "id" | "inputIntent" | "text" | "attachments">
+    Pick<ChatMessage, "id" | "inputIntent" | "text" | "attachments" | "userShell">
   >;
   /** The saved queue entry stays visible while its draft is edited in the composer. */
   readonly editingRunId: RunId | null;
@@ -87,6 +87,11 @@ export function QueuedRunsControl({
     [projection],
   );
   const queued = workflow?.queuedRuns ?? [];
+  const shellMessageIds = new Set(
+    (projection?.messages ?? [])
+      .filter((message) => message.userShell !== undefined)
+      .map((message) => message.id),
+  );
   const activeRun = workflow?.activeRun ?? null;
   const canReorder = workflow?.canReorder === true;
   const queuedImageAttachmentIds = useMemo(() => {
@@ -135,6 +140,7 @@ export function QueuedRunsControl({
       key: run.id,
       runId: run.id,
       messageId: run.userMessageId,
+      userShell: run.userMessageId !== null && shellMessageIds.has(run.userMessageId),
       serverIndex,
       text,
       attachments,
@@ -151,6 +157,7 @@ export function QueuedRunsControl({
       key: message.id,
       runId: null,
       messageId: null,
+      userShell: message.userShell !== undefined,
       serverIndex: null,
       text: message.text,
       attachments: [] as ReadonlyArray<ContractChatAttachment>,
@@ -190,6 +197,8 @@ export function QueuedRunsControl({
 
   const steerInFlightRef = useRef(false);
   const steer = async (queuedRunId: RunId) => {
+    const queuedItem = queued.find((entry) => entry.run.id === queuedRunId);
+    if (queuedItem?.run.userMessageId && shellMessageIds.has(queuedItem.run.userMessageId)) return;
     if (activeRun === null || !workflow?.canPromoteToSteer || steerInFlightRef.current) return;
     steerInFlightRef.current = true;
     setBusyRunId(queuedRunId);
@@ -207,6 +216,7 @@ export function QueuedRunsControl({
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
+      if (next?.run.userMessageId && shellMessageIds.has(next.run.userMessageId)) return false;
       if (!next || !workflow?.canPromoteToSteer) return false;
       if (!repeat && busyRunId === null) void steer(next.run.id);
       return true;
@@ -215,6 +225,7 @@ export function QueuedRunsControl({
     // moving the caret inside that draft.
     editLatest(repeat) {
       const latest = queued.at(-1);
+      if (latest?.run.userMessageId && shellMessageIds.has(latest.run.userMessageId)) return false;
       if (!latest || props.editingRunId !== null || busyRunId !== null) return false;
       if (!repeat) {
         setExpanded(true);
@@ -272,9 +283,11 @@ export function QueuedRunsControl({
         <ComposerBanner.Scroll className={cn("max-h-32", !expanded && "hidden")}>
           <ComposerBanner.Children render={<ol />} id={queueListId}>
             {items.map((item) => {
-              const previewText = replaceComposerContextReferences(item.text, (reference) =>
-                reference.kind === "image" && item.thumbnails.length > 0 ? "" : reference.label,
-              ).trim();
+              const previewText =
+                (item.userShell ? "! " : "") +
+                replaceComposerContextReferences(item.text, (reference) =>
+                  reference.kind === "image" && item.thumbnails.length > 0 ? "" : reference.label,
+                ).trim();
               const rowRunId = item.runId;
               const rowServerIndex = item.serverIndex;
               const isEditing = rowRunId !== null && rowRunId === props.editingRunId;
@@ -422,7 +435,9 @@ export function QueuedRunsControl({
                                 size="icon-xs"
                                 variant="ghost-muted"
                                 aria-label="Edit queued message"
-                                disabled={item.runId === null || busyRunId !== null}
+                                disabled={
+                                  item.userShell || item.runId === null || busyRunId !== null
+                                }
                                 onClick={() => {
                                   if (item.runId !== null && item.messageId !== null) {
                                     props.onEditQueuedRun({
@@ -448,6 +463,7 @@ export function QueuedRunsControl({
                               size="xs"
                               variant="ghost-muted"
                               disabled={
+                                item.userShell ||
                                 item.runId === null ||
                                 busyRunId !== null ||
                                 !workflow?.canPromoteToSteer

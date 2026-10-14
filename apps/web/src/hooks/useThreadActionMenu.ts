@@ -47,6 +47,7 @@ import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
+import { readThreadHookActivity, setThreadHookActivity } from "./useThreadHookActivity";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -161,8 +162,25 @@ export function useThreadActionMenu(input: {
           supports,
           snoozePresets,
         });
-        const clicked = await settlePromise(() => api.contextMenu.show(items, position));
+        const clicked = await settlePromise(() =>
+          api.contextMenu.show(
+            [
+              ...items,
+              {
+                id: "show-hook-activity" as const,
+                label: "Show all hook activity",
+                checked: readThreadHookActivity(threadRef),
+                separatorBefore: true,
+              },
+            ],
+            position,
+          ),
+        );
         if (clicked._tag === "Failure" || clicked.value === null) return;
+        if (clicked.value === "show-hook-activity") {
+          setThreadHookActivity(threadRef, !readThreadHookActivity(threadRef));
+          return;
+        }
         const action: ThreadActionMenuId = clicked.value;
         if (
           threadActionRequiresOperate(action) &&

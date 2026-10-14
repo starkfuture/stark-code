@@ -22,6 +22,13 @@ import {
   ChatGptHandoffState,
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
+import {
+  CheckpointFileRestoreInput,
+  CheckpointRestorePreview,
+  CheckpointFileRestoreResult,
+  CheckpointUndoRestoreInput,
+  CheckpointFileRestoreError,
+} from "./checkpointRestore.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
@@ -159,8 +166,26 @@ import {
   ProviderUploadFeedbackError,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
+  ProviderReadSessionCatalogInput,
+  ProviderReadContextUsageInput,
+  ProviderSessionReadError,
 } from "./provider.ts";
 import { ProviderInstanceId, ProviderInstanceMutation } from "./providerInstance.ts";
+import {
+  McpServerActionInput,
+  McpServerSetEnabledInput,
+  McpServerSubmitCallbackInput,
+  McpServersListInput,
+  McpServersListResult,
+  McpServerSignInStart,
+  McpServerRequestError,
+} from "./mcpServers.ts";
+import {
+  ReadPermissionRulesInput,
+  ForgetPermissionRuleInput,
+  ReadPermissionRulesResult,
+  PermissionRulesError,
+} from "./permissionRules.ts";
 import { PullRequestReviewGuideResult } from "./pullRequestReviewGuide.ts";
 import {
   PullRequestActionInput,
@@ -292,6 +317,8 @@ import {
   OtlpEndpointCheckInput,
   OtlpEndpointCheckResult,
   ServerConfig,
+  ServerProviderSessionCatalog,
+  ProviderContextBreakdown,
   ServerProviderUpdateError,
   ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
@@ -401,9 +428,22 @@ export const WS_METHODS = {
   mcpAppsToolInfo: "mcpApps.toolInfo",
   mcpAppsReadResource: "mcpApps.readResource",
   mcpAppsUpdateModelContext: "mcpApps.updateModelContext",
+  mcpServersList: "mcp.servers.list",
+  mcpServerReconnect: "mcp.server.reconnect",
+  mcpServerSetEnabled: "mcp.server.setEnabled",
+  mcpServerSignIn: "mcp.server.signIn",
+  mcpServerSubmitCallback: "mcp.server.submitCallback",
+  mcpServerSignOut: "mcp.server.signOut",
 
   // Provider methods
   providerUploadFeedback: "provider.uploadFeedback",
+  providerReadSessionCatalog: "provider.readSessionCatalog",
+  providerReadPermissionRules: "provider.readPermissionRules",
+  providerForgetPermissionRule: "provider.forgetPermissionRule",
+  checkpointRollbackPreview: "checkpoint.rollback.preview",
+  checkpointRestoreFiles: "checkpoint.restoreFiles",
+  checkpointUndoRestore: "checkpoint.undoRestore",
+  providerReadContextUsage: "provider.readContextUsage",
   providerAuthStart: "provider.auth.start",
   providerConsumeResetCredit: "provider.consumeResetCredit",
   providerAuthComplete: "provider.auth.complete",
@@ -1345,6 +1385,71 @@ const WsProviderUploadFeedbackRpc = Rpc.make(WS_METHODS.providerUploadFeedback, 
   error: Schema.Union([ProviderUploadFeedbackError, EnvironmentAuthorizationError]),
 });
 
+const McpServerRpcError = Schema.Union([McpServerRequestError, EnvironmentAuthorizationError]);
+const WsMcpServersListRpc = Rpc.make(WS_METHODS.mcpServersList, {
+  payload: McpServersListInput,
+  success: McpServersListResult,
+  error: McpServerRpcError,
+});
+const WsMcpServerReconnectRpc = Rpc.make(WS_METHODS.mcpServerReconnect, {
+  payload: McpServerActionInput,
+  error: McpServerRpcError,
+});
+const WsMcpServerSetEnabledRpc = Rpc.make(WS_METHODS.mcpServerSetEnabled, {
+  payload: McpServerSetEnabledInput,
+  error: McpServerRpcError,
+});
+const WsMcpServerSignInRpc = Rpc.make(WS_METHODS.mcpServerSignIn, {
+  payload: McpServerActionInput,
+  success: McpServerSignInStart,
+  error: McpServerRpcError,
+});
+const WsMcpServerSubmitCallbackRpc = Rpc.make(WS_METHODS.mcpServerSubmitCallback, {
+  payload: McpServerSubmitCallbackInput,
+  error: McpServerRpcError,
+});
+const WsMcpServerSignOutRpc = Rpc.make(WS_METHODS.mcpServerSignOut, {
+  payload: McpServerActionInput,
+  error: McpServerRpcError,
+});
+
+const WsProviderReadSessionCatalogRpc = Rpc.make(WS_METHODS.providerReadSessionCatalog, {
+  payload: ProviderReadSessionCatalogInput,
+  success: ServerProviderSessionCatalog,
+  error: Schema.Union([ProviderSessionReadError, EnvironmentAuthorizationError]),
+});
+const WsProviderReadPermissionRulesRpc = Rpc.make(WS_METHODS.providerReadPermissionRules, {
+  payload: ReadPermissionRulesInput,
+  success: ReadPermissionRulesResult,
+  error: Schema.Union([PermissionRulesError, EnvironmentAuthorizationError]),
+});
+const WsProviderForgetPermissionRuleRpc = Rpc.make(WS_METHODS.providerForgetPermissionRule, {
+  payload: ForgetPermissionRuleInput,
+  success: ReadPermissionRulesResult,
+  error: Schema.Union([PermissionRulesError, EnvironmentAuthorizationError]),
+});
+
+const WsCheckpointRollbackPreviewRpc = Rpc.make(WS_METHODS.checkpointRollbackPreview, {
+  payload: CheckpointFileRestoreInput,
+  success: CheckpointRestorePreview,
+  error: Schema.Union([CheckpointFileRestoreError, EnvironmentAuthorizationError]),
+});
+const WsCheckpointRestoreFilesRpc = Rpc.make(WS_METHODS.checkpointRestoreFiles, {
+  payload: CheckpointFileRestoreInput,
+  success: CheckpointFileRestoreResult,
+  error: Schema.Union([CheckpointFileRestoreError, EnvironmentAuthorizationError]),
+});
+const WsCheckpointUndoRestoreRpc = Rpc.make(WS_METHODS.checkpointUndoRestore, {
+  payload: CheckpointUndoRestoreInput,
+  success: CheckpointFileRestoreResult,
+  error: Schema.Union([CheckpointFileRestoreError, EnvironmentAuthorizationError]),
+});
+const WsProviderReadContextUsageRpc = Rpc.make(WS_METHODS.providerReadContextUsage, {
+  payload: ProviderReadContextUsageInput,
+  success: ProviderContextBreakdown,
+  error: Schema.Union([ProviderSessionReadError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
   payload: VcsStatusSubscriptionInput,
   success: VcsStatusStreamEvent,
@@ -2002,6 +2107,19 @@ export const WsRpcGroup = RpcGroup.make(
   WsMcpAppsReadResourceRpc,
   WsMcpAppsUpdateModelContextRpc,
   WsProviderUploadFeedbackRpc,
+  WsMcpServersListRpc,
+  WsMcpServerReconnectRpc,
+  WsMcpServerSetEnabledRpc,
+  WsMcpServerSignInRpc,
+  WsMcpServerSubmitCallbackRpc,
+  WsMcpServerSignOutRpc,
+  WsProviderReadSessionCatalogRpc,
+  WsProviderReadPermissionRulesRpc,
+  WsProviderForgetPermissionRuleRpc,
+  WsCheckpointRollbackPreviewRpc,
+  WsCheckpointRestoreFilesRpc,
+  WsCheckpointUndoRestoreRpc,
+  WsProviderReadContextUsageRpc,
   WsSubscribeVcsStatusRpc,
   WsSubscribeWorktreeSetupRpc,
   WsWorktreeSetupCancelRpc,

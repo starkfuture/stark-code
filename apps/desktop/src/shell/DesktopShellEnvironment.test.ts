@@ -1,12 +1,16 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as HostProcess from "@starkfuture/shared/HostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as NodeOS from "node:os";
@@ -22,6 +26,9 @@ const textEncoder = new TextEncoder();
 const isDesktopShellEnvironmentCommandError = Schema.is(
   DesktopShellEnvironment.DesktopShellEnvironmentCommandError,
 );
+const isDesktopShellEnvironmentCommandTimeoutError = Schema.is(
+  DesktopShellEnvironment.DesktopShellEnvironmentCommandTimeoutError,
+);
 
 function envOutput(values: Readonly<Record<string, string>>): string {
   return Object.entries(values)
@@ -33,14 +40,22 @@ function envOutput(values: Readonly<Record<string, string>>): string {
     .join("\n");
 }
 
-function makeProcess(output: string, exitCode = 0): ChildProcessSpawner.ChildProcessHandle {
-  const stdout = output.length === 0 ? Stream.empty : Stream.make(textEncoder.encode(output));
+function makeProcess(
+  output: string,
+  exitCode = 0,
+  startupDelayMs = 0,
+): ChildProcessSpawner.ChildProcessHandle {
+  const startup = startupDelayMs > 0 ? Effect.sleep(startupDelayMs) : Effect.void;
+  const stdout =
+    output.length === 0
+      ? Stream.empty
+      : Stream.fromEffect(startup.pipe(Effect.as(textEncoder.encode(output))));
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(123),
     stdout,
     stderr: Stream.empty,
     all: stdout,
-    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitCode)),
+    exitCode: startup.pipe(Effect.as(ChildProcessSpawner.ExitCode(exitCode))),
     isRunning: Effect.succeed(false),
     kill: () => Effect.void,
     stdin: Sink.drain,
@@ -74,8 +89,9 @@ function runShellEnvironment(input: {
   readonly userShell?: string;
   readonly handler: (
     command: ChildProcess.Command,
-  ) => string | { output: string; exitCode: number };
+  ) => string | { output: string; exitCode: number; startupDelayMs?: number };
   readonly failure?: PlatformError.PlatformError;
+  readonly onProcessReleased?: () => void;
 }) {
   const layerEnvironment = Layer.succeed(
     DesktopEnvironment.DesktopEnvironment,
@@ -88,10 +104,13 @@ function runShellEnvironment(input: {
     ChildProcessSpawner.make((command) => {
       if (input.failure !== undefined) return Effect.fail(input.failure);
       const result = input.handler(command);
-      return Effect.succeed(
-        typeof result === "string"
-          ? makeProcess(result)
-          : makeProcess(result.output, result.exitCode),
+      return Effect.acquireRelease(
+        Effect.succeed(
+          typeof result === "string"
+            ? makeProcess(result)
+            : makeProcess(result.output, result.exitCode, result.startupDelayMs),
+        ),
+        () => Effect.sync(() => input.onProcessReleased?.()),
       );
     }),
   );
@@ -120,6 +139,180 @@ function runShellEnvironment(input: {
 }
 
 describe("DesktopShellEnvironment", () => {
+  it.live.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "imports the environment after a real shell writes beyond both pipe buffers",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const directory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "stark-noisy-shell-",
+        });
+        const shell = `${directory}/login-shell`;
+        yield* fileSystem.writeFileString(
+          shell,
+          [
+            "#!/bin/sh",
+            "/usr/bin/head -c 2097152 /dev/zero >&2",
+            "/usr/bin/head -c 2097152 /dev/zero",
+            "export AGENT_WORKSPACE='/fixture/agent-workspace'",
+            'exec /bin/sh -c "$2"',
+            "",
+          ].join("\n"),
+        );
+        yield* fileSystem.chmod(shell, 0o700);
+        const env: NodeJS.ProcessEnv = { SHELL: shell, PATH: "/usr/bin:/bin", HOME: directory };
+        const realSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const commands: string[] = [];
+        // A failed fixture must never fall back to executing the user's real profiles.
+        const fixtureSpawner = ChildProcessSpawner.make((command) => {
+          if (command._tag === "StandardCommand") {
+            commands.push(command.command);
+            if (command.command === shell) return realSpawner.spawn(command);
+          }
+          return Effect.succeed(makeProcess(""));
+        });
+        const service = yield* DesktopShellEnvironment.make.pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, fixtureSpawner),
+          Effect.provideService(DesktopEnvironment.DesktopEnvironment, {
+            platform: "darwin",
+          } as DesktopEnvironment.DesktopEnvironment["Service"]),
+        );
+        yield* withProcessEnv(env, service.installIntoProcess);
+        assert.deepEqual(commands, [shell]);
+        assert.equal(env.AGENT_WORKSPACE, "/fixture/agent-workspace");
+        assert.equal(env.PATH, "/usr/bin:/bin");
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect.each([
+    { startupDelayMs: 8_000, inheritedWorkspace: undefined },
+    { startupDelayMs: 10_000, inheritedWorkspace: undefined },
+    { startupDelayMs: 10_000, inheritedWorkspace: "/parent/workspace" },
+  ])("imports a slow Dock login shell without clobbering or importing credentials (%j)", (input) =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = {
+        SHELL: "/bin/zsh",
+        PATH: "/usr/bin",
+        ...(input.inheritedWorkspace ? { AGENT_WORKSPACE: input.inheritedWorkspace } : {}),
+      };
+      let commands = 0;
+      let released = 0;
+      const importer = yield* runShellEnvironment({
+        env,
+        platform: "darwin",
+        handler: () => {
+          commands += 1;
+          return {
+            output: envOutput({
+              PATH: "/local/bin:/usr/bin",
+              AGENT_WORKSPACE: "/project/agent-workspace",
+              AWS_SECRET_ACCESS_KEY: "never-import",
+              API_TOKEN: "never-import",
+            }),
+            exitCode: 0,
+            startupDelayMs: input.startupDelayMs,
+          };
+        },
+        onProcessReleased: () => {
+          released += 1;
+        },
+      }).pipe(Effect.forkChild);
+      yield* TestClock.adjust(input.startupDelayMs);
+      yield* Fiber.join(importer);
+      assert.equal(commands, 1);
+      assert.equal(released, 1);
+      assert.equal(env.AGENT_WORKSPACE, input.inheritedWorkspace ?? "/project/agent-workspace");
+      assert.equal(env.PATH, "/local/bin:/usr/bin");
+      assert.equal(env.AWS_SECRET_ACCESS_KEY, undefined);
+      assert.equal(env.API_TOKEN, undefined);
+    }),
+  );
+
+  it.effect(
+    "bounds slow POSIX candidates to one shared budget and releases each timed-out probe",
+    () =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = { SHELL: "/bin/slow", PATH: "/usr/bin" };
+        const commands: string[] = [];
+        const timeouts: number[] = [];
+        let released = 0;
+        const logger = Logger.make(({ message }) => {
+          const messages = Array.isArray(message) ? message : [message];
+          for (const value of messages) {
+            if (isDesktopShellEnvironmentCommandTimeoutError(value)) {
+              timeouts.push(value.timeoutMs);
+            }
+          }
+        });
+        const importer = yield* runShellEnvironment({
+          env,
+          platform: "darwin",
+          userShell: "/bin/another-slow",
+          handler: (command) => {
+            if (command._tag !== "StandardCommand") return "";
+            commands.push(command.command);
+            return command.command === "/bin/launchctl"
+              ? "/launchctl/bin"
+              : {
+                  output: envOutput({ PATH: "/too-late", AGENT_WORKSPACE: "/too-late" }),
+                  exitCode: 0,
+                  startupDelayMs: 60_000,
+                };
+          },
+          onProcessReleased: () => {
+            released += 1;
+          },
+        }).pipe(
+          Effect.provide(Logger.layer([logger], { mergeWithExisting: false })),
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust("20 seconds");
+        yield* Fiber.join(importer);
+        assert.deepEqual(commands, ["/bin/slow", "/bin/another-slow", "/bin/launchctl"]);
+        assert.deepEqual(timeouts, [15_000, 5_000]);
+        assert.equal(released, 3);
+        assert.equal(env.PATH, "/launchctl/bin:/usr/bin");
+        assert.equal(env.AGENT_WORKSPACE, undefined);
+      }),
+  );
+
+  it.effect(
+    "imports AGENT_WORKSPACE from the login shell for Dock launches without importing credential names",
+    () =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin" };
+        let capture = "";
+        yield* runShellEnvironment({
+          env,
+          platform: "darwin",
+          handler: (command) => {
+            if (command._tag !== "StandardCommand") return "";
+            capture = command.args.join(" ");
+            return envOutput({
+              PATH: "/local/bin:/usr/bin",
+              AGENT_WORKSPACE: "/project/tools/agent-workspace",
+              AWS_SECRET_ACCESS_KEY: "never-import",
+            });
+          },
+        });
+        assert.equal(env.AGENT_WORKSPACE, "/project/tools/agent-workspace");
+        assert.equal(env.AWS_SECRET_ACCESS_KEY, undefined);
+        assert.include(capture, "printenv AGENT_WORKSPACE");
+        assert.notInclude(capture, "printenv AWS_SECRET_ACCESS_KEY");
+        assert.deepEqual(
+          DesktopShellEnvironment.safeExtraLoginShellEnvNames([
+            "AGENT_WORKSPACE",
+            "SAFE_NAME",
+            "API_TOKEN",
+            "AWS_PROFILE",
+            "SSH_KEY",
+            "name;whoami",
+            "SAFE_NAME",
+          ]),
+          ["AGENT_WORKSPACE", "SAFE_NAME"],
+        );
+      }),
+  );
   it.effect("rejects PATH output from a failed shell and tries the next candidate", () =>
     Effect.gen(function* () {
       const env: NodeJS.ProcessEnv = { SHELL: "/bin/failing", PATH: "/usr/bin" };

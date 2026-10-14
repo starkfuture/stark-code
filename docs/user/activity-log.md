@@ -16,3 +16,9 @@ Failed calls do not count as successful messages or creations. Waiting on a thre
 it finished, and an interrupt or cancellation request does not mean the thread stopped. When tool
 details are unavailable, summaries use a broader description instead of guessing how many threads
 were affected.
+
+## Hook activity
+
+Successful hook activity stays quiet by default. Failed or blocked hooks remain
+visible. Turn on **Show all hook activity** for a thread to inspect folded success
+and informational events. Hook details are displayed as plain text.

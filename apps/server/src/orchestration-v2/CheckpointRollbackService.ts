@@ -27,6 +27,7 @@ import type * as ProviderAdapter from "@starkfuture/provider-core/server/Provide
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
+import { CheckpointFileRestore } from "../checkpointing/CheckpointFileRestore.ts";
 
 export const ROLLBACK_FAILED_MESSAGE =
   "The provider could not roll back this conversation. Try again; if it keeps failing, check the provider and server logs.";
@@ -66,12 +67,19 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
 const isCheckpointRollbackExecutionError = Schema.is(CheckpointRollbackExecutionError);
 
 export interface CheckpointRollbackServiceV2Shape {
+  readonly restoreFiles: (input: {
+    readonly threadId: ThreadId;
+    readonly checkpointId: CheckpointId;
+    readonly scopeId: CheckpointScopeId;
+  }) => Effect.Effect<void, import("@starkfuture/contracts").CheckpointFileRestoreError>;
   readonly execute: (input: {
     readonly threadId: ThreadId;
     readonly providerThreadId: ProviderThreadId;
     readonly checkpointId: CheckpointId;
     readonly scopeId: CheckpointScopeId;
     readonly restoreFiles?: boolean;
+    readonly restoreScope?: "checkout" | "agent-files";
+    readonly conversation?: boolean;
   }) => Effect.Effect<void, CheckpointRollbackExecutionError>;
 }
 
@@ -93,6 +101,7 @@ export const layer: Layer.Layer<
   | Path.Path
   | ProjectStore.ProjectStoreV2
   | ThreadCommandExecutor.ThreadCommandExecutor
+  | CheckpointFileRestore
 > = Layer.effect(
   CheckpointRollbackServiceV2,
   Effect.gen(function* () {
@@ -106,6 +115,7 @@ export const layer: Layer.Layer<
     const projects = yield* ProjectStore.ProjectStoreV2;
     const path = yield* Path.Path;
     const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+    const fileRestore = yield* CheckpointFileRestore;
 
     const execute = Effect.fn("orchestrationV2.checkpointRollback.execute")(function* (input: {
       readonly threadId: ThreadId;
@@ -113,7 +123,13 @@ export const layer: Layer.Layer<
       readonly checkpointId: CheckpointId;
       readonly scopeId: CheckpointScopeId;
       readonly restoreFiles?: boolean;
+      readonly restoreScope?: "checkout" | "agent-files";
+      readonly conversation?: boolean;
     }) {
+      if (input.conversation === false) {
+        if (input.restoreFiles !== false) yield* fileRestore.restore(input);
+        return;
+      }
       const projection = yield* projections.getThreadRecords(input.threadId, [
         "providerThreads",
         "providerSessions",
@@ -137,7 +153,10 @@ export const layer: Layer.Layer<
         checkpoint === undefined ||
         scope === undefined ||
         checkpoint.scopeId !== scope.id ||
-        checkpoint.status !== "ready"
+        !(
+          checkpoint.status === "ready" ||
+          (checkpoint.status === "missing" && providerThread.driver === "claudeAgent")
+        )
       ) {
         return yield* new CheckpointRollbackExecutionError({
           reason: "rollback-target-invalid",
@@ -160,6 +179,7 @@ export const layer: Layer.Layer<
 
       if (
         input.restoreFiles !== false &&
+        input.restoreScope === "checkout" &&
         !(yield* isCheckpointRestoreIsolated(projection.thread, scope, {
           fileSystem,
           projections,
@@ -257,6 +277,11 @@ export const layer: Layer.Layer<
               };
             });
 
+      // Claude's file checkpoints belong to the current native session. Rewind
+      // files before rollbackThread closes/reset that query at thread start.
+      const nativeFiles =
+        checkpoint.status === "missing" && providerThread.driver === "claudeAgent";
+      if (nativeFiles && input.restoreFiles !== false) yield* fileRestore.restore(input);
       const snapshot =
         runsToRollback.length === 0
           ? { providerThread }
@@ -265,7 +290,17 @@ export const layer: Layer.Layer<
               target: rollbackTarget,
               providerThreadTurns,
             });
-      if (input.restoreFiles !== false) yield* checkpoints.restore({ scope, checkpoint });
+      if (input.restoreFiles !== false && !nativeFiles) {
+        const isolated = yield* isCheckpointRestoreIsolated(projection.thread, scope, {
+          fileSystem,
+          projections,
+          projects,
+          path,
+        });
+        if (isolated && input.restoreScope !== "agent-files")
+          yield* checkpoints.restore({ scope, checkpoint });
+        else yield* fileRestore.restore(input);
+      }
       const staleCheckpoints = projection.checkpoints.filter(
         (candidate) =>
           candidate.scopeId === scope.id &&
@@ -354,6 +389,7 @@ export const layer: Layer.Layer<
     });
 
     return CheckpointRollbackServiceV2.of({
+      restoreFiles: (input) => fileRestore.restore(input).pipe(Effect.asVoid),
       execute: (input) =>
         execute(input).pipe(
           Effect.mapError((cause) =>

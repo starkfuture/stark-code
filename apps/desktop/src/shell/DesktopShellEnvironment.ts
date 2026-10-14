@@ -1,4 +1,5 @@
 import { listLoginShellCandidates } from "@starkfuture/shared/shell";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -11,12 +12,20 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { fromLenientJson } from "@starkfuture/shared/schemaJson";
 
 type EnvironmentPatch = Record<string, string>;
 
 interface ShellEnvironmentConfig {
   readonly env: NodeJS.ProcessEnv;
   readonly platform: NodeJS.Platform;
+  readonly extraLoginShellEnvNames?: ReadonlyArray<string>;
+}
+
+export function safeExtraLoginShellEnvNames(names: ReadonlyArray<string>): string[] {
+  return [...new Set(names)]
+    .filter((name) => /^(?!AWS_)(?!.*(?:TOKEN|SECRET|KEY))[A-Z_][A-Z0-9_]*$/.test(name))
+    .slice(0, 32);
 }
 
 interface WindowsProbeOptions {
@@ -92,9 +101,14 @@ const WINDOWS_PROFILE_ENV_NAMES = ["PATH", "FNM_DIR", "FNM_MULTISHELL_PATH"] as 
 const LOCALE_ENV_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
 const FALLBACK_LC_CTYPE = "en_US.UTF-8";
 const WINDOWS_SHELL_CANDIDATES = ["pwsh.exe", "powershell.exe"] as const;
-const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
+// Version managers and company shell setup commonly need 8–10 seconds on Dock launches.
+// Share a total budget across candidates so a broken profile cannot multiply that wait.
+const LOGIN_SHELL_TIMEOUT = Duration.seconds(15);
+const LOGIN_SHELL_TOTAL_BUDGET = Duration.seconds(20);
+const WINDOWS_SHELL_TIMEOUT = Duration.seconds(5);
 const LAUNCHCTL_TIMEOUT = Duration.seconds(2);
 const PROCESS_TERMINATE_GRACE = Duration.seconds(1);
+const MAX_PROBE_OUTPUT_CHARS = 1_048_576;
 
 const trimNonEmpty = (value: string | null | undefined): Option.Option<string> =>
   Option.fromNullishOr(value).pipe(
@@ -256,14 +270,27 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
           shell: input.shell ?? false,
           stdin: "ignore",
           stdout: "pipe",
-          stderr: "pipe",
+          // Profiles can write more than a pipe buffer before reaching our capture
+          // command. We do not use their stderr, so never leave it unread and blocked.
+          stderr: "ignore",
           killSignal: "SIGTERM",
           forceKillAfter: PROCESS_TERMINATE_GRACE,
         }),
       );
-      return yield* Effect.all([Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode], {
-        concurrency: 2,
-      });
+      return yield* Effect.all(
+        [
+          child.stdout.pipe(
+            Stream.decodeText(),
+            // Keep draining noisy startup output; the environment markers come last.
+            Stream.runFold(
+              () => "",
+              (output, chunk) => (output + chunk).slice(-MAX_PROBE_OUTPUT_CHARS),
+            ),
+          ),
+          child.exitCode,
+        ],
+        { concurrency: 2 },
+      );
     }),
   ).pipe(
     Effect.mapError(
@@ -309,6 +336,7 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
 const readLoginShellEnvironment = (
   shell: string,
   names: ReadonlyArray<string>,
+  timeout: Duration.Duration,
 ): Effect.Effect<EnvironmentPatch, never, ChildProcessSpawner.ChildProcessSpawner> =>
   names.length === 0
     ? Effect.succeed({})
@@ -316,7 +344,7 @@ const readLoginShellEnvironment = (
         probe: "login-shell",
         command: shell,
         args: ["-ilc", capturePosixEnvironmentCommand(names)],
-        timeout: LOGIN_SHELL_TIMEOUT,
+        timeout,
       }).pipe(Effect.map((output) => extractEnvironment(output, names)));
 
 const readLaunchctlPath = runCommandOutput({
@@ -346,7 +374,7 @@ const readWindowsEnvironment = Effect.fn("desktop.shellEnvironment.readWindowsEn
         probe: options.loadProfile ? "powershell-profile" : "powershell-no-profile",
         command,
         args,
-        timeout: LOGIN_SHELL_TIMEOUT,
+        timeout: WINDOWS_SHELL_TIMEOUT,
       });
       const environment = extractEnvironment(output, names);
       if (Object.keys(environment).length > 0) {
@@ -403,11 +431,22 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
   > {
     const fileSystem = yield* FileSystem.FileSystem;
     const shellEnvironment: EnvironmentPatch = {};
+    const loginShellDeadline =
+      (yield* Clock.currentTimeMillis) + Duration.toMillis(LOGIN_SHELL_TOTAL_BUDGET);
 
     for (const shell of listLoginShellCandidates(config.platform, config.env.SHELL)) {
+      const remainingMs = loginShellDeadline - (yield* Clock.currentTimeMillis);
+      if (remainingMs <= 0) break;
       Object.assign(
         shellEnvironment,
-        yield* readLoginShellEnvironment(shell, LOGIN_SHELL_ENV_NAMES),
+        yield* readLoginShellEnvironment(
+          shell,
+          [
+            ...LOGIN_SHELL_ENV_NAMES,
+            ...safeExtraLoginShellEnvNames(config.extraLoginShellEnvNames ?? ["AGENT_WORKSPACE"]),
+          ],
+          Duration.millis(Math.min(Duration.toMillis(LOGIN_SHELL_TIMEOUT), remainingMs)),
+        ),
       );
       if (shellEnvironment.PATH) break;
     }
@@ -455,6 +494,12 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       if (!config.env[name] && shellEnvironment[name]) {
         config.env[name] = shellEnvironment[name];
       }
+    }
+
+    for (const name of safeExtraLoginShellEnvNames(
+      config.extraLoginShellEnvNames ?? ["AGENT_WORKSPACE"],
+    )) {
+      if (!config.env[name] && shellEnvironment[name]) config.env[name] = shellEnvironment[name];
     }
 
     // Locale variables form one precedence group: LC_ALL can override an inherited
@@ -515,15 +560,37 @@ export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const installIntoProcess: DesktopShellEnvironment["Service"]["installIntoProcess"] =
-    installShellEnvironment({
-      env: process.env,
-      platform: environment.platform,
-    }).pipe(
-      Effect.provideService(FileSystem.FileSystem, fileSystem),
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.withSpan("desktop.shellEnvironment.installIntoProcess"),
-    );
+  const installIntoProcess: DesktopShellEnvironment["Service"]["installIntoProcess"] = Effect.gen(
+    function* () {
+      const namesSchema = Schema.Array(Schema.String);
+      const documentSchema = fromLenientJson(
+        Schema.Struct({
+          extraLoginShellEnvNames: Schema.optional(namesSchema),
+          settings: Schema.optional(
+            Schema.Struct({ extraLoginShellEnvNames: Schema.optional(namesSchema) }),
+          ),
+        }),
+      );
+      const document = environment.clientSettingsPath
+        ? yield* fileSystem.readFileString(environment.clientSettingsPath).pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(documentSchema)),
+            Effect.orElseSucceed(() => null),
+          )
+        : null;
+      yield* installShellEnvironment({
+        env: process.env,
+        platform: environment.platform,
+        extraLoginShellEnvNames: safeExtraLoginShellEnvNames(
+          document?.settings?.extraLoginShellEnvNames ??
+            document?.extraLoginShellEnvNames ?? ["AGENT_WORKSPACE"],
+        ),
+      });
+    },
+  ).pipe(
+    Effect.provideService(FileSystem.FileSystem, fileSystem),
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    Effect.withSpan("desktop.shellEnvironment.installIntoProcess"),
+  );
 
   return DesktopShellEnvironment.of({ installIntoProcess });
 });

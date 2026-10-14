@@ -201,6 +201,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   cancelProviderAuthCallback: (url: string) =>
     ipcRenderer.invoke(IpcChannels.CANCEL_PROVIDER_AUTH_CALLBACK_CHANNEL, url),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
+  getStarkPagesMirror: (projectRoot: string) =>
+    ipcRenderer.invoke(IpcChannels.STARK_PAGES_MIRROR_CHANNEL, projectRoot),
+  openStarkPagesExternal: (input: { readonly projectRoot: string; readonly url: string }) =>
+    ipcRenderer.invoke(IpcChannels.STARK_PAGES_OPEN_EXTERNAL_CHANNEL, input),
+  openStarkPagesLink: (url: string) =>
+    ipcRenderer.invoke(IpcChannels.STARK_PAGES_OPEN_LINK_CHANNEL, url),
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),
   openSystemSettings: (pane: string) =>

@@ -62,6 +62,18 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectsMutate]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverProbe]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetConfig]: AuthOrchestrationReadScope,
+  [WS_METHODS.providerReadSessionCatalog]: AuthOrchestrationReadScope,
+  [WS_METHODS.providerReadPermissionRules]: AuthOrchestrationReadScope,
+  [WS_METHODS.checkpointRollbackPreview]: AuthOrchestrationReadScope,
+  [WS_METHODS.checkpointRestoreFiles]: AuthOrchestrationOperateScope,
+  [WS_METHODS.checkpointUndoRestore]: AuthOrchestrationOperateScope,
+  [WS_METHODS.providerReadContextUsage]: AuthOrchestrationReadScope,
+  [WS_METHODS.mcpServersList]: AuthOrchestrationReadScope,
+  [WS_METHODS.mcpServerReconnect]: AuthOrchestrationOperateScope,
+  [WS_METHODS.mcpServerSetEnabled]: AuthProvidersManageScope,
+  [WS_METHODS.mcpServerSignIn]: AuthProvidersManageScope,
+  [WS_METHODS.mcpServerSubmitCallback]: AuthProvidersManageScope,
+  [WS_METHODS.mcpServerSignOut]: AuthProvidersManageScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationReadScope,
   [WS_METHODS.serverUpdateProvider]: AuthProvidersManageScope,
   [WS_METHODS.providerAuthStart]: AuthProvidersManageScope,
@@ -253,6 +265,24 @@ const requiredScopesForRpcCall = (
   method: string,
   payload: unknown,
 ): ReadonlyArray<AuthEnvironmentScope> => {
+  if (
+    method === ORCHESTRATION_V2_WS_METHODS.dispatchCommand &&
+    typeof payload === "object" &&
+    payload !== null &&
+    "type" in payload &&
+    payload.type === "runtime-request.respond" &&
+    "decision" in payload &&
+    payload.decision === "acceptAlways"
+  )
+    return [AuthOrchestrationOperateScope, AuthSettingsWriteScope];
+  if (
+    method === ORCHESTRATION_V2_WS_METHODS.dispatchCommand &&
+    typeof payload === "object" &&
+    payload !== null &&
+    "type" in payload &&
+    payload.type === "thread.shell-command.dispatch"
+  )
+    return [AuthOrchestrationOperateScope, AuthTerminalOperateScope];
   if (method === WS_METHODS.serverRetryResourceTelemetry) {
     return [AuthEnvironmentMaintainScope, AuthDiagnosticsReadScope];
   }

@@ -35,6 +35,17 @@ const terminalReference = formatTerminalContextReference({
   lineEnd: 4,
 });
 
+describe("shell composer triggers", () => {
+  it.each(["/", "$", "€", "£", "@", "#", "/compact", "$skill", "@file"])(
+    "disables %s popups only in shell mode",
+    (text) => {
+      expect(detectComposerTrigger(text, text.length, true)).toBeNull();
+      expect(detectComposerTrigger(text, text.length, false)).not.toBeNull();
+      expect(composerStateAtPromptEnd(text, false, true).trigger).toBeNull();
+    },
+  );
+});
+
 const citation: AssistantCitation = {
   version: 1,
   environmentId: EnvironmentId.make("environment-1"),

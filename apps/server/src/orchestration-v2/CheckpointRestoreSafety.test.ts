@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { symlinksSupported } from "@starkfuture/shared/testing/symlinks";
 import * as CheckpointRollbackService from "./CheckpointRollbackService.ts";
+import { CheckpointFileRestore } from "../checkpointing/CheckpointFileRestore.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { EventSinkV2 } from "./EventSink.ts";
@@ -103,6 +104,9 @@ it.effect.each([
       Layer.provide(
         Layer.mergeAll(
           NodeServices.layer,
+          Layer.mock(CheckpointFileRestore)({
+            restore: () => Effect.die("Unexpected narrow restore in checkout isolation test"),
+          }),
           ThreadCommandExecutor.layer,
           IdAllocator.layer,
           Layer.mock(ProjectStore.ProjectStoreV2)({
@@ -185,7 +189,14 @@ it.effect.each([
     );
     if (rejected) {
       const error = yield* service
-        .execute({ threadId, providerThreadId, checkpointId, scopeId, restoreFiles })
+        .execute({
+          threadId,
+          providerThreadId,
+          checkpointId,
+          scopeId,
+          restoreFiles,
+          restoreScope: "checkout",
+        })
         .pipe(Effect.flip);
       assert.equal(error.reason, "shared-workspace");
       assert.deepEqual(calls, []);

@@ -8,6 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
 
 import {
@@ -39,6 +40,7 @@ import {
 } from "./GitVcsDriverCore.ts";
 import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
+import { restoreCheckpointPaths } from "./RestoreCheckpointPaths.ts";
 
 export interface ExecuteGitInput {
   readonly operation: string;
@@ -813,6 +815,20 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
   ] as const;
 
   const checkpoints: VcsDriver.VcsCheckpointOps = {
+    restorePaths: (input) =>
+      restoreCheckpointPaths(input, execute, fileSystem, path).pipe(
+        Effect.mapError((cause) =>
+          Schema.is(VcsProcessExitError)(cause)
+            ? cause
+            : new VcsProcessExitError({
+                operation: "GitVcsDriver.checkpoints.restorePaths",
+                command: "git restore",
+                cwd: input.cwd,
+                exitCode: -1,
+                detail: String(cause),
+              }),
+        ),
+      ),
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
       const operation = VcsProcess.CHECKPOINT_CAPTURE_OPERATION;
       const indexConfig = [

@@ -1372,7 +1372,7 @@ it.effect("reads a repository once when several worktrees share it", () =>
           id: "p2",
           title: "starkcode worktree",
           workspaceRoot: "/b",
-          repository: "PingDotGG/StarkCode",
+          repository: "Example/Stark-Code",
         }),
       ],
       providers: [

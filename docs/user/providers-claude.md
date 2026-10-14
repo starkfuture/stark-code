@@ -76,6 +76,21 @@ can still be started by you. Invoke those one per message: Claude directly runs
 only the last named skill and may try to start earlier ones through its Skill
 tool, which refuses skills reserved for manual invocation.
 
+## MCP servers
+
+Open the thread's **MCP** panel to inspect connected servers and available tools.
+The local desktop app can reconnect, enable or disable, sign in, or sign out when
+Claude supports the action. **Settings → MCP servers** also works without an open
+thread. Remote clients can view cached status but cannot start a cold inspection
+session or change server connections.
+
+## Context details
+
+Open **Details** from the context meter for Claude's context breakdown. The summary
+does not send a model request. **Count exactly** requests a full count explicitly;
+it can use the provider's counting API. Without a live session, totals from the last
+turn are labeled as totals rather than a current context-window measurement.
+
 ## OpenRouter
 
 Create a Claude instance with its own config directory, such as

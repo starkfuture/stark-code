@@ -319,6 +319,12 @@ export type ModelPreferences = {
 };
 
 export const ClientSettingsSchema = Schema.Struct({
+  extraLoginShellEnvNames: Schema.Array(
+    Schema.String.check(Schema.isPattern(/^(?!AWS_)(?!.*(?:TOKEN|SECRET|KEY))[A-Z_][A-Z0-9_]*$/)),
+  )
+    .check(Schema.isMaxLength(32))
+    .pipe(Schema.withDecodingDefault(Effect.succeed(["AGENT_WORKSPACE"]))),
+  shellCommandRespond: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   notificationMode: NotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
@@ -1098,6 +1104,10 @@ export const StorageCleanupSettings = Schema.Struct({
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
 export const ServerSettings = Schema.Struct({
+  allowUserShellCommands: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  shellCommandTimeoutMs: Schema.Int.check(
+    Schema.isBetween({ minimum: 1_000, maximum: 3_600_000 }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed(600_000))),
   // Null means no client has migrated this preference yet; an empty value is
   // authoritative so another device cannot resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1454,12 +1464,14 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
     operation: ServerSettingsOperation,
     providerInstanceId: Schema.optional(Schema.String),
     environmentVariable: Schema.optional(Schema.String),
+    validationMessage: Schema.optional(Schema.String),
     // Validation failures (e.g. a create colliding with an existing
     // instance) originate without an upstream defect.
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
+    if (this.validationMessage !== undefined) return this.validationMessage;
     const provider =
       this.providerInstanceId === undefined ? "" : ` for provider ${this.providerInstanceId}`;
     const variable =
@@ -1535,6 +1547,10 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   worktreesDirectory: Schema.optionalKey(TrimmedString),
   // Server settings
+  allowUserShellCommands: Schema.optionalKey(Schema.Boolean),
+  shellCommandTimeoutMs: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 3_600_000 })),
+  ),
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
@@ -1682,6 +1698,8 @@ export function requiredScopesForProjectMutation(
 }
 
 export const ClientSettingsPatch = Schema.Struct({
+  extraLoginShellEnvNames: Schema.optionalKey(ClientSettingsSchema.fields.extraLoginShellEnvNames),
+  shellCommandRespond: Schema.optionalKey(Schema.Boolean),
   notificationMode: Schema.optionalKey(NotificationMode),
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),

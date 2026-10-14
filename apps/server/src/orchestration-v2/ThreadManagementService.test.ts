@@ -1085,3 +1085,23 @@ it.effect.each([
     expect(dispatched).toEqual(settles ? ["thread.settle"] : []);
   }),
 );
+
+it("stamps shell-command provenance at client ingress", () => {
+  const command: OrchestrationV2Command = {
+    type: "thread.shell-command.dispatch",
+    commandId: CommandId.make("shell-provenance"),
+    threadId: ThreadId.make("shell-provenance"),
+    messageId: MessageId.make("shell-provenance"),
+    command: "pwd",
+    respond: true,
+    createdBy: "agent",
+    creationSource: "mcp",
+    dispatchMode: { type: "start_immediately" },
+  };
+  expect(
+    ThreadManagementService.withCreationProvenance(command, {
+      createdBy: "user",
+      creationSource: "web",
+    }),
+  ).toMatchObject({ createdBy: "user", creationSource: "web", command: "pwd" });
+});

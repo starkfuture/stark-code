@@ -24,6 +24,7 @@ export function NativeAgentShell(props: {
   readonly cwd: string;
   readonly worktreePath: string | null;
   readonly keybindings: ResolvedKeybindingsConfig;
+  readonly focusRequestId?: number;
   readonly onBackToChat: () => void;
 }) {
   const [ended, setEnded] = useState(false);
@@ -46,6 +47,9 @@ export function NativeAgentShell(props: {
           <div className="text-xs text-muted-foreground">
             All CLI commands, plugins, and skills. Shares files with chat; uses its own
             conversation.
+            {props.driver === "codex"
+              ? " Read-only by default; approve access inside Codex when needed."
+              : null}
           </div>
         </div>
         <Button variant="ghost" size="sm" onClick={props.onBackToChat}>
@@ -64,7 +68,7 @@ export function NativeAgentShell(props: {
           providerInstanceId={props.providerInstanceId}
           agentShell
           onSessionExited={() => setEnded(true)}
-          focusRequestId={1}
+          focusRequestId={props.focusRequestId ?? 1}
           autoFocus
           visible
           resizeEpoch={0}

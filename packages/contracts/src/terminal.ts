@@ -337,6 +337,19 @@ export class TerminalProviderEnvironmentError extends Schema.TaggedError<Termina
   }
 }
 
+export class TerminalNativeLaunchRefusedError extends Schema.TaggedError<TerminalNativeLaunchRefusedError>()(
+  "TerminalNativeLaunchRefusedError",
+  {
+    providerInstanceId: ProviderInstanceId,
+    flag: Schema.String,
+    reason: Schema.String,
+  },
+) {
+  override get message() {
+    return `Stark requires supervised Codex. Remove ${this.flag} from this account's launch arguments (Settings > Providers > ${this.providerInstanceId}). ${this.reason}`;
+  }
+}
+
 export class TerminalNotRunningError extends Schema.TaggedError<TerminalNotRunningError>()(
   "TerminalNotRunningError",
   {
@@ -385,6 +398,7 @@ export const TerminalError = Schema.Union([
   TerminalSessionLookupError,
   TerminalProviderInstanceNotFoundError,
   TerminalProviderEnvironmentError,
+  TerminalNativeLaunchRefusedError,
   TerminalNotRunningError,
   TerminalWriteError,
   TerminalResizeError,

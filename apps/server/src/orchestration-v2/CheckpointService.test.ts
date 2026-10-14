@@ -1,4 +1,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import { assert, it, vi } from "@effect/vitest";
 import {
   CheckpointScopeId,
@@ -17,6 +20,58 @@ import * as Layer from "effect/Layer";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as IdAllocator from "@starkfuture/provider-core/server/IdAllocator";
+
+it.effect("retains bounded post-edit fingerprints for a non-Git checkpoint", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "stark-native-capture-" });
+    yield* fs.writeFileString(path.join(cwd, "agent.txt"), "agent result");
+    const now = yield* DateTime.now;
+    const scope: OrchestrationV2CheckpointScope = {
+      id: CheckpointScopeId.make("native-fingerprint"),
+      threadId: ThreadId.make("native-fingerprint"),
+      runId: null,
+      nodeId: NodeId.make("native-fingerprint"),
+      parentScopeId: null,
+      providerThreadId: null,
+      kind: "root_run",
+      ordinalWithinParent: 0,
+      advancesAppRunCount: true,
+      cwd,
+      createdAt: now,
+    };
+    const checkpoint = yield* Effect.gen(function* () {
+      const service = yield* CheckpointService.CheckpointServiceV2;
+      return yield* service.capture({
+        scope,
+        runId: RunId.make("native-fingerprint"),
+        nodeId: scope.nodeId,
+        ordinalWithinScope: 1,
+        appRunOrdinal: 1,
+        capturedAt: now,
+        agentWrittenPaths: ["agent.txt"],
+      });
+    }).pipe(
+      Effect.provide(
+        CheckpointService.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              IdAllocator.layer,
+              Layer.mock(CheckpointStore.CheckpointStore)({
+                isGitRepository: () => Effect.succeed(false),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    assert.equal(checkpoint.status, "missing");
+    assert.deepEqual(checkpoint.agentWrittenPaths, ["agent.txt"]);
+    assert.equal(checkpoint.nativeFileStates?.[0]?.path, "agent.txt");
+    assert.match(checkpoint.nativeFileStates?.[0]?.sha256 ?? "", /^[0-9a-f]{64}$/);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 
 it.effect.each([false, true, "interrupt"] as const)(
   "materializes baseline, lookup fails=%s",

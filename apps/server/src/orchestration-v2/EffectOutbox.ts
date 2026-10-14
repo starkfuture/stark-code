@@ -85,7 +85,14 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("provider-thread.rollback"),
     restoreFiles: Schema.optional(Schema.Boolean),
+    restoreScope: Schema.optional(Schema.Literals(["checkout", "agent-files"])),
+    conversation: Schema.optional(Schema.Boolean),
     providerThreadId: ProviderThreadId,
+    checkpointId: CheckpointId,
+    scopeId: CheckpointScopeId,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("checkpoint.files.restore"),
     checkpointId: CheckpointId,
     scopeId: CheckpointScopeId,
   }),
@@ -124,6 +131,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "provider-runtime.continue",
   "provider-session.detach",
   "provider-thread.rollback",
+  "checkpoint.files.restore",
   "checkpoint.capture",
   "terminal.cleanup",
   "preview.cleanup",

@@ -11,6 +11,10 @@ import {
   type ProviderSettingsFormSchemaAnnotation,
 } from "@starkfuture/contracts";
 import { PlusIcon, XIcon } from "lucide-react";
+import {
+  NativeAgentLaunchRefused,
+  validateNativeCodexLaunchArgs,
+} from "@starkfuture/shared/nativeCodexLaunch";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -557,6 +561,18 @@ export function ProviderSettingsForm({
   variant,
   onChange,
 }: ProviderSettingsFormProps) {
+  const [launchArgsError, setLaunchArgsError] = useState<string | null>(null);
+  const updateConfig = (next: Record<string, unknown> | undefined) => {
+    try {
+      if (definition.driverKind === "codex")
+        validateNativeCodexLaunchArgs(typeof next?.launchArgs === "string" ? next.launchArgs : "");
+      setLaunchArgsError(null);
+      onChange(next);
+    } catch (error) {
+      if (!(error instanceof NativeAgentLaunchRefused)) throw error;
+      setLaunchArgsError(error.message);
+    }
+  };
   const fields = useMemo(
     () => deriveProviderSettingsFields(definition, value),
     [definition, value],
@@ -578,10 +594,15 @@ export function ProviderSettingsForm({
           value={value}
           idPrefix={idPrefix}
           variant={variant}
-          onChange={onChange}
+          onChange={updateConfig}
         />
       ))}
       {isLocalAcp ? <ProviderCommandArguments value={value} onChange={onChange} /> : null}
+      {launchArgsError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {launchArgsError}
+        </p>
+      ) : null}
     </>
   );
 }

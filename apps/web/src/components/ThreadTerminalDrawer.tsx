@@ -89,6 +89,7 @@ import { terminalEnvironment } from "../state/terminal";
 import { useEnvironmentScope } from "../state/session";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { useAtomCommand } from "../state/use-atom-command";
+import { TerminalLaunchErrorNotice } from "./TerminalLaunchErrorNotice";
 import { preventTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
 import {
   resolveTerminalFontPreference,
@@ -1118,11 +1119,20 @@ export function TerminalViewport({
     };
   }, [drawerHeight, environmentId, resizeEpoch, terminalId, threadId]);
   return (
-    <div
-      ref={containerRef}
-      tabIndex={-1}
-      className="relative h-full w-full overflow-hidden bg-(--terminal-background)"
-    />
+    <div className="flex h-full w-full flex-col overflow-hidden bg-(--terminal-background)">
+      {terminalError ? (
+        <TerminalLaunchErrorNotice
+          message={terminalError}
+          environmentId={environmentId}
+          {...(providerInstanceId ? { providerInstanceId } : {})}
+        />
+      ) : null}
+      <div
+        ref={containerRef}
+        tabIndex={-1}
+        className="relative min-h-0 w-full flex-1 overflow-hidden"
+      />
+    </div>
   );
 }
 

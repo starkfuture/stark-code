@@ -26,10 +26,10 @@ describe("findPromptLinkProject", () => {
         repositoryIdentity: identity("github.com/example/stark-code", "github.com/me/starkcode"),
       },
       { id: "none", repositoryIdentity: null },
-      { id: "recent", repositoryIdentity: identity("github.com/PingDotGG/StarkCode") },
+      { id: "recent", repositoryIdentity: identity("github.com/Example/Stark-Code") },
       { id: "older", repositoryIdentity: identity("github.com/example/stark-code") },
     ];
-    expect(findPromptLinkProject(projects, { owner: "example", name: "starkcode" })?.id).toBe(
+    expect(findPromptLinkProject(projects, { owner: "example", name: "stark-code" })?.id).toBe(
       "recent",
     );
     expect(findPromptLinkProject(projects, { owner: "me", name: "starkcode" })?.id).toBe("fork");
@@ -61,7 +61,7 @@ describe("findPromptLinkPullRequestThread", () => {
         pullRequests: [link(7, "stack-dismissed")],
       },
     ];
-    const pullRequest = { owner: "PingDotGG", name: "starkcode", number: 7 };
+    const pullRequest = { owner: "example", name: "stark-code", number: 7 };
     expect(findPromptLinkPullRequestThread(threads, pullRequest)?.id).toBe("new");
     expect(findPromptLinkPullRequestThread(threads, { ...pullRequest, number: 9 })).toBeUndefined();
   });

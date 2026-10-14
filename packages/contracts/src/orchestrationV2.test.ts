@@ -1568,3 +1568,43 @@ describe("latestProviderTurnForAttempt", () => {
     expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
   });
 });
+
+describe("human shell command dispatch", () => {
+  const input = {
+    type: "thread.shell-command.dispatch",
+    commandId: "shell-command",
+    threadId: "shell-thread",
+    messageId: "shell-message",
+    createdBy: "user",
+    creationSource: "web",
+    command: "  pwd  ",
+    respond: true,
+    dispatchMode: { type: "start_immediately" },
+  };
+  const decode = Schema.decodeUnknownSync(OrchestrationV2Command);
+  it("trims the command and accepts bounded timeout and queued delivery", () => {
+    expect(decode(input)).toMatchObject({ command: "pwd", createdBy: "user" });
+    expect(
+      decode({ ...input, timeoutMs: 600_000, dispatchMode: { type: "queue_after_active" } }),
+    ).toMatchObject({ timeoutMs: 600_000 });
+  });
+  it("rejects blank and overlong commands, invalid timeouts, and steering modes", () => {
+    for (const command of ["", "   ", "x".repeat(10_001)])
+      expect(() => decode({ ...input, command })).toThrow();
+    for (const timeoutMs of [999, 3_600_001, 1000.5])
+      expect(() => decode({ ...input, timeoutMs })).toThrow();
+    for (const type of ["steer_active", "restart_active", "defer_start"])
+      expect(() => decode({ ...input, dispatchMode: { type, targetRunId: "run" } })).toThrow();
+  });
+  it("cannot smuggle shell metadata through an ordinary message dispatch", () => {
+    const decoded = decode({
+      ...input,
+      type: "message.dispatch",
+      text: "!pwd",
+      attachments: [],
+      userShell: { command: "pwd", respond: false },
+    });
+    expect(decoded).not.toHaveProperty("userShell");
+    expect(decoded).toMatchObject({ text: "!pwd" });
+  });
+});

@@ -258,6 +258,8 @@ export function turnItemHasDetail(item: OrchestrationV2TurnItem): boolean {
       return Boolean(item.detail?.trim());
     case "system_notice":
       return item.message.trim().length > 0;
+    case "hook_run":
+      return item.detail.trim().length > 0;
     case "error":
       return item.failure.message.trim().length > 0;
     case "proposed_plan":

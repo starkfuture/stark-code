@@ -19,6 +19,8 @@ const state = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   resize: vi.fn(),
   otherCommand: vi.fn(),
+  navigate: vi.fn(),
+  error: null as string | null,
   createSurface:
     vi.fn<
       (
@@ -29,6 +31,10 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => state.navigate }));
+vi.mock("./ui/button", () => ({
+  Button: (props: Record<string, unknown>) => <button {...props} />,
+}));
 vi.mock("../hooks/useSettings", () => ({
   getClientSettings: () => DEFAULT_CLIENT_SETTINGS,
   useClientSettings: (select: (settings: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
@@ -45,7 +51,7 @@ vi.mock("../state/use-atom-command", () => ({
   useAtomCommand: (command: string) => (command === "resize" ? state.resize : state.otherCommand),
 }));
 vi.mock("../state/terminalSessions", () => ({
-  useAttachedTerminalSession: () => session,
+  useAttachedTerminalSession: () => ({ ...session, error: state.error }),
 }));
 vi.mock("~/terminal/ghostty/surface", () => ({
   GhosttyTerminalSurface: { create: state.createSurface },
@@ -79,6 +85,8 @@ let renderer: ReactTestRenderer | undefined;
 
 beforeEach(() => {
   state.allowed = true;
+  state.error = null;
+  state.navigate.mockReset();
   state.listeners.clear();
   state.resize.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   state.otherCommand.mockReset().mockResolvedValue(AsyncResult.success(undefined));
@@ -104,6 +112,42 @@ afterEach(async () => {
   await act(async () => renderer?.unmount());
   renderer = undefined;
   vi.unstubAllGlobals();
+});
+
+it("shows native launch refusal in the shell and opens the affected provider settings", async () => {
+  state.error =
+    "Stark requires supervised Codex. Remove -s danger-full-access from this account's launch arguments.";
+  await act(async () => {
+    renderer = create(
+      <TerminalViewport
+        advancedTypography={false}
+        threadRef={threadRef}
+        threadId={threadRef.threadId}
+        terminalId="native-agent-codex"
+        terminalLabel="Codex native shell"
+        cwd="/repo"
+        providerInstanceId={"codex_work" as import("@starkfuture/contracts").ProviderInstanceId}
+        agentShell
+        onSessionExited={state.otherCommand}
+        focusRequestId={0}
+        autoFocus={false}
+        visible
+        resizeEpoch={0}
+        drawerHeight={200}
+        keybindings={[]}
+      />,
+      { createNodeMock: () => ({ closest: () => null, contains: () => false }) },
+    );
+  });
+  const alert = renderer!.root.findByProps({ role: "alert" });
+  expect(alert.findByType("p").children.join("")).toContain("Remove -s danger-full-access");
+  const button = alert.findByType("button");
+  expect(button.children.join("")).toBe("Open provider settings");
+  await act(async () => button.props.onClick());
+  expect(state.navigate).toHaveBeenCalledWith({
+    to: "/settings/providers",
+    search: { environmentId: threadRef.environmentId, instanceId: "codex_work" },
+  });
 });
 
 it("rechecks the target terminal grant when a retained surface callback reports a resize", async () => {

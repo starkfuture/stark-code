@@ -1,5 +1,13 @@
 import { NATIVE_AGENT_SHELL_TOGGLE_EVENT, toggleNativeAgentShell } from "../nativeAgentShell";
 import { NativeAgentShell, nativeAgentTerminalId } from "./NativeAgentShell";
+import { StarkPagesSidebar } from "./StarkPagesSidebar";
+import { CheckpointRestoreChoices } from "./chat/CheckpointRestoreChoices";
+import {
+  userShellCommandAvailability,
+  rememberProjectShellCommand,
+  buildUserShellCommandDispatch,
+} from "./chat/userShellComposer";
+import { orchestrationEnvironment } from "../state/orchestration";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -583,6 +591,7 @@ import { readEnvironmentScope, readPreparedConnection } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
+import { useThreadHookActivity } from "../hooks/useThreadHookActivity";
 import { Button, InlineButton } from "./ui/button";
 import {
   AlertDialog,
@@ -1587,6 +1596,9 @@ export default function ChatView(props: ChatViewProps) {
     forceExpandedMobileComposer = false,
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  const showAllHookActivity = useThreadHookActivity(
+    routeKind === "server" ? scopeThreadRef(environmentId, threadId) : null,
+  );
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const hasTerminalWriteAccess = useCallback(
     () => readEnvironmentScope(environmentId, AuthTerminalOperateScope),
@@ -1639,6 +1651,10 @@ export default function ChatView(props: ChatViewProps) {
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
   });
+  const dispatchShellCommand = useOrchestrationCommand(
+    orchestrationEnvironment.v2.dispatchCommand,
+    { reportFailure: false },
+  );
   const resumeThreadQueue = useOrchestrationCommand(threadEnvironment.resumeThreadQueue, {
     reportFailure: false,
   });
@@ -1666,6 +1682,12 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const revertThreadCheckpoint = useOrchestrationCommand(threadEnvironment.revertCheckpoint, {
+    reportFailure: false,
+  });
+  const restoreCheckpointFiles = useAtomCommand(serverEnvironment.restoreCheckpointFiles, {
+    reportFailure: false,
+  });
+  const undoCheckpointRestore = useAtomCommand(serverEnvironment.undoCheckpointRestore, {
     reportFailure: false,
   });
   const forkThreadFromRun = useAtomCommand(threadEnvironment.forkFromRun, {
@@ -2262,6 +2284,8 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
   const [nativeShellThreadKey, setNativeShellThreadKey] = useState<string | null>(null);
   const [nativeShellPreparing, setNativeShellPreparing] = useState(false);
+  const [nativeShellFocusRequest, setNativeShellFocusRequest] = useState(1);
+  const [pagesProjectKeys, setPagesProjectKeys] = useState<ReadonlySet<string>>(new Set());
   const [nativeShellSelection, setNativeShellSelection] = useState<{
     instanceId: ProviderInstanceId;
     driver: string;
@@ -2639,6 +2663,14 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectKey = activeProject
     ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
     : null;
+  const closePages = useCallback(() => {
+    if (!activeProjectKey) return;
+    setPagesProjectKeys((current) => {
+      const next = new Set(current);
+      next.delete(activeProjectKey);
+      return next;
+    });
+  }, [activeProjectKey]);
   const [pendingFileSurfaceIdsByProject, setPendingFileSurfaceIdsByProject] = useState<
     ReadonlyMap<string, ReadonlySet<string>>
   >(() => new Map());
@@ -2683,6 +2715,13 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeProjectRef, activeThreadRef]);
   const activeEnvironment =
     activeThread == null ? null : (environmentById.get(activeThread.environmentId) ?? null);
+  const pagesAvailable =
+    isElectron &&
+    activeProject !== null &&
+    activeEnvironment !== null &&
+    isDesktopLocalConnectionTarget(activeEnvironment.entry.target);
+  const pagesOpen =
+    pagesAvailable && activeProjectKey !== null && pagesProjectKeys.has(activeProjectKey);
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
   const activeEnvironmentUnavailable =
     activeEnvironment !== null && activeEnvironmentConnectionPhase !== "connected";
@@ -3020,6 +3059,15 @@ export default function ChatView(props: ChatViewProps) {
     ? (activeEnvironment?.serverConfig ?? null)
     : (primaryEnvironment?.serverConfig ?? null);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
+  const pagesProvider = providerStatuses.find(
+    (provider) => provider.instanceId === nativeShellSelection?.instanceId,
+  );
+  const pagesPluginKnown =
+    pagesProvider?.slashCommands.some(
+      (command) =>
+        command.name.replace(/^\//, "") === "stark-workbench:publish" &&
+        command.source === "plugin",
+    ) === true;
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
     activeThread?.modelSelection.instanceId ??
@@ -3297,6 +3345,15 @@ export default function ChatView(props: ChatViewProps) {
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
   const activeProviderStatus = selectedProviderEntry?.snapshot ?? null;
+  const userShellCommandAvailable = userShellCommandAvailability({
+    canOperateTerminal,
+    canOperateThread,
+    capability: serverConfig?.environment.capabilities.userShellCommand === true,
+    allowed: settings.allowUserShellCommands,
+    provider: selectedProvider,
+    multipleModels: multipleModelSelections !== null,
+  });
+  const shellHistoryProjectKey = `${environmentId}:${activeProject?.id ?? ""}`;
   const { enabled: interactionModeEnabled, interactionMode } = resolveComposerInteractionMode({
     planModeEnabled: settings.planModeEnabled,
     provider: activeProviderStatus,
@@ -8495,6 +8552,43 @@ export default function ChatView(props: ChatViewProps) {
     messageId: MessageId;
     routeThreadKey: string;
   } | null>(null);
+  const [restoringFiles, setRestoringFiles] = useState(false);
+  const restorePreview = useEnvironmentQuery(
+    pendingRevert && activeThread && pendingRevert.routeThreadKey === routeThreadKey
+      ? serverEnvironment.checkpointRestorePreview({
+          environmentId,
+          input: { threadId: activeThread.id, turnCount: pendingRevert.turnCount },
+        })
+      : null,
+  );
+  useEffect(() => {
+    if (pendingRevert) restorePreview.refresh();
+  }, [pendingRevert, restorePreview.refresh]);
+  const restoreCodeOnly = async () => {
+    if (
+      !pendingRevert ||
+      !activeThread ||
+      restoringFiles ||
+      pendingRevert.routeThreadKey !== routeThreadKey
+    )
+      return;
+    setRestoringFiles(true);
+    try {
+      const result = await restoreCheckpointFiles({
+        environmentId,
+        input: { threadId: activeThread.id, turnCount: pendingRevert.turnCount },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      setPendingRevert(null);
+    } catch (error) {
+      setThreadError(
+        activeThread.id,
+        error instanceof Error ? error.message : "Could not restore files.",
+      );
+    } finally {
+      setRestoringFiles(false);
+    }
+  };
 
   if (pendingRevert && pendingRevert.routeThreadKey !== routeThreadKey) {
     setPendingRevert(null);
@@ -8986,6 +9080,7 @@ export default function ChatView(props: ChatViewProps) {
       annotation: PreviewAnnotationPayload;
       image: ComposerImageAttachment | null;
     },
+    userShellCommand?: { readonly respond: boolean },
   ) => {
     e?.preventDefault();
     if (nativeShellMode) return;
@@ -8995,6 +9090,153 @@ export default function ChatView(props: ChatViewProps) {
           activeThreadId,
           "The native agent is still running. Exit it in Shell mode, or use another thread and worktree for parallel work.",
         );
+      return;
+    }
+    if (userShellCommand !== undefined) {
+      const submittedPrompt = promptRef.current;
+      const routeAtSend = currentRouteThreadKeyRef.current;
+      const command = submittedPrompt.trim();
+      if (
+        !userShellCommandAvailable ||
+        !readEnvironmentScope(environmentId, AuthTerminalOperateScope) ||
+        !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
+        !activeThread ||
+        !activeProject ||
+        !clientSettingsHydrated ||
+        isConnecting ||
+        isRevertingCheckpoint ||
+        sendInFlightRef.current ||
+        threadDetailLoading ||
+        environmentChangeRef.current !== null
+      )
+        return;
+      if (composerHasNonPromptContent || command.length === 0 || command.length > 10_000) {
+        setThreadError(
+          activeThread.id,
+          composerHasNonPromptContent
+            ? "Shell commands cannot include attachments or context."
+            : "Enter a shell command between 1 and 10,000 characters.",
+        );
+        return;
+      }
+      const context = composerRef.current?.getSendContext();
+      if (!context?.providerAvailable || !context.selectedModelSelection) return;
+      const messageId = newMessageId();
+      const createdAt = new Date().toISOString();
+      const threadId = activeThread.id;
+      const queued = phase === "running";
+      const message = {
+        id: messageId,
+        role: "user" as const,
+        text: command,
+        userShell: { command, respond: userShellCommand.respond },
+        runId: null,
+        createdAt,
+        updatedAt: createdAt,
+        streaming: false,
+        ...(queued ? { inputIntent: "queued_turn" as const } : {}),
+      };
+      sendInFlightRef.current = true;
+      setThreadError(threadId, null);
+      try {
+        if (!isServerThread) {
+          if (envMode === "worktree" && !activeThread.worktreePath && !activeThreadBranch)
+            throw new Error("Select a base branch before running a command in a new worktree.");
+          const created = await launchNativeThread({
+            environmentId,
+            input: {
+              commandId: CommandId.make(randomUUID()),
+              creationSource: "web",
+              threadId,
+              projectId: activeProject.id,
+              title: command.split("\n")[0]!.slice(0, 100),
+              generateTitle: false,
+              modelSelection: context.selectedModelSelection,
+              runtimeMode: defaultRuntimeMode,
+              interactionMode: context.interactionMode,
+              workspaceStrategy: activeThread.worktreePath
+                ? {
+                    type: "existing_worktree",
+                    worktreePath: activeThread.worktreePath,
+                    ...(activeThreadBranch ? { branch: activeThreadBranch } : {}),
+                  }
+                : envMode === "worktree"
+                  ? {
+                      type: "worktree",
+                      baseRef: activeThreadBranch!,
+                      startFromOrigin: activeProjectSettings.settings.newWorktreesStartFromOrigin,
+                    }
+                  : { type: "root", ...(activeThreadBranch ? { branch: activeThreadBranch } : {}) },
+            },
+          });
+          if (created._tag === "Failure") throw squashAtomCommandFailure(created);
+        } else {
+          const saved = await persistThreadSettingsForNextTurn({
+            threadId,
+            createdAt,
+            runtimeMode,
+            interactionMode: context.interactionMode,
+            ...(localCheckoutBranchMismatch
+              ? { branch: localCheckoutBranchMismatch.currentBranch }
+              : {}),
+          });
+          if (saved._tag === "Failure") throw squashAtomCommandFailure(saved);
+          const metadata = await updateThreadMetadata({
+            environmentId,
+            input: { threadId, modelSelection: context.selectedModelSelection },
+          });
+          if (metadata._tag === "Failure") throw squashAtomCommandFailure(metadata);
+        }
+        if (currentRouteThreadKeyRef.current === routeAtSend)
+          setOptimisticUserMessages((messages) => [...messages, message]);
+        const result = await dispatchShellCommand({
+          environmentId,
+          input: buildUserShellCommandDispatch({
+            commandId: CommandId.make(randomUUID()),
+            threadId,
+            messageId,
+            command,
+            respond: userShellCommand.respond,
+            running: queued,
+            nativeAgentRunning: runningTerminalIds.some((id) => id.startsWith("native-agent-")),
+          }),
+        });
+        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        rememberProjectShellCommand(shellHistoryProjectKey, message);
+        const draftStore = useComposerDraftStore.getState();
+        if (draftStore.getComposerDraft(composerDraftTarget)?.prompt === submittedPrompt) {
+          draftStore.setPrompt(composerDraftTarget, "", "human");
+          draftStore.setShellCommandState(composerDraftTarget, {
+            shellMode: true,
+            shellCommandRespond: settings.shellCommandRespond,
+          });
+          if (
+            currentRouteThreadKeyRef.current === routeAtSend &&
+            promptRef.current === submittedPrompt
+          ) {
+            promptRef.current = "";
+            composerRef.current?.resetCursorState();
+          }
+        }
+        if (currentRouteThreadKeyRef.current === routeAtSend) {
+          scrollToEnd();
+          if (!isServerThread)
+            await navigate({
+              to: "/$environmentId/$threadId",
+              params: { environmentId, threadId },
+            });
+        }
+      } catch (error) {
+        setOptimisticUserMessages((messages) =>
+          messages.filter((candidate) => candidate.id !== messageId),
+        );
+        setThreadError(
+          threadId,
+          error instanceof Error ? error.message : "Could not run the shell command.",
+        );
+      } finally {
+        sendInFlightRef.current = false;
+      }
       return;
     }
     // Typed out in full rather than picked from the menu. Attachments or contexts
@@ -11641,6 +11883,24 @@ export default function ChatView(props: ChatViewProps) {
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
           />
+          {pagesAvailable ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={pagesOpen}
+              onClick={() => {
+                if (!activeProjectKey) return;
+                setPagesProjectKeys((current) => {
+                  const next = new Set(current);
+                  if (next.has(activeProjectKey)) next.delete(activeProjectKey);
+                  else next.add(activeProjectKey);
+                  return next;
+                });
+              }}
+            >
+              Pages
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             size="sm"
@@ -11666,10 +11926,54 @@ export default function ChatView(props: ChatViewProps) {
           </Button>
         </header>
 
+        {serverProjection?.thread.lastFileRestore ? (
+          <div
+            role="status"
+            className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground"
+          >
+            <span>
+              Restored {serverProjection.thread.lastFileRestore.restored} files, kept{" "}
+              {serverProjection.thread.lastFileRestore.kept}.
+            </span>
+            {serverProjection.thread.lastFileRestore.undoId ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={
+                  restoringFiles ||
+                  isWorking ||
+                  !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
+                }
+                onClick={() => {
+                  const undoId = serverProjection.thread.lastFileRestore?.undoId;
+                  if (!undoId || !activeThread || restoringFiles) return;
+                  setRestoringFiles(true);
+                  void undoCheckpointRestore({
+                    environmentId,
+                    input: { threadId: activeThread.id, undoId },
+                  })
+                    .then((result) => {
+                      if (result._tag === "Failure")
+                        setThreadError(
+                          activeThread.id,
+                          "Could not undo this restore. Files changed since are kept.",
+                        );
+                    })
+                    .finally(() => setRestoringFiles(false));
+                }}
+              >
+                Undo restore
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         {/* Main content area with optional plan sidebar */}
         <div className="relative flex min-h-0 min-w-0 flex-1">
           {nativeShellMode && activeThreadRef && nativeShellSelection && activeProject ? (
-            <div className="absolute inset-0 z-30">
+            <div
+              className={cn("absolute inset-y-0 left-0 z-30", pagesOpen ? "right-96" : "right-0")}
+            >
               <NativeAgentShell
                 key={`${activeThreadKey}:${nativeShellSelection.instanceId}`}
                 threadRef={activeThreadRef}
@@ -11678,6 +11982,7 @@ export default function ChatView(props: ChatViewProps) {
                 cwd={activeThreadWorktreePath ?? activeProject.workspaceRoot}
                 worktreePath={activeThreadWorktreePath ?? null}
                 keybindings={keybindings}
+                focusRequestId={nativeShellFocusRequest}
                 onBackToChat={() => setNativeShellThreadKey(null)}
               />
             </div>
@@ -11744,6 +12049,7 @@ export default function ChatView(props: ChatViewProps) {
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                showAllHookActivity={showAllHookActivity}
                 citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
                 citationHistoryLoading={threadDetailLoading}
                 {...(!paintOnlyDisplayedTimeline
@@ -11959,6 +12265,8 @@ export default function ChatView(props: ChatViewProps) {
                           ) : null}
                           {!composerMounted ? null : (
                             <ChatComposer
+                              userShellCommandAvailable={userShellCommandAvailable}
+                              shellHistoryProjectKey={shellHistoryProjectKey}
                               canOperateThread={canOperateThread}
                               reportedModelSelection={reportedModelSelection}
                               multipleModelSelections={multipleModelSelections}
@@ -12266,6 +12574,54 @@ export default function ChatView(props: ChatViewProps) {
             ) : null}
           </ThreadFindCanvas>
           {/* end chat column */}
+          {pagesOpen && activeProject ? (
+            <div className="min-h-0 w-96 shrink-0">
+              <StarkPagesSidebar
+                key={activeProjectKey}
+                projectRoot={activeProject.workspaceRoot}
+                agent={
+                  (nativeShellMode ? nativeShellSelection?.driver : selectedProvider) ===
+                  "claudeAgent"
+                    ? "claude"
+                    : "codex"
+                }
+                // Chat publishing is enabled only after the SDK's plugin loading and publish guard
+                // have been verified live. The native CLI keeps its own plugin and approval flow.
+                canPublish={
+                  nativeShellMode &&
+                  nativeShellSelection?.driver === "claudeAgent" &&
+                  pagesPluginKnown &&
+                  canOperateTerminal
+                }
+                onPublishRequest={(slug) => {
+                  const command = `/stark-workbench:publish ${slug}`;
+                  if (
+                    nativeShellMode &&
+                    nativeShellSelection?.driver === "claudeAgent" &&
+                    activeThreadRef &&
+                    canOperateTerminal
+                  ) {
+                    // Deliberately no newline: the user reviews this in Claude and presses Enter.
+                    void writeTerminal({
+                      environmentId: activeThreadRef.environmentId,
+                      input: {
+                        threadId: activeThreadRef.threadId,
+                        terminalId: nativeAgentTerminalId(nativeShellSelection.instanceId),
+                        data: command,
+                      },
+                    }).then((result) => {
+                      if (result._tag === "Success")
+                        setNativeShellFocusRequest((value) => value + 1);
+                    });
+                  } else {
+                    setComposerDraftPrompt(composerDraftTarget, command);
+                    focusComposer();
+                  }
+                }}
+                onClose={closePages}
+              />
+            </div>
+          ) : null}
         </div>
         {/* end horizontal flex container */}
 
@@ -12410,28 +12766,27 @@ export default function ChatView(props: ChatViewProps) {
               composer.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (!pendingRevert || pendingRevert.routeThreadKey !== routeThreadKey) return;
-                setPendingRevert(null);
-                void onRevertToTurnCount(pendingRevert.turnCount, pendingRevert.messageId, true);
-              }}
-            >
-              Revert files too
-            </Button>
-            <Button
-              onClick={() => {
-                if (!pendingRevert || pendingRevert.routeThreadKey !== routeThreadKey) return;
-                setPendingRevert(null);
-                void onRevertToTurnCount(pendingRevert.turnCount, pendingRevert.messageId, false);
-              }}
-            >
-              Revert and keep changes
-            </Button>
-          </AlertDialogFooter>
+          <CheckpointRestoreChoices
+            shared={activeThread.worktreePath === null}
+            preview={restorePreview.data}
+            pending={restorePreview.isPending}
+            error={restorePreview.error}
+            busy={restoringFiles}
+            canOperate={readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)}
+            onCodeAndChat={() => {
+              if (!pendingRevert || pendingRevert.routeThreadKey !== routeThreadKey) return;
+              setPendingRevert(null);
+              void onRevertToTurnCount(pendingRevert.turnCount, pendingRevert.messageId, true);
+            }}
+            onChatOnly={() => {
+              if (!pendingRevert || pendingRevert.routeThreadKey !== routeThreadKey) return;
+              setPendingRevert(null);
+              void onRevertToTurnCount(pendingRevert.turnCount, pendingRevert.messageId, false);
+            }}
+            onCodeOnly={() => {
+              void restoreCodeOnly();
+            }}
+          />
         </AlertDialogPopup>
       </AlertDialog>
       <LinkPullRequestDialogHost />

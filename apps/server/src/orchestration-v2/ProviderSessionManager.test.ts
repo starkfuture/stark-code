@@ -2674,7 +2674,7 @@ it.effect("ProviderSessionManagerV2 terminal detach revokes the thread's MCP cre
   }),
 );
 
-it.effect("ProviderSessionManagerV2 releases idle sessions without sweeping all sessions", () =>
+it.effect("ProviderSessionManagerV2 inspection does not postpone idle release", () =>
   Effect.gen(function* () {
     const state = yield* Ref.make(emptyState);
     const effect = Effect.gen(function* () {
@@ -2705,7 +2705,9 @@ it.effect("ProviderSessionManagerV2 releases idle sessions without sweeping all 
         runtimePolicy,
       });
 
-      yield* TestClock.adjust("1 second");
+      yield* TestClock.adjust("500 millis");
+      assert.isTrue(Option.isSome(yield* manager.peek(providerSessionId)));
+      yield* TestClock.adjust("500 millis");
       yield* Effect.yieldNow;
 
       const liveSession = yield* manager.get(providerSessionId);

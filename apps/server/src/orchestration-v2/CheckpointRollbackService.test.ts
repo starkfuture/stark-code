@@ -20,6 +20,7 @@ import { resolveCodexRollbackTurnCount } from "./Adapters/CodexAdapterV2.ts";
 import { isCheckpointRestoreIsolated } from "./CheckpointRestoreSafety.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as CheckpointRollbackService from "./CheckpointRollbackService.ts";
+import { CheckpointFileRestore } from "../checkpointing/CheckpointFileRestore.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as KeyedLock from "@starkfuture/shared/KeyedLock";
 import * as EventSink from "./EventSink.ts";
@@ -38,6 +39,9 @@ const layerCheckpointRollbackService = CheckpointRollbackService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       NodeServices.layer,
+      Layer.mock(CheckpointFileRestore)({
+        restore: () => Effect.die("Unexpected narrow restore in a legacy checkout test"),
+      }),
       Layer.mock(ProjectStore.ProjectStoreV2)({ get: () => Effect.succeed(unrelatedProject) }),
     ),
   ),
@@ -350,7 +354,8 @@ it.effect.each([
   { restoreFiles: false, shared: "worktree" },
   { restoreFiles: true, shared: "historical" },
   { restoreFiles: false, shared: "none", targetOrdinal: 1 },
-])("rewinds safely with %s", ({ restoreFiles, shared, targetOrdinal = 0 }) => {
+  { restoreFiles: true, shared: "root", native: true },
+])("rewinds safely with %s", ({ restoreFiles, shared, targetOrdinal = 0, native = false }) => {
   const threadId = ThreadId.make("rewind-files");
   const providerThreadId = ProviderThreadId.make("rewind-provider");
   const providerSessionId = ProviderSessionId.make("rewind-session");
@@ -371,6 +376,7 @@ it.effect.each([
     id: providerThreadId,
     providerSessionId,
     providerInstanceId: instanceId,
+    driver: native ? "claudeAgent" : "codex",
   };
   const projection = {
     thread: {
@@ -391,7 +397,12 @@ it.effect.each([
     nodes: [],
     attempts: [1, 2, 3].map((ordinal) => ({ id: `attempt-${ordinal}`, runId: `run-${ordinal}` })),
     checkpoints: [
-      { id: checkpointId, scopeId, status: "ready", appRunOrdinal: targetOrdinal || null },
+      {
+        id: checkpointId,
+        scopeId,
+        status: native ? "missing" : "ready",
+        appRunOrdinal: targetOrdinal || null,
+      },
     ],
     checkpointScopes: [{ id: scopeId, cwd: process.cwd() }],
     runs: [1, 2, 3].map((ordinal) => ({
@@ -402,7 +413,28 @@ it.effect.each([
       activeAttemptId: `attempt-${ordinal}`,
     })),
   } as unknown as OrchestrationV2ThreadProjection;
-  const layerTest = layerCheckpointRollbackService.pipe(
+  const layerNativeRollback = CheckpointRollbackService.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(CheckpointFileRestore)({
+          restore: () =>
+            Effect.sync(() => {
+              calls.push("native-files");
+              return {
+                restorable: ["a"],
+                conflicts: [],
+                untracked: [],
+                insertions: 0,
+                deletions: 0,
+              };
+            }),
+        }),
+        Layer.mock(ProjectStore.ProjectStoreV2)({ get: () => Effect.succeed(unrelatedProject) }),
+      ),
+    ),
+  );
+  const layerTest = (native ? layerNativeRollback : layerCheckpointRollbackService).pipe(
     Layer.provide(
       Layer.mergeAll(
         layerThreadCommands,
@@ -472,18 +504,36 @@ it.effect.each([
   );
   return Effect.gen(function* () {
     const service = yield* CheckpointRollbackService.CheckpointRollbackServiceV2;
-    if (restoreFiles && shared !== "none") {
+    if (restoreFiles && shared !== "none" && !native) {
       const error = yield* Effect.flip(
-        service.execute({ threadId, providerThreadId, checkpointId, scopeId, restoreFiles }),
+        service.execute({
+          threadId,
+          providerThreadId,
+          checkpointId,
+          scopeId,
+          restoreFiles,
+          restoreScope: "checkout",
+        }),
       );
       assert.equal(error.reason, "shared-workspace");
       assert.deepEqual(calls, []);
       return;
     }
-    yield* service.execute({ threadId, providerThreadId, checkpointId, scopeId, restoreFiles });
+    yield* service.execute({
+      threadId,
+      providerThreadId,
+      checkpointId,
+      scopeId,
+      restoreFiles,
+      restoreScope: native ? "agent-files" : "checkout",
+    });
     assert.deepEqual(
       calls,
-      restoreFiles ? ["provider", "files", "projection"] : ["provider", "projection"],
+      native
+        ? ["native-files", "provider", "projection"]
+        : restoreFiles
+          ? ["provider", "files", "projection"]
+          : ["provider", "projection"],
     );
   }).pipe(Effect.provide(layerTest));
 });

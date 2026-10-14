@@ -401,3 +401,26 @@ describe("orchestration V2 wire projection", () => {
     expect(projectTurnItemForWire({ ...base, output })).not.toHaveProperty("output");
   });
 });
+
+it("streams a bounded human shell preview while keeping agent command output on demand", () => {
+  const item = {
+    ...base,
+    type: "command_execution" as const,
+    input: "pwd",
+    output: "human output\n",
+    source: "user_shell" as const,
+    durationMs: 42,
+    exitCode: 0,
+    fullOutputPath: "/attachments/shell/command.log",
+  };
+  expect(projectTurnItemForWire(item)).toMatchObject({
+    output: item.output,
+    source: "user_shell",
+    durationMs: 42,
+    fullOutputPath: item.fullOutputPath,
+  });
+  const long = projectTurnItemForWire({ ...item, output: "x".repeat(100_000) });
+  expect(long).toMatchObject({ outputOmitted: true });
+  expect(long.type === "command_execution" ? long.output?.length : 0).toBeLessThan(33_000);
+  expect(projectTurnItemForWire({ ...item, source: "agent" })).not.toHaveProperty("output");
+});

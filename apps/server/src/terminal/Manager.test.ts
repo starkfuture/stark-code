@@ -43,7 +43,8 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "./Manager.ts";
-import { nativeAgentLaunch } from "./NativeAgentLaunch.ts";
+import { nativeAgentLaunch, NativeAgentLaunchRefused } from "./NativeAgentLaunch.ts";
+import { TerminalNativeLaunchRefusedError } from "@starkfuture/contracts";
 import * as PtyAdapter from "@starkfuture/shared/PtyAdapter";
 
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
@@ -2503,7 +2504,14 @@ it.layer(
           resolveAgentShellLaunch: () =>
             Effect.try({
               try: () => nativeAgentLaunch({ driver: "codex", config: { launchArgs }, home: cwd }),
-              catch: (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
+              catch: (cause) =>
+                cause instanceof NativeAgentLaunchRefused
+                  ? new TerminalNativeLaunchRefusedError({
+                      providerInstanceId,
+                      flag: cause.flag,
+                      reason: cause.reason,
+                    })
+                  : new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
             }),
         });
 
@@ -2515,7 +2523,11 @@ it.layer(
         expect(ptyAdapter.spawnInputs).toHaveLength(0);
         expect(ptyAdapter.processes).toHaveLength(0);
         expect(yield* getEvents).toContainEqual(
-          expect.objectContaining({ type: "error", threadId: "thread-1" }),
+          expect.objectContaining({
+            type: "error",
+            threadId: "thread-1",
+            message: expect.stringContaining("Remove -s danger-full-access"),
+          }),
         );
 
         launchArgs = "-s workspace-write";

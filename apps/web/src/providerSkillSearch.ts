@@ -16,8 +16,16 @@ export function scoreProviderSkill(skill: ServerProviderSkill, query: string): n
   const normalizedShortDescription = skill.shortDescription?.toLowerCase() ?? "";
   const normalizedDescription = skill.description?.toLowerCase() ?? "";
   const normalizedScope = skill.scope?.toLowerCase() ?? "";
+  const normalizedPlugin = skill.pluginName?.toLowerCase() ?? "";
 
   const scores = [
+    scoreQueryMatch({
+      value: normalizedPlugin,
+      query,
+      exactBase: 10,
+      prefixBase: 12,
+      includesBase: 14,
+    }),
     scoreQueryMatch({
       value: normalizedName,
       query,

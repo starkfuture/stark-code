@@ -18,6 +18,8 @@ import {
   type OrchestrationV2Command,
   type OrchestrationV2GetTurnItemResult,
   type OrchestrationV2ServerCommand,
+  type OrchestrationV2ServerProducerCommand,
+  type OrchestrationV2InternalCommand,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2CreationSource,
   type OrchestrationV2Run,
@@ -66,6 +68,7 @@ export function withCreationProvenance(
   switch (command.type) {
     case "thread.create":
     case "message.dispatch":
+    case "thread.shell-command.dispatch":
     case "thread.fork":
     case "thread.merge_back":
     case "delegated_task.request":
@@ -313,8 +316,15 @@ export interface ThreadManagementServiceShape {
    * resolved instance is off for the project, except a command id that
    * already has a receipt, which only replays its recorded result.
    */
+  /** Server/agent producers cannot synthesize human shell commands. */
+  readonly dispatchUserShellCommand?: (
+    command: Extract<OrchestrationV2Command, { readonly type: "thread.shell-command.dispatch" }>,
+  ) => Effect.Effect<
+    Orchestrator.OrchestratorV2DispatchResult,
+    Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
+  >;
   readonly dispatch: (
-    command: OrchestrationV2ServerCommand,
+    command: OrchestrationV2ServerProducerCommand | OrchestrationV2InternalCommand,
   ) => Effect.Effect<
     Orchestrator.OrchestratorV2DispatchResult,
     Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
@@ -650,6 +660,16 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
+      case "thread.shell-command.dispatch":
+        return orchestrator.getThreadRecords(command.threadId, []).pipe(
+          Effect.flatMap((projection) =>
+            assertProviderInstanceEnabled({
+              projectId: projection.thread.projectId,
+              commandId: command.commandId,
+              instanceId: projection.thread.modelSelection.instanceId,
+            }),
+          ),
+        );
       case "delegated_task.request":
         return orchestrator.getThreadRecords(command.parentThreadId, []).pipe(
           Effect.flatMap((parent) =>
@@ -665,11 +685,22 @@ const make = Effect.gen(function* () {
     }
   };
 
-  const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
+  const dispatchWithEnablement = (command: OrchestrationV2ServerCommand) =>
     ensureCommandTranscripts(command).pipe(
       Effect.andThen(assertDispatchTargetEnabled(command)),
       Effect.andThen(orchestrator.dispatch(command)),
     );
+
+  const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
+    (command as { readonly type: string }).type === "thread.shell-command.dispatch"
+      ? Effect.fail(
+          new Orchestrator.OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "Human shell commands must come through client intake.",
+          }),
+        )
+      : dispatchWithEnablement(command);
 
   const getProjectThread: ThreadManagementServiceShape["getProjectThread"] = (input) =>
     getThreadProjection(input.threadId).pipe(
@@ -1135,6 +1166,7 @@ const make = Effect.gen(function* () {
         Effect.andThen(orchestrator.searchThread(input)),
       ),
     dispatch,
+    dispatchUserShellCommand: dispatchWithEnablement,
     getThreadHistoryPage: (threadId, cursor, throughEntryId, conversationOnly) =>
       ensureProjectionTranscript(threadId).pipe(
         Effect.andThen(

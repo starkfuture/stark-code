@@ -2266,6 +2266,32 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="general" />
+      {window.desktopBridge ? (
+        <SettingsSection id="login-shell" title="Native shell">
+          <SettingsRow
+            title="Extra login-shell variables"
+            description="Comma-separated variable names to import when opening Stark Code from the Dock. Restart the app after changing this. Credential and AWS variables are excluded."
+            control={
+              <Input
+                key={settings.extraLoginShellEnvNames.join(",")}
+                defaultValue={settings.extraLoginShellEnvNames.join(", ")}
+                aria-label="Extra login-shell variables"
+                onBlur={(event) => {
+                  const names = [...new Set(event.target.value.split(/[,\s]+/).filter(Boolean))];
+                  if (
+                    names.length <= 32 &&
+                    names.every((name) =>
+                      /^(?!AWS_)(?!.*(?:TOKEN|SECRET|KEY))[A-Z_][A-Z0-9_]*$/.test(name),
+                    )
+                  )
+                    updateSettings({ extraLoginShellEnvNames: names });
+                  else event.target.value = settings.extraLoginShellEnvNames.join(", ");
+                }}
+              />
+            }
+          />
+        </SettingsSection>
+      ) : null}
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
           {...searchableSetting("project-grouping")}

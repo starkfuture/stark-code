@@ -44,6 +44,7 @@ import {
   workEntryDisplayLabel,
   workEntryReadOutput,
   workEntryIsVisibleInGroup,
+  filterHookActivity,
 } from "./MessagesTimeline.logic";
 import type { WorkLogEntry } from "../../session-logic";
 
@@ -93,6 +94,60 @@ describe("expanded tool group scrolling", () => {
     expect(
       resolveWorkGroupScrollIndex(entries, { entryId: "removed", offset: 120 }),
     ).toBeUndefined();
+  });
+});
+
+describe("hook activity visibility", () => {
+  const fixture = makeStreamingTimelineFixture();
+  const projected = (
+    id: string,
+    outcome: "ran" | "blocked",
+    level: "info" | "notice",
+  ): OrchestrationV2ProjectedTurnItem => ({
+    ...fixture.visibleTurnItems[0]!,
+    sourceItemId: TurnItemId.make(id),
+    item: {
+      id: TurnItemId.make(id),
+      threadId: fixture.threadId,
+      runId: fixture.runId,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: ProviderTurnId.make("hooks-turn"),
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      startedAt: DateTime.makeUnsafe(fixture.time(1)),
+      completedAt: DateTime.makeUnsafe(fixture.time(1)),
+      updatedAt: DateTime.makeUnsafe(fixture.time(1)),
+      type: "hook_run",
+      title: "Hook",
+      status: "completed",
+      provider: ProviderDriverKind.make("claudeAgent"),
+      eventName: "PreToolUse",
+      hookName: "project guard",
+      outcome,
+      level,
+      summary: outcome === "blocked" ? "Blocked by PreToolUse hook" : "PreToolUse hook ran",
+      detail: "<script>plain text only</script>",
+      durationMs: 10,
+    },
+  });
+  it("hides successful hooks by default and keeps the blocking row", () => {
+    const entries = deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems: [
+        projected("success", "ran", "info"),
+        projected("blocked", "blocked", "notice"),
+      ],
+      optimisticMessages: [],
+    });
+    const visible = filterHookActivity(entries, false);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.kind === "work" && visible[0].entry.label).toBe(
+      "Blocked by PreToolUse hook",
+    );
+    const verbose = filterHookActivity(entries, true);
+    expect(verbose).toHaveLength(1);
+    expect(verbose[0]?.kind === "work" && verbose[0].entry.label).toBe("Hooks: 2 ran, 1 blocked");
   });
 });
 
@@ -905,6 +960,7 @@ describe("deriveMessagesTimelineRows", () => {
           ...common,
           id: TurnItemId.make("command"),
           type: "command_execution",
+          source: "agent",
           input: "pwd",
           output: "",
         },

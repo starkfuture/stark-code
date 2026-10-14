@@ -546,6 +546,36 @@ export interface RunExecutionServiceV2StartRootRunInput {
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
 }
 
+/** Metadata, never a bang prefix in text, selects the human command route. */
+export function dispatchProviderTurn(
+  session: ProviderAdapter.ProviderAdapterV2SessionRuntime,
+  input: ProviderAdapter.ProviderAdapterV2TurnInput,
+) {
+  const shell = input.message.userShell !== undefined;
+  const compact =
+    !shell &&
+    input.message.attachments.length === 0 &&
+    input.message.text.trim().toLowerCase() === "/compact";
+  const start = shell
+    ? session.runUserShellCommand
+    : compact
+      ? session.compactThread
+      : session.startTurn;
+  return start === undefined
+    ? Effect.fail(
+        new ProviderAdapter.ProviderAdapterTurnStartError({
+          driver: session.driver,
+          threadId: input.threadId,
+          providerThreadId: input.providerThread.id,
+          runId: input.runId,
+          cause: shell
+            ? "This provider does not support ! commands."
+            : "This provider does not support context compaction.",
+        }),
+      )
+    : start(input);
+}
+
 export interface RunExecutionServiceV2Shape {
   readonly startRootRun: (
     input: RunExecutionServiceV2StartRootRunInput,
@@ -973,6 +1003,7 @@ export const layer: Layer.Layer<
                 : { relatedProviderThreadIds: input.relatedProviderThreadIds }),
             }),
           );
+          const shellAuditItems = new Set<TurnItemId>();
           const rootTerminalSeen = yield* Ref.make(false);
           const rootRunFinalized = yield* Ref.make(false);
           const providerThreadOwnerLost = yield* Ref.make(false);
@@ -1113,6 +1144,23 @@ export const layer: Layer.Layer<
                 });
               }
               if (event.type === "turn_item.updated") {
+                const item = event.turnItem;
+                if (
+                  item.runId === input.run.id &&
+                  item.type === "command_execution" &&
+                  item.source === "user_shell" &&
+                  isSettledTurnItemStatus(item.status) &&
+                  !shellAuditItems.has(item.id)
+                ) {
+                  shellAuditItems.add(item.id);
+                  yield* Effect.logInfo("user-shell-command", {
+                    threadId: input.run.threadId,
+                    commandId: input.message.userShell?.commandId ?? input.commandId,
+                    provider: input.session.driver,
+                    exitCode: item.exitCode ?? null,
+                    durationMs: item.durationMs ?? null,
+                  });
+                }
                 const belongsToRootRun = event.turnItem.runId === input.run.id;
                 const belongsToOwnedChildThread =
                   event.turnItem.threadId !== input.run.threadId &&
@@ -1436,21 +1484,34 @@ export const layer: Layer.Layer<
             runtimePolicy: input.runtimePolicy,
             ...(appContext.length === 0 ? {} : { appContext }),
           };
-          const compact =
-            input.message.attachments.length === 0 &&
-            input.message.text.trim().toLowerCase() === "/compact";
-          const startTurn = compact
-            ? (input.session.compactThread?.(turnInput) ??
-              Effect.fail(
-                new ProviderAdapter.ProviderAdapterTurnStartError({
-                  driver: input.session.driver,
-                  threadId: input.run.threadId,
-                  providerThreadId: input.providerThread.id,
-                  runId: input.run.id,
-                  cause: "This provider does not support context compaction.",
-                }),
-              ))
-            : input.session.startTurn(turnInput);
+          const startTurn =
+            input.message.userShell === undefined
+              ? dispatchProviderTurn(input.session, turnInput)
+              : serverSettings.getSettings.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderAdapter.ProviderAdapterTurnStartError({
+                        driver: input.session.driver,
+                        threadId: input.run.threadId,
+                        providerThreadId: input.providerThread.id,
+                        runId: input.run.id,
+                        cause,
+                      }),
+                  ),
+                  Effect.flatMap((settings) =>
+                    settings.allowUserShellCommands === false
+                      ? Effect.fail(
+                          new ProviderAdapter.ProviderAdapterTurnStartError({
+                            driver: input.session.driver,
+                            threadId: input.run.threadId,
+                            providerThreadId: input.providerThread.id,
+                            runId: input.run.id,
+                            cause: "User shell commands are disabled for this environment.",
+                          }),
+                        )
+                      : dispatchProviderTurn(input.session, turnInput),
+                  ),
+                );
           yield* Effect.andThen(shouldStart, startTurn).pipe(
             Effect.catchCause((cause) =>
               Effect.logError("orchestration V2 provider turn start failed", {

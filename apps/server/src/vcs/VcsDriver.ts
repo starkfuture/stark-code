@@ -48,6 +48,10 @@ export interface VcsDeleteCheckpointRefsInput {
 }
 
 export interface VcsCheckpointOps {
+  /** Shared workspaces restore only recorded edit-tool paths, with a content precondition. */
+  readonly restorePaths?: (
+    input: VcsRestorePathsInput,
+  ) => Effect.Effect<VcsRestorePathsResult, VcsError>;
   readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<void, VcsError>;
   readonly hasCheckpointRef: (
     input: Omit<VcsRestoreCheckpointInput, "fallbackToHead">,
@@ -62,6 +66,27 @@ export interface VcsCheckpointOps {
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,
   ) => Effect.Effect<void, VcsError>;
+}
+
+export interface VcsRestorePathsInput {
+  readonly cwd: string;
+  readonly sourceRef: CheckpointRef;
+  readonly expectedRef: CheckpointRef;
+  readonly expectedRefs?: Readonly<Record<string, CheckpointRef>>;
+  readonly paths: ReadonlyArray<string>;
+  readonly dryRun?: boolean;
+}
+export interface VcsRestorePathsResult {
+  readonly restored: ReadonlyArray<string>;
+  readonly conflicts: ReadonlyArray<{
+    readonly path: string;
+    readonly reason:
+      | "changed since"
+      | "symlink or hard link"
+      | "folder missing"
+      | "outside workspace"
+      | "checkpoint unavailable";
+  }>;
 }
 
 export class VcsDriver extends Context.Service<

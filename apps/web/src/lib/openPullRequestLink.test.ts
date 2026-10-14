@@ -166,7 +166,7 @@ describe("matchesLinkedPullRequestUrl", () => {
     expect(
       matchesLinkedPullRequestUrl(
         linkedPullRequest,
-        "https://github.com/PingDotGG/StarkCode/pull/42/files",
+        "https://github.com/Example/Stark-Code/pull/42/files",
       ),
     ).toBe(true);
   });

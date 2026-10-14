@@ -5,7 +5,7 @@ composer; it applies to that thread.
 
 Set the default for new threads in **Settings → General → New threads → Permissions**.
 Projects can override the environment default. New threads use this setting rather than the
-mode of the thread you were viewing. The initial default is **Full access**; existing threads
+mode of the thread you were viewing. The initial default is **Supervised**; existing threads
 and modes you choose in a draft keep their permissions.
 
 | Mode                  | Behavior                                                                              |
@@ -17,6 +17,17 @@ and modes you choose in a draft keep their permissions.
 
 Approve or reject requests in the conversation to let the agent continue. Permission modes do
 not prevent the agent from asking questions about the task.
+
+## Remember an approval
+
+When an approval supports a saved rule, review the exact tool or command prefix and
+its scope before remembering it. A saved command prefix can allow later commands
+with different arguments. **Settings → Permissions** lists saved rules and lets
+you forget them. Stark Pages publishing always requires a fresh approval.
+
+Claude skills and plugin commands can declare tools that Claude permits before
+Stark Code receives an approval request. The composer warns about this when you
+select a skill or plugin command. Choose it only if you trust its tool permissions.
 
 ## Provider differences
 

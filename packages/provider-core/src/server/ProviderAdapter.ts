@@ -31,6 +31,10 @@ import {
   RuntimeRequestId,
   RunAttemptId,
   RunId,
+  ServerProviderSessionCatalog,
+  McpServerStatusEntry,
+  McpServerSignInStart,
+  ProviderContextBreakdown,
   ThreadId,
 } from "@starkfuture/contracts";
 import * as Context from "effect/Context";
@@ -62,6 +66,7 @@ export const ProviderAdapterV2TurnMessage = Schema.Struct({
   creationSource: OrchestrationV2ConversationMessage.fields.creationSource,
   scheduledTaskId: OrchestrationV2ConversationMessage.fields.scheduledTaskId,
   senderThreadId: OrchestrationV2ConversationMessage.fields.senderThreadId,
+  userShell: OrchestrationV2ConversationMessage.fields.userShell,
 });
 export type ProviderAdapterV2TurnMessage = typeof ProviderAdapterV2TurnMessage.Type;
 
@@ -538,6 +543,23 @@ export type ProviderAdapterV2SubagentOutcome = {
   readonly result: OrchestrationV2Subagent["result"];
 };
 
+export interface ProviderAdapterV2McpServers {
+  readonly list: () => Effect.Effect<readonly McpServerStatusEntry[], ProviderAdapterV2Error>;
+  readonly reconnect: (name: string) => Effect.Effect<void, ProviderAdapterV2Error>;
+  readonly setEnabled: (
+    name: string,
+    enabled: boolean,
+  ) => Effect.Effect<void, ProviderAdapterV2Error>;
+  readonly startSignIn: (
+    name: string,
+  ) => Effect.Effect<McpServerSignInStart, ProviderAdapterV2Error>;
+  readonly submitCallback: (
+    name: string,
+    url: string,
+  ) => Effect.Effect<void, ProviderAdapterV2Error>;
+  readonly signOut: (name: string) => Effect.Effect<void, ProviderAdapterV2Error>;
+}
+
 export interface ProviderAdapterV2SessionRuntime {
   readonly instanceId: ProviderInstanceId;
   readonly driver: ProviderDriverKind;
@@ -596,6 +618,9 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly startTurn: (
     input: ProviderAdapterV2TurnInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;
+  readonly runUserShellCommand?: (
+    input: ProviderAdapterV2TurnInput,
+  ) => Effect.Effect<void, ProviderAdapterV2Error>;
   readonly compactThread?: (
     input: ProviderAdapterV2TurnInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;
@@ -638,12 +663,36 @@ export interface ProviderAdapterV2SessionRuntime {
     readonly providerThread: OrchestrationV2ProviderThread;
     readonly reason?: string;
   }) => Effect.Effect<{ readonly feedbackId: string }, ProviderAdapterV2Error>;
+  /** Reads an already running session; never starts a query or refreshes activity. */
+  readonly readSessionCatalog?: () => Effect.Effect<
+    ServerProviderSessionCatalog,
+    ProviderAdapterV2Error
+  >;
+  readonly readContextUsage?: (input: {
+    readonly detail: "summary" | "full";
+  }) => Effect.Effect<ProviderContextBreakdown, ProviderAdapterV2Error>;
+  readonly rewindFiles?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+    readonly userMessageId: string;
+    readonly dryRun: boolean;
+  }) => Effect.Effect<
+    {
+      readonly canRewind: boolean;
+      readonly error?: string;
+      readonly filesChanged: readonly string[];
+      readonly insertions: number;
+      readonly deletions: number;
+      readonly skippedLinks?: number;
+    },
+    ProviderAdapterV2Error
+  >;
   /**
    * MCP Apps host operations through the provider's own MCP client, for
    * drivers whose protocol exposes them (Codex). Absent means apps from this
    * provider are not interactive and their tool calls stay plain tool rows.
    */
   readonly mcpApps?: ProviderAdapterV2McpApps;
+  readonly mcpServers?: ProviderAdapterV2McpServers;
   readonly rollbackThread: (
     input: ProviderAdapterV2RollbackThreadInput,
   ) => Effect.Effect<ProviderAdapterV2ThreadSnapshot, ProviderAdapterV2Error>;
@@ -657,6 +706,8 @@ export class ProviderAdapterV2 extends Context.Service<
   {
     readonly instanceId: ProviderInstanceId;
     readonly driver: ProviderDriverKind;
+    /** Status-only project query for Settings; never sends a model turn. */
+    readonly mcpServersForCwd?: (cwd: string) => ProviderAdapterV2McpServers;
     readonly getCapabilities: () => Effect.Effect<
       OrchestrationV2ProviderCapabilities,
       ProviderAdapterV2Error

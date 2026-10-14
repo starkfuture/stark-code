@@ -49,6 +49,10 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import { writeFileStringAtomically } from "@starkfuture/shared/atomicWrite";
+import {
+  validateNativeCodexLaunchArgs,
+  NativeAgentLaunchRefused,
+} from "@starkfuture/shared/nativeCodexLaunch";
 import { resolveSymlinkTarget } from "@starkfuture/shared/symlink";
 import * as ServerConfig from "./config.ts";
 import { type DeepPartial, deepMerge } from "@starkfuture/shared/Struct";
@@ -75,6 +79,37 @@ export {
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
+
+function validateChangedCodexLaunchArgs(
+  current: ServerSettings,
+  next: ServerSettings,
+  settingsPath: string,
+) {
+  return Effect.try({
+    try: () => {
+      for (const [id, instance] of Object.entries(next.providerInstances)) {
+        if (instance.driver !== "codex") continue;
+        const config = instance.config as Record<string, unknown> | undefined;
+        const launchArgs = typeof config?.launchArgs === "string" ? config.launchArgs : "";
+        const previous = current.providerInstances[ProviderInstanceId.make(id)];
+        const previousConfig = previous?.config as Record<string, unknown> | undefined;
+        if (previous?.driver === "codex" && previousConfig?.launchArgs === config?.launchArgs)
+          continue;
+        validateNativeCodexLaunchArgs(launchArgs);
+      }
+    },
+    catch: (cause) =>
+      new ServerSettingsError({
+        settingsPath,
+        operation: "normalize",
+        validationMessage:
+          cause instanceof NativeAgentLaunchRefused
+            ? cause.message
+            : "Could not validate Codex launch arguments.",
+        cause,
+      }),
+  });
+}
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -251,7 +286,11 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
     ): Effect.Effect<ServerSettings, ServerSettingsError> =>
       writeSemaphore.withPermits(1)(
         Ref.get(currentSettingsRef).pipe(
-          Effect.flatMap(update),
+          Effect.flatMap((current) =>
+            update(current).pipe(
+              Effect.tap((next) => validateChangedCodexLaunchArgs(current, next, "test settings")),
+            ),
+          ),
           Effect.flatMap(normalizeServerSettings),
           Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
           Effect.map(resolveTextGenerationProvider),
@@ -1070,6 +1109,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const current = yield* getSettingsFromCache;
         const updated = yield* update(current);
+        yield* validateChangedCodexLaunchArgs(current, updated, settingsPath);
         const persisted = yield* persistSettingsSecrets(current, updated);
         const next = yield* normalizeServerSettings(persisted.settings);
         const materialized = yield* Effect.uninterruptibleMask(() =>

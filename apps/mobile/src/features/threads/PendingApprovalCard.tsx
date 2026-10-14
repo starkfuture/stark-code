@@ -1,4 +1,5 @@
 import { RequestActionButton } from "./RequestActionButton";
+import { mobileApprovalOptions } from "./pendingApprovalOptions";
 import type {
   ProviderApprovalDecision,
   ProviderApprovalOption,
@@ -27,7 +28,9 @@ const DEFAULT_APPROVAL_OPTIONS: ReadonlyArray<ProviderApprovalOption> = [
 
 export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const options: ReadonlyArray<ProviderApprovalOption> =
-    props.approval.options ?? DEFAULT_APPROVAL_OPTIONS;
+    // Persistent choices need a settings grant and an exact-rule preview UI.
+    // Until mobile supports both, only the desktop approval card offers them.
+    mobileApprovalOptions(props.approval.options ?? DEFAULT_APPROVAL_OPTIONS);
   const warning = options.find((option) => option.warning)?.warning;
   // Opaque for the same reason as PendingUserInputCard: nothing blurs the feed
   // behind this card, so a translucent surface bleeds messages through it.
@@ -68,7 +71,10 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
                   : "secondary"
             }
             disabled={disabled || !props.canOperateThread}
-            onPress={() => void props.onRespond(props.approval.requestId, option.decision)}
+            onPress={() => {
+              if (!disabled && props.canOperateThread)
+                void props.onRespond(props.approval.requestId, option.decision);
+            }}
           />
         ))}
       </View>

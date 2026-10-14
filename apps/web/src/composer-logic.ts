@@ -256,7 +256,12 @@ export function isCollapsedCursorAdjacentToInlineToken(
   return false;
 }
 
-export function detectComposerTrigger(text: string, cursorInput: number): ComposerTrigger | null {
+export function detectComposerTrigger(
+  text: string,
+  cursorInput: number,
+  shellMode = false,
+): ComposerTrigger | null {
+  if (shellMode) return null;
   const cursor = clampCursor(text, cursorInput);
   const tokenStart = tokenStartForCursor(text, cursor);
   const token = text.slice(tokenStart, cursor);
@@ -308,7 +313,9 @@ export function pastedPathQueryLength(
   lineBefore: string,
   pasted: string,
   pathQueryActive = true,
+  shellMode = false,
 ): number {
+  if (shellMode) return 0;
   if (!pathQueryActive) return 0;
   if (detectComposerTrigger(lineBefore, lineBefore.length)?.kind !== "path") return 0;
   return /^\S*/.exec(pasted)![0].length;
@@ -318,6 +325,7 @@ export function pastedPathQueryLength(
 export function composerStateAtPromptEnd(
   text: string,
   literalText = false,
+  shellMode = false,
 ): {
   cursor: number;
   trigger: ComposerTrigger | null;
@@ -325,9 +333,10 @@ export function composerStateAtPromptEnd(
   const cursor = collapseExpandedComposerCursor(text, text.length, literalText);
   return {
     cursor,
-    trigger: literalText
-      ? null
-      : detectComposerTrigger(text, expandCollapsedComposerCursor(text, cursor)),
+    trigger:
+      literalText || shellMode
+        ? null
+        : detectComposerTrigger(text, expandCollapsedComposerCursor(text, cursor)),
   };
 }
 

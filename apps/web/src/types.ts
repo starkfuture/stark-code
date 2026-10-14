@@ -89,6 +89,7 @@ export function isBrowserPreviewAttachment(attachment: ChatFileAttachment): bool
 }
 
 export interface ChatMessage {
+  readonly userShell?: import("@starkfuture/contracts").OrchestrationV2UserShellCommand;
   readonly context?: import("@starkfuture/contracts").OrchestrationMessageContext | undefined;
   readonly id: MessageId;
   readonly role: "user" | "assistant" | "system";

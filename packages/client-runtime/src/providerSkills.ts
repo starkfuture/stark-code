@@ -5,11 +5,14 @@ import {
   type ServerProviderSlashCommand,
 } from "@starkfuture/contracts";
 
-export type ProviderSkillSourceKind = "app" | "repo" | "project" | "personal" | "system" | "other";
-
-function normalizePathSeparators(pathValue: string): string {
-  return pathValue.replaceAll("\\", "/");
-}
+export type ProviderSkillSourceKind =
+  | "plugin"
+  | "mcp"
+  | "repo"
+  | "project"
+  | "personal"
+  | "system"
+  | "other";
 
 export function dedupeProviderSkillsByName(
   skills: ReadonlyArray<ServerProviderSkill>,
@@ -56,12 +59,9 @@ export function getProviderSlashCommandsForSlashMenu(
 }
 
 export function resolveProviderSkillSourceKind(
-  skill: Pick<ServerProviderSkill, "path" | "scope">,
+  skill: Pick<ServerProviderSkill, "path" | "scope" | "pluginName">,
 ): ProviderSkillSourceKind {
-  const normalizedPath = normalizePathSeparators(skill.path);
-  if (normalizedPath.includes("/.codex/plugins/") || normalizedPath.includes("/.agents/plugins/")) {
-    return "app";
-  }
+  if (skill.pluginName) return "plugin";
 
   const normalizedScope = skill.scope?.trim().toLowerCase();
   switch (normalizedScope) {
@@ -76,7 +76,10 @@ export function resolveProviderSkillSourceKind(
     case "personal":
       return "personal";
     case "system":
+    case "builtin":
       return "system";
+    case "mcp":
+      return "mcp";
     case undefined:
     case "":
       return "other";

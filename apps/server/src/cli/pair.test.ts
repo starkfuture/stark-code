@@ -92,7 +92,15 @@ describe("pair tailscale local target", () => {
   });
 });
 
-const runCli = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.0.0" })(args);
+// Pin the factory to the concrete CLI runtime before calling it. Inferring
+// this large command union locally widens its service requirements.
+const runCli: (
+  args: ReadonlyArray<string>,
+) => Effect.Effect<
+  void,
+  Command.Error<typeof cli> | CliError.CliError,
+  Command.Environment | Layer.Success<typeof layerCliRuntime>
+> = Command.runWith(cli, { version: "0.0.0" });
 
 const provideCliTestLayers = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.provide(effect, Layer.mergeAll(layerCliRuntime, TestConsole.layer));

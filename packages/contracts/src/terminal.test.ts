@@ -10,6 +10,7 @@ import {
   TerminalError,
   TerminalOpenInput,
   TerminalProviderEnvironmentError,
+  TerminalNativeLaunchRefusedError,
   TerminalResizeInput,
   TerminalSessionSnapshot,
   TerminalThreadInput,
@@ -19,6 +20,25 @@ import { ProviderInstanceId } from "./providerInstance.ts";
 
 const encodeTerminalError = Schema.encodeUnknownSync(TerminalError);
 const decodeTerminalError = Schema.decodeUnknownSync(TerminalError);
+
+describe("TerminalNativeLaunchRefusedError", () => {
+  it("round-trips the named refusal and provider settings destination", () => {
+    const error = new TerminalNativeLaunchRefusedError({
+      providerInstanceId: ProviderInstanceId.make("codex_work"),
+      flag: "-s danger-full-access",
+      reason: "Use read-only or explicitly opt into workspace-write.",
+    });
+    const decoded = decodeTerminalError(encodeTerminalError(error));
+    expect(decoded).toMatchObject({
+      _tag: "TerminalNativeLaunchRefusedError",
+      providerInstanceId: "codex_work",
+      flag: "-s danger-full-access",
+      reason: error.reason,
+    });
+    expect(decoded.message).toContain("Remove -s danger-full-access");
+    expect(decoded.message).toContain("Settings > Providers > codex_work");
+  });
+});
 
 function decodeSync<S extends Schema.Top>(schema: S, input: unknown): Schema.Schema.Type<S> {
   return Schema.decodeUnknownSync(schema as never)(input) as Schema.Schema.Type<S>;

@@ -2,6 +2,8 @@ import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  ContextHandoffId,
+  type OrchestrationV2UserShellCommand,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -155,6 +157,8 @@ it("does not commit running state when inherited background routing cannot be re
 
 function makeLocalCommandHarness(input: {
   readonly text: string;
+  readonly userShell?: OrchestrationV2UserShellCommand;
+  readonly pendingHandoff?: boolean;
   readonly previousNativeSession?: boolean;
   readonly previousMessages?: ReadonlyArray<string>;
   readonly logoutFailure?: string;
@@ -225,6 +229,7 @@ function makeLocalCommandHarness(input: {
     nodeId: rootNodeId,
     role: "user",
     text: input.text,
+    ...(input.userShell === undefined ? {} : { userShell: input.userShell }),
     attachments: [],
     streaming: false,
     createdBy: "user",
@@ -332,7 +337,25 @@ function makeLocalCommandHarness(input: {
     ],
     providerSessions: [],
     providerTurns: [],
-    contextHandoffs: [],
+    contextHandoffs: input.pendingHandoff
+      ? [
+          {
+            id: ContextHandoffId.make("pending-shell-handoff"),
+            threadId,
+            targetRunId: runId,
+            toProviderThreadId: providerThreadId,
+            status: "ready",
+            strategy: "full_thread_summary",
+            fromProviderThreadIds: [],
+            createdByProviderInstanceId: newInstanceId,
+            summaryMessageId: null,
+            coveredRunOrdinals: { from: 1, to: 1 },
+            summaryText: "DO NOT CONSUME DURING SHELL",
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]
+      : [],
     contextTransfers: [],
     turnItems: [],
     visibleTurnItems: [],
@@ -393,6 +416,7 @@ function makeLocalCommandHarness(input: {
       ),
     ensureThread: () => Effect.succeed(providerThread),
   };
+  const shellStarts: ProviderAdapter.ProviderAdapterV2TurnInput[] = [];
   const open = vi.fn(() =>
     input.interruptOpen === true
       ? Effect.interrupt
@@ -414,7 +438,7 @@ function makeLocalCommandHarness(input: {
                   ),
                 ),
               )
-            : input.failReadsAfterRunning === true
+            : input.failReadsAfterRunning === true || input.userShell !== undefined
               ? Effect.succeed({
                   driver: providerThread.driver,
                   providerSession: {
@@ -430,15 +454,34 @@ function makeLocalCommandHarness(input: {
                     lastError: null,
                   },
                   ensureThread: () => Effect.succeed(providerThread),
+                  runUserShellCommand: (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) =>
+                    Effect.sync(() => {
+                      shellStarts.push(turnInput);
+                    }),
+                  startTurn: () => Effect.die("A shell command must not become a prompt."),
                 } as never)
               : Effect.die("A local command must not open a native session."),
   );
   const startRootRun = vi.fn<
     (input: RunExecutionService.RunExecutionServiceV2StartRootRunInput) => Effect.Effect<void>
-  >(() =>
-    input.failReadsAfterRunning === true
-      ? Effect.void
-      : Effect.die("A local command must not start a native turn."),
+  >((rootInput) =>
+    input.userShell !== undefined
+      ? rootInput.session.runUserShellCommand!({
+          appThread: rootInput.appThread,
+          threadId,
+          runId,
+          runOrdinal: rootInput.run.ordinal,
+          providerTurnOrdinal: rootInput.providerTurnOrdinal,
+          attemptId: rootInput.attemptId,
+          rootNodeId: rootInput.rootNode.id,
+          providerThread: rootInput.providerThread,
+          message: rootInput.message,
+          modelSelection: rootInput.modelSelection,
+          runtimePolicy: rootInput.runtimePolicy,
+        }).pipe(Effect.orDie)
+      : input.failReadsAfterRunning === true
+        ? Effect.void
+        : Effect.die("A local command must not start a native turn."),
   );
   const failReadIfRunning = Effect.suspend(() =>
     input.failReadsAfterRunning === true &&
@@ -489,7 +532,17 @@ function makeLocalCommandHarness(input: {
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
           prepareProviderHandoff: () => Effect.die("history read must fail first"),
         }),
-        Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
+        Layer.mock(EventSink.EventSinkV2)({
+          writeIfRunCurrent,
+          write: ({ events: incoming }) =>
+            Effect.sync(() => {
+              for (const event of incoming) {
+                events.push(event);
+                projection = ProjectionStore.applyToProjection(projection, event);
+              }
+              return { storedEvents: [] } as never;
+            }),
+        }),
         IdAllocator.layer,
         FileSystem.layerNoop({}),
         Layer.mock(GitWorkflow.GitWorkflowService)({}),
@@ -532,6 +585,7 @@ function makeLocalCommandHarness(input: {
   );
   return {
     open,
+    shellStarts,
     writeIfRunCurrent,
     startRootRun,
     tryHandlePromptCommand,
@@ -855,3 +909,21 @@ for (const previousMessages of [[], ["/compact", " /COMPACT "]]) {
       }),
   );
 }
+
+effectIt.effect(
+  "routes a shell command literally and leaves pending handoff context for the next prompt",
+  () =>
+    Effect.gen(function* () {
+      const userShell = { command: "/logout", respond: false, timeoutMs: 600_000 };
+      const harness = makeLocalCommandHarness({ text: "/logout", userShell, pendingHandoff: true });
+      yield* harness.start;
+      expect(harness.tryHandlePromptCommand).not.toHaveBeenCalled();
+      expect(harness.shellStarts).toHaveLength(1);
+      expect(harness.shellStarts[0]?.message).toMatchObject({ text: "/logout", userShell });
+      expect(harness.shellStarts[0]?.message.text).not.toContain("DO NOT CONSUME");
+      expect(harness.projection().contextHandoffs[0]).not.toHaveProperty("delivery");
+      expect(harness.events.filter((event) => event.type === "context-handoff.updated")).toEqual(
+        [],
+      );
+    }),
+);

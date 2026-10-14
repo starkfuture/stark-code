@@ -9,6 +9,7 @@ import * as Ref from "effect/Ref";
 import * as Electron from "electron";
 
 import { type DesktopSnapShotEvent, DEFAULT_CLIENT_SETTINGS } from "@starkfuture/contracts";
+import { isStarkPagesPanelUrl } from "@starkfuture/shared/starkPages";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -626,6 +627,25 @@ export const make = Effect.gen(function* () {
       });
     };
     installContextMenu(window, window.webContents);
+    const pagesFrameOrigins = new Map<number, string>();
+    const guardPagesFrameNavigation = (
+      event: Electron.Event<Electron.WebContentsWillFrameNavigateEventParams>,
+    ) => {
+      if (event.isMainFrame || !event.frame) return;
+      const frameId = event.frame.frameTreeNodeId;
+      const origin = pagesFrameOrigins.get(frameId);
+      if (origin) {
+        if (!isStarkPagesPanelUrl(event.url) || new URL(event.url).origin !== origin)
+          event.preventDefault();
+      } else if (isStarkPagesPanelUrl(event.url)) {
+        pagesFrameOrigins.set(frameId, new URL(event.url).origin);
+        // There is one Pages panel per window; drop stale frame ids after project switches.
+        while (pagesFrameOrigins.size > 64)
+          pagesFrameOrigins.delete(pagesFrameOrigins.keys().next().value!);
+      }
+    };
+    window.webContents.on("will-frame-navigate", guardPagesFrameNavigation);
+    window.webContents.on("will-redirect", guardPagesFrameNavigation);
     window.webContents.on("did-attach-webview", (_event, contents) => {
       installContextMenu(window, contents);
       void runPromise(previewManager.prepareWebview(contents));

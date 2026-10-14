@@ -22,10 +22,7 @@ const APP_BUNDLE_ID = isDevelopment
   : BRAND.bundleId;
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
 const LAUNCHER_VERSION = 21;
-const developmentMacIconPngPath = NodePath.join(
-  repoRoot,
-  ...BRAND.iconPath.split("/"),
-);
+const developmentMacIconPngPath = NodePath.join(repoRoot, ...BRAND.iconPath.split("/"));
 const productionMacIconPngPath = NodePath.join(repoRoot, ...BRAND.iconPath.split("/"));
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
@@ -137,6 +134,8 @@ export function makeDevelopmentLauncherScript({
   return [
     "#!/bin/sh",
     "export T3CODE_TELEMETRY_ENABLED=false",
+    "export T3CODE_OTEL_SDK_DISABLED=true",
+    "export OTEL_SDK_DISABLED=true",
     "export T3CODE_DISABLE_AUTO_UPDATE=1",
     "export T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED=1",
     `if [ -f ${shellSingleQuote(environmentFilePath)} ]; then . ${shellSingleQuote(environmentFilePath)}; fi`,
@@ -194,7 +193,9 @@ export function registerMacLauncherBundle(
     // kLSServerCommunicationErr: sandboxed tooling can build and run Electron
     // while the user's Launch Services registration process is unavailable.
     if (development && /(?:^|\s)-10822(?:\s|$)/.test(details)) {
-      console.warn("macOS app registration is unavailable; launching without managed protocol links.");
+      console.warn(
+        "macOS app registration is unavailable; launching without managed protocol links.",
+      );
       return false;
     }
     throw new Error(`Failed to register macOS app ${appBundlePath}: ${details}`.trim());
@@ -302,10 +303,8 @@ export function resolveMacBundleInfoPlistStrings(executableName) {
     CFBundleIdentifier: APP_BUNDLE_ID,
     CFBundleExecutable: executableName,
     CFBundleIconFile: "icon.icns",
-    NSScreenCaptureUsageDescription:
-      "T3 Code captures the active window when you use the snapshot shortcut.",
-    NSDocumentsFolderUsageDescription:
-      "T3 Code reads project files you open in the desktop app.",
+    NSScreenCaptureUsageDescription: `${BRAND.productName} captures the active window when you use the snapshot shortcut.`,
+    NSDocumentsFolderUsageDescription: `${BRAND.productName} reads project files you open in the desktop app.`,
   };
 }
 

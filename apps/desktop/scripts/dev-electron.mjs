@@ -204,7 +204,7 @@ function startWatchers() {
           return;
         }
 
-        void shutdown(1);
+        scheduleRestart();
       },
     );
 

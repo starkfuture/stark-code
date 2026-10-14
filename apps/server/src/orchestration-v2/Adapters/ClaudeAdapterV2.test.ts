@@ -253,8 +253,8 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
   });
 
   it.each([
-    ["--permission-mode acceptEdits", "acceptEdits"],
-    ["--dangerously-skip-permissions", "bypassPermissions"],
+    ["--permission-mode acceptEdits", "default"],
+    ["--dangerously-skip-permissions", "default"],
     ["--dangerously-skip-permissions --permission-mode plan", "plan"],
   ])("folds %s into the SDK permission mode", (launchArgs, expected) => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({

@@ -43,9 +43,9 @@ describe("DesktopEnvironment", () => {
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(
         {},
-        { STARK_CODE_DESKTOP_DATA_DIR: "/tmp/t3/electron" },
+        { STARK_CODE_DESKTOP_DATA_DIR: "/tmp/stark/electron" },
       );
-      assert.strictEqual(environment.appDataDirectory, "/tmp/t3/electron");
+      assert.strictEqual(environment.appDataDirectory, "/tmp/stark/electron");
       assert.strictEqual(environment.branding.baseName, "Stark Code");
     }),
   );
@@ -72,16 +72,16 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.isDevelopment, true);
       assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
       assert.equal(environment.baseDir, "/tmp/stark");
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.desktopSettingsPath, "/tmp/t3/userdata/desktop-settings.json");
-      assert.equal(environment.clientSettingsPath, "/tmp/t3/userdata/client-settings.json");
+      assert.equal(environment.stateDir, "/tmp/stark/userdata");
+      assert.equal(environment.desktopSettingsPath, "/tmp/stark/userdata/desktop-settings.json");
+      assert.equal(environment.clientSettingsPath, "/tmp/stark/userdata/client-settings.json");
       assert.equal(
         environment.savedEnvironmentRegistryPath,
-        "/tmp/t3/userdata/saved-environments.json",
+        "/tmp/stark/userdata/saved-environments.json",
       );
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
+      assert.equal(environment.serverSettingsPath, "/tmp/stark/userdata/settings.json");
+      assert.equal(environment.logDir, "/tmp/stark/userdata/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/stark/userdata/browser-artifacts");
       assert.equal(environment.rootDir, "/repo");
       assert.equal(environment.appRoot, "/repo");
       assert.equal(environment.serverRoot, "/repo");
@@ -89,10 +89,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.backendCwd, "/repo");
       assert.equal(environment.appUserModelId, "com.starkfuture.starkcode.dev");
       assert.equal(environment.linuxWmClass, "t3code-dev");
-      assert.equal(
-        environment.linuxDesktopEntryName,
-        "com.t3tools.T3Code.Development.desktop",
-      );
+      assert.equal(environment.linuxDesktopEntryName, "com.t3tools.T3Code.Development.desktop");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -125,10 +122,10 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, false);
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
+      assert.equal(environment.stateDir, "/tmp/stark/userdata");
+      assert.equal(environment.logDir, "/tmp/stark/userdata/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/stark/userdata/browser-artifacts");
+      assert.equal(environment.serverSettingsPath, "/tmp/stark/userdata/settings.json");
       assert.equal(environment.otlpProtocol, "http/json");
     }),
   );

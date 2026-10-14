@@ -16,7 +16,7 @@ const isMainProcessExternal = (id: string) =>
   id === "electron" || id.startsWith("electron/") || isDesktopRuntimeExternalDependency(id);
 const publicConfigDefine = {
   __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
-    BRAND.cloudServicesEnabled ? repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "" : "",
+    BRAND.cloudServicesEnabled ? (repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "") : "",
   ),
 };
 
@@ -26,13 +26,13 @@ export default defineConfig({
       build: {
         command:
           "node scripts/build-browser-secret.mjs && node scripts/build-preview-annotation-css.mjs && vp pack",
-        dependsOn: ["t3-code#build"],
+        dependsOn: ["t3#build"],
         cache: false,
       },
       dev: {
         command:
           "node scripts/build-browser-secret.mjs && node scripts/build-preview-annotation-css.mjs && node scripts/dev-desktop.mjs",
-        dependsOn: ["t3-code#build"],
+        dependsOn: ["t3#build"],
         cache: false,
       },
       "dev:bundle": {
@@ -42,7 +42,7 @@ export default defineConfig({
       },
       "dev:electron": {
         command: "node scripts/dev-electron.mjs",
-        dependsOn: ["t3-code#build"],
+        dependsOn: ["t3#build"],
         cache: false,
       },
     },

@@ -1,3 +1,4 @@
+import { BRAND } from "@t3tools/shared/branding";
 import type { RuntimeMode } from "@t3tools/contracts";
 import { type LucideIcon, LockIcon, LockOpenIcon, PenLineIcon, SparklesIcon } from "lucide-react";
 
@@ -27,4 +28,6 @@ export const runtimeModeConfig: Record<
   },
 };
 
-export const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
+export const runtimeModeOptions = BRAND.requireApprovalsByDefault
+  ? (["approval-required"] as RuntimeMode[])
+  : (Object.keys(runtimeModeConfig) as RuntimeMode[]);

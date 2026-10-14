@@ -1,3 +1,8 @@
+import { BRAND } from "@t3tools/shared/branding";
+import {
+  claimAgentWorkspace,
+  releaseAgentWorkspace,
+} from "../workspace/WorkspaceAgentOwnership.ts";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -50,6 +55,31 @@ import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+
+function supervisedRuntimePolicy(
+  policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+): ProviderAdapter.ProviderAdapterV2RuntimePolicy;
+function supervisedRuntimePolicy(
+  policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
+): ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined;
+function supervisedRuntimePolicy(
+  policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
+): ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined {
+  if (!BRAND.requireApprovalsByDefault || policy === undefined) return policy;
+  const { approvalPolicy, sandboxPolicy, ...rest } = policy;
+  const readOnlySandbox =
+    sandboxPolicy === "read-only" ||
+    (typeof sandboxPolicy === "object" &&
+      sandboxPolicy !== null &&
+      "type" in sandboxPolicy &&
+      sandboxPolicy.type === "readOnly");
+  return {
+    ...rest,
+    runtimeMode: "approval-required",
+    ...(approvalPolicy === "untrusted" ? { approvalPolicy } : {}),
+    ...(readOnlySandbox ? { sandboxPolicy } : {}),
+  };
+}
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_IDLE_PIN_MS = 4 * 60 * 60 * 1000;
@@ -320,7 +350,7 @@ function providerThreadLoadKey(input: {
   return JSON.stringify({
     providerThread: providerThreadRuntimeKey(input.providerThread),
     modelSelection: input.modelSelection ?? null,
-    runtimePolicy: input.runtimePolicy ?? null,
+    runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) ?? null,
   });
 }
 
@@ -419,6 +449,23 @@ export const layerWithOptions = (
           }),
       );
       const sessions = yield* Ref.make(new Map<string, LiveSessionEntry>());
+      const workspaceTurnTokens = new Map<string, symbol>();
+      const workspaceTurnKey = (sessionId: ProviderSessionId, turnKey: string) =>
+        `${sessionId}#${turnKey}`;
+      const releaseSessionWorkspaces = (sessionId: ProviderSessionId) => {
+        for (const [key, token] of workspaceTurnTokens) {
+          if (!key.startsWith(`${sessionId}#`)) continue;
+          releaseAgentWorkspace(token);
+          workspaceTurnTokens.delete(key);
+        }
+      };
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          for (const token of workspaceTurnTokens.values()) releaseAgentWorkspace(token);
+          workspaceTurnTokens.clear();
+        }),
+      );
+
       // One retry per released entry, so a later release with the same id
       // cannot drop cleanup for threads only the earlier session served.
       const releaseRecordRetries = yield* FiberSet.make();
@@ -1430,6 +1477,15 @@ export const layerWithOptions = (
         withActivityError(
           providerSessionId,
           Effect.gen(function* () {
+            const ownerKey = workspaceTurnKey(
+              providerSessionId,
+              busyTurnKey(providerThreadId, runOrdinal),
+            );
+            const ownerToken = workspaceTurnTokens.get(ownerKey);
+            if (ownerToken !== undefined) {
+              releaseAgentWorkspace(ownerToken);
+              workspaceTurnTokens.delete(ownerKey);
+            }
             const key = sessionKey(providerSessionId);
             const now = yield* Clock.currentTimeMillis;
             yield* Ref.update(sessions, (current) => {
@@ -1709,7 +1765,12 @@ export const layerWithOptions = (
                 providerInstanceId: runtime.instanceId,
               }),
             ).pipe(
-              Effect.andThen(runtime.ensureThread(input)),
+              Effect.andThen(
+                runtime.ensureThread({
+                  ...input,
+                  runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy),
+                }),
+              ),
               Effect.tap((providerThread) =>
                 markProviderThreadLoaded({
                   providerSessionId,
@@ -1717,7 +1778,7 @@ export const layerWithOptions = (
                   providerThreadKey: providerThreadLoadKey({
                     providerThread,
                     modelSelection: input.modelSelection,
-                    runtimePolicy: input.runtimePolicy,
+                    runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy),
                   }),
                 }),
               ),
@@ -1725,14 +1786,21 @@ export const layerWithOptions = (
           resumeThread: (input) => {
             const threadId = input.threadId ?? input.providerThread.appThreadId;
             if (threadId === null || threadId === undefined) {
-              return runtime.resumeThread(input);
+              return runtime.resumeThread({
+                ...input,
+                ...(input.runtimePolicy === undefined
+                  ? {}
+                  : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
+              });
             }
             const providerThreadKey = providerThreadLoadKey({
               providerThread: input.providerThread,
               ...(input.modelSelection === undefined
                 ? {}
                 : { modelSelection: input.modelSelection }),
-              ...(input.runtimePolicy === undefined ? {} : { runtimePolicy: input.runtimePolicy }),
+              ...(input.runtimePolicy === undefined
+                ? {}
+                : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
             });
             return observeActivity(
               providerSessionId,
@@ -1753,7 +1821,14 @@ export const layerWithOptions = (
                 isProviderThreadLoaded({ providerSessionId, threadId, providerThreadKey }),
               ),
               Effect.flatMap((loaded) =>
-                loaded ? Effect.succeed(input.providerThread) : runtime.resumeThread(input),
+                loaded
+                  ? Effect.succeed(input.providerThread)
+                  : runtime.resumeThread({
+                      ...input,
+                      ...(input.runtimePolicy === undefined
+                        ? {}
+                        : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
+                    }),
               ),
               Effect.tap((providerThread) =>
                 markProviderThreadLoaded({
@@ -1766,7 +1841,7 @@ export const layerWithOptions = (
                       : { modelSelection: input.modelSelection }),
                     ...(input.runtimePolicy === undefined
                       ? {}
-                      : { runtimePolicy: input.runtimePolicy }),
+                      : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
                   }),
                 }),
               ),
@@ -1781,7 +1856,14 @@ export const layerWithOptions = (
                 providerInstanceId: runtime.instanceId,
               }),
             ).pipe(
-              Effect.andThen(runtime.forkThread(input)),
+              Effect.andThen(
+                runtime.forkThread({
+                  ...input,
+                  ...(input.runtimePolicy === undefined
+                    ? {}
+                    : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
+                }),
+              ),
               Effect.tap((providerThread) =>
                 markProviderThreadLoaded({
                   providerSessionId,
@@ -1793,7 +1875,7 @@ export const layerWithOptions = (
                       : { modelSelection: input.modelSelection }),
                     ...(input.runtimePolicy === undefined
                       ? {}
-                      : { runtimePolicy: input.runtimePolicy }),
+                      : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
                   }),
                 }),
               ),
@@ -1821,15 +1903,59 @@ export const layerWithOptions = (
               ),
               Effect.andThen(
                 Effect.acquireUseRelease(
-                  observeActivity(
+                  withActivityError(
                     providerSessionId,
-                    markBusy(
-                      providerSessionId,
-                      busyTurnKey(input.providerThread.id, input.runOrdinal),
+                    Effect.gen(function* () {
+                      const cwd = input.runtimePolicy.cwd;
+                      const turnKey = busyTurnKey(input.providerThread.id, input.runOrdinal);
+                      const ownerKey = workspaceTurnKey(providerSessionId, turnKey);
+                      if (cwd !== null) {
+                        const workspace = yield* fileSystem
+                          .realPath(cwd)
+                          .pipe(Effect.orElseSucceed(() => cwd));
+                        const token =
+                          workspaceTurnTokens.get(ownerKey) ?? Symbol("graphical workspace owner");
+                        yield* Effect.try(() =>
+                          claimAgentWorkspace(workspace, {
+                            token,
+                            threadId: input.threadId,
+                            kind: "graphical",
+                          }),
+                        );
+                        workspaceTurnTokens.set(ownerKey, token);
+                      }
+                      yield* observeActivity(
+                        providerSessionId,
+                        markBusy(providerSessionId, turnKey),
+                      ).pipe(
+                        Effect.onError(() =>
+                          Effect.sync(() => {
+                            const token = workspaceTurnTokens.get(ownerKey);
+                            if (token !== undefined) releaseAgentWorkspace(token);
+                            workspaceTurnTokens.delete(ownerKey);
+                          }),
+                        ),
+                      );
+                    }),
+                  ).pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ProviderAdapter.ProviderAdapterTurnStartError({
+                          driver: runtime.driver,
+                          threadId: input.threadId,
+                          providerThreadId: input.providerThread.id,
+                          runId: input.runId,
+                          cause,
+                        }),
                     ),
                   ),
                   () =>
-                    runtime.startTurn(input).pipe(turnMetrics("send", input.modelSelection.model)),
+                    runtime
+                      .startTurn({
+                        ...input,
+                        runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy),
+                      })
+                      .pipe(turnMetrics("send", input.modelSelection.model)),
                   (_, exit) =>
                     Exit.isFailure(exit)
                       ? observeActivity(
@@ -2095,6 +2221,10 @@ export const layerWithOptions = (
                 }
               });
               const sessionScope = yield* Scope.fork(sessionScopes);
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => releaseSessionWorkspaces(input.providerSessionId)),
+              ).pipe(Effect.provideService(Scope.Scope, sessionScope));
+
               // The previous session's agent scope must not explain this
               // session's failures, even when this provider runs without one.
               yield* agentScope.clear(input.threadId);
@@ -2103,7 +2233,7 @@ export const layerWithOptions = (
                   threadId: input.threadId,
                   providerSessionId: input.providerSessionId,
                   modelSelection: input.modelSelection,
-                  runtimePolicy: input.runtimePolicy,
+                  runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy),
                   ...(input.resumeFromSession === undefined
                     ? {}
                     : { resumeFromSession: input.resumeFromSession }),

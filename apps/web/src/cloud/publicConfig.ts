@@ -39,7 +39,13 @@ function normalizeSecureUrl(value: string): string | null {
 }
 
 export function resolveCloudPublicConfig(): CloudPublicConfig {
-  if (!BRAND.cloudServicesEnabled) return { clerkPublishableKey: null, clerkJwtTemplate: null, relayUrl: null, relayTracing: { tracesUrl: null, tracesDataset: null, tracesToken: null } };
+  if (!BRAND.cloudServicesEnabled)
+    return {
+      clerkPublishableKey: null,
+      clerkJwtTemplate: null,
+      relayUrl: null,
+      relayTracing: { tracesUrl: null, tracesDataset: null, tracesToken: null },
+    };
   return {
     clerkPublishableKey: trimNonEmpty(
       import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined,

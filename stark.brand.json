@@ -7,5 +7,6 @@
   "iconPath": "assets/stark/icon-macos.png",
   "telemetryEnabled": false,
   "cloudServicesEnabled": false,
-  "requireApprovalsByDefault": true
+  "requireApprovalsByDefault": true,
+  "backgroundNetworkChecksEnabled": false
 }

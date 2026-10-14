@@ -1,3 +1,4 @@
+import { BRAND } from "@t3tools/shared/branding";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Clock from "effect/Clock";
@@ -625,9 +626,16 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       layerProviderEventLoggers,
-      ModelManifest.layerModelCatalog.pipe(Layer.provideMerge(ModelManifest.layer)),
+      BRAND.backgroundNetworkChecksEnabled
+        ? ModelManifest.layerModelCatalog.pipe(Layer.provideMerge(ModelManifest.layer))
+        : ModelManifest.layerTest,
       ResetCreditCoordinator.layer,
-      ProviderLatestVersions.layer,
+      BRAND.backgroundNetworkChecksEnabled
+        ? ProviderLatestVersions.layer
+        : Layer.succeed(ProviderLatestVersions.ProviderLatestVersions, {
+            cached: () => Effect.succeed(null),
+            invalidate: () => Effect.void,
+          }),
       McpProviderSessions.layer,
     ),
   ),

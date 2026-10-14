@@ -67,12 +67,8 @@ export function retryDelayMs(failures: number, random: number): number {
 }
 
 const TelemetryEnvConfig = Config.all({
-  posthogKey: Config.String("T3CODE_POSTHOG_KEY").pipe(
-    Config.withDefault(""),
-  ),
-  posthogHost: Config.String("T3CODE_POSTHOG_HOST").pipe(
-    Config.withDefault(""),
-  ),
+  posthogKey: Config.String("T3CODE_POSTHOG_KEY").pipe(Config.withDefault("")),
+  posthogHost: Config.String("T3CODE_POSTHOG_HOST").pipe(Config.withDefault("")),
   enabled: Config.Boolean("T3CODE_TELEMETRY_ENABLED").pipe(Config.withDefault(false)),
   flushBatchSize: Config.Number("T3CODE_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
   maxBufferedEvents: Config.Number("T3CODE_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
@@ -177,7 +173,13 @@ export const make = Effect.gen(function* () {
   const sendBatch = Effect.fn("AnalyticsService.sendBatch")(function* (
     events: ReadonlyArray<BufferedAnalyticsEvent>,
   ) {
-    if (!telemetryConfig.enabled || !telemetryConfig.posthogKey || !telemetryConfig.posthogHost || !identifier) return;
+    if (
+      !telemetryConfig.enabled ||
+      !telemetryConfig.posthogKey ||
+      !telemetryConfig.posthogHost ||
+      !identifier
+    )
+      return;
 
     const payload = {
       api_key: telemetryConfig.posthogKey,
@@ -262,7 +264,13 @@ export const make = Effect.gen(function* () {
 
   const record: AnalyticsService["Service"]["record"] = Effect.fn("AnalyticsService.record")(
     function* (event, properties) {
-      if (!telemetryConfig.enabled || !telemetryConfig.posthogKey || !telemetryConfig.posthogHost || !identifier) return;
+      if (
+        !telemetryConfig.enabled ||
+        !telemetryConfig.posthogKey ||
+        !telemetryConfig.posthogHost ||
+        !identifier
+      )
+        return;
 
       // Telemetry is best effort: an event without a uuid is not sent. The
       // Node implementation throws (a defect) rather than failing, so catch both.

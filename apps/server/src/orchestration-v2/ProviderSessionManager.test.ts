@@ -184,7 +184,7 @@ const modelSelection = {
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 
 const runtimePolicy = {
-  runtimeMode: "full-access",
+  runtimeMode: "approval-required",
   interactionMode: "default",
   cwd: process.cwd(),
 } satisfies ProviderAdapter.ProviderAdapterV2RuntimePolicy;
@@ -1546,7 +1546,7 @@ it.effect(
                 attachments: [],
               },
               modelSelection,
-              runtimePolicy,
+              runtimePolicy: { ...runtimePolicy, cwd: `${runtimePolicy.cwd}/${threadId}` },
             });
           });
 
@@ -4053,7 +4053,7 @@ it.effect(
             attachments: [],
           },
           modelSelection,
-          runtimePolicy,
+          runtimePolicy: { ...runtimePolicy, cwd: `${runtimePolicy.cwd}/${firstThreadId}` },
         });
         yield* runtime.startTurn({
           appThread: secondAppThread,
@@ -4075,7 +4075,7 @@ it.effect(
             attachments: [],
           },
           modelSelection,
-          runtimePolicy,
+          runtimePolicy: { ...runtimePolicy, cwd: `${runtimePolicy.cwd}/${secondThreadId}` },
         });
 
         const queue = (yield* Ref.get(state)).eventQueues.get(String(providerSessionId));
@@ -4463,7 +4463,7 @@ function runIdleThreadUnloadScenario(
               attachments: [],
             },
             modelSelection,
-            runtimePolicy,
+            runtimePolicy: { ...runtimePolicy, cwd: `${runtimePolicy.cwd}/${threadId}` },
           });
         }).pipe(Effect.orDie);
       const subscribe = runtime.subscribeEvents;

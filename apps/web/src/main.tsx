@@ -29,7 +29,7 @@ if (isElectron) {
 }
 
 const clerkPublishableKey = BRAND.cloudServicesEnabled
-  ? import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined
+  ? (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined)
   : undefined;
 
 // A failed split-chunk fetch usually means the hashed assets went stale under

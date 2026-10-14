@@ -1,4 +1,4 @@
-import { EventEmitter } from "node:events";
+import * as NodeEvents from "node:events";
 import { describe, expect, it } from "vite-plus/test";
 import { superviseDesktopDevelopment } from "./dev-desktop.mjs";
 
@@ -10,7 +10,7 @@ function fixture() {
     env: {},
     spawnProcess: (command, args) => {
       commands.push([command, args]);
-      const child = new EventEmitter();
+      const child = new NodeEvents.EventEmitter();
       child.signals = [];
       child.kill = (signal) => {
         child.signals.push(signal);

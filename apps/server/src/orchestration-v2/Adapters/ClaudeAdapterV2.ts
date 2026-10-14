@@ -1,3 +1,4 @@
+import { BRAND } from "@t3tools/shared/branding";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import {
   dynamicToolTitle,
@@ -997,21 +998,39 @@ export function makeClaudeQueryOptions(input: {
       : typeof input.sdkSettings === "object" && input.sdkSettings !== null
         ? ({ ...input.sdkSettings, ...selectionSettings } as ClaudeSdkSettings)
         : selectionSettings;
-  const effectiveQuerySettings =
+  let effectiveQuerySettings =
     input.settings?.autoCompactWindow === undefined || input.settings.autoCompactWindow.length === 0
       ? querySettings
       : ({
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
+  if (BRAND.requireApprovalsByDefault) {
+    const current =
+      typeof effectiveQuerySettings === "object" && effectiveQuerySettings !== null
+        ? effectiveQuerySettings
+        : {};
+    const permissions =
+      typeof current.permissions === "object" && current.permissions !== null
+        ? current.permissions
+        : {};
+    effectiveQuerySettings = {
+      ...current,
+      disableAutoMode: "disable",
+      permissions: { ...permissions, disableBypassPermissionsMode: "disable" },
+    } as ClaudeSdkSettings;
+  }
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
-    permissionMode:
-      (launchArgPermissionMode as PermissionMode | null | undefined) ??
-      (launchArgSkipPermissions === null || launchArgSkipPermissions === "true"
-        ? "bypassPermissions"
-        : (input.permissionMode ?? "default")),
+    permissionMode: BRAND.requireApprovalsByDefault
+      ? input.permissionMode === "plan" || launchArgPermissionMode === "plan"
+        ? "plan"
+        : "default"
+      : ((launchArgPermissionMode as PermissionMode | null | undefined) ??
+        (launchArgSkipPermissions === null || launchArgSkipPermissions === "true"
+          ? "bypassPermissions"
+          : (input.permissionMode ?? "default"))),
     includePartialMessages: true,
     ...(compiledSelection.effort === undefined
       ? {}
@@ -1023,7 +1042,7 @@ export function makeClaudeQueryOptions(input: {
     ...(input.allowedTools === undefined ? {} : { allowedTools: [...input.allowedTools] }),
     ...(input.disallowedTools === undefined ? {} : { disallowedTools: [...input.disallowedTools] }),
     ...(input.canUseTool === undefined ? {} : { canUseTool: input.canUseTool }),
-    ...(input.allowDangerouslySkipPermissions === true
+    ...(input.allowDangerouslySkipPermissions === true && !BRAND.requireApprovalsByDefault
       ? { allowDangerouslySkipPermissions: true }
       : {}),
     ...(requestThinkingSummaries

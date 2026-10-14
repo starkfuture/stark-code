@@ -10,6 +10,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ServerSettingsError,
+  TerminalProviderEnvironmentError,
   TerminalProviderInstanceNotFoundError,
 } from "@starkfuture/contracts";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
@@ -42,6 +43,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "./Manager.ts";
+import { nativeAgentLaunch } from "./NativeAgentLaunch.ts";
 import * as PtyAdapter from "@starkfuture/shared/PtyAdapter";
 
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
@@ -2485,6 +2487,57 @@ it.layer(
         yield* manager.restart({ ...input, cols: 120, rows: 40 });
         expect(ptyAdapter.spawnInputs[1]?.shell).toBe("/installed/claude");
         expect(ptyAdapter.spawnInputs[1]?.args).toEqual(["--plugin-dir", "/my plugins"]);
+      }),
+  );
+
+  it.effect(
+    "rejects unsafe native Codex sandbox arguments before PTY spawn and releases workspace ownership",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "stark-native-policy-" });
+        const providerInstanceId = ProviderInstanceId.make("codex_work");
+        let launchArgs = "-s danger-full-access";
+        const { manager, ptyAdapter, getEvents } = yield* createManager(5, {
+          resolveProviderInstanceEnvironment: () => Effect.succeed({}),
+          resolveAgentShellLaunch: () =>
+            Effect.try({
+              try: () => nativeAgentLaunch({ driver: "codex", config: { launchArgs }, home: cwd }),
+              catch: (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
+            }),
+        });
+
+        const rejected = yield* manager.open(
+          openInput({ cwd, providerInstanceId, agentShell: true }),
+        );
+
+        expect(rejected).toMatchObject({ status: "error", pid: null });
+        expect(ptyAdapter.spawnInputs).toHaveLength(0);
+        expect(ptyAdapter.processes).toHaveLength(0);
+        expect(yield* getEvents).toContainEqual(
+          expect.objectContaining({ type: "error", threadId: "thread-1" }),
+        );
+
+        launchArgs = "-s workspace-write";
+        const retry = yield* manager.open(
+          openInput({
+            threadId: "safe-retry-thread",
+            cwd,
+            providerInstanceId,
+            agentShell: true,
+          }),
+        );
+
+        expect(retry).toMatchObject({ status: "running", agentShell: true });
+        expect(ptyAdapter.spawnInputs).toHaveLength(1);
+        expect(ptyAdapter.spawnInputs[0]?.args).toEqual(
+          expect.arrayContaining([
+            "--sandbox",
+            "workspace-write",
+            "--ask-for-approval",
+            "on-request",
+          ]),
+        );
       }),
   );
 

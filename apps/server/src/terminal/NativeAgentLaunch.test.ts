@@ -2,11 +2,24 @@ import { CODEX_PRIVACY_ARGS, PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/pr
 import { describe, expect, it } from "@effect/vitest";
 import { nativeAgentLaunch } from "./NativeAgentLaunch.ts";
 
+const defaultCodexPolicy = [
+  "--ask-for-approval",
+  "on-request",
+  "--sandbox",
+  "workspace-write",
+  "-c",
+  'approval_policy="on-request"',
+  "-c",
+  'sandbox_mode="workspace-write"',
+  "-c",
+  'approvals_reviewer="user"',
+];
+
 describe("native agent shell launch", () => {
   it("runs Codex interactively rather than starting its app server", () => {
     expect(nativeAgentLaunch({ driver: "codex", config: {}, home: "/Users/test" })).toEqual({
       shell: "codex",
-      args: ["--ask-for-approval", "on-request", ...CODEX_PRIVACY_ARGS],
+      args: [...defaultCodexPolicy, ...CODEX_PRIVACY_ARGS],
     });
   });
   it("keeps Claude plugin arguments and executable paths as distinct argv values", () => {
@@ -48,8 +61,7 @@ describe("native agent shell launch", () => {
     expect(result.args).toEqual([
       "--config",
       "name=$(whoami)",
-      "--ask-for-approval",
-      "on-request",
+      ...defaultCodexPolicy,
       ...CODEX_PRIVACY_ARGS,
     ]);
   });
@@ -57,7 +69,19 @@ describe("native agent shell launch", () => {
     expect(
       nativeAgentLaunch({ driver: "codex", home: "/tmp", config: { launchArgs: "-a untrusted" } })
         .args,
-    ).toEqual(["-a", "untrusted", ...CODEX_PRIVACY_ARGS]);
+    ).toEqual([
+      "--ask-for-approval",
+      "untrusted",
+      "--sandbox",
+      "workspace-write",
+      "-c",
+      'approval_policy="untrusted"',
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "-c",
+      'approvals_reviewer="user"',
+      ...CODEX_PRIVACY_ARGS,
+    ]);
     expect(
       nativeAgentLaunch({
         driver: "claudeAgent",
@@ -102,6 +126,26 @@ describe("native agent shell launch", () => {
     for (const [driver, launchArgs] of [
       ["codex", "--yolo"],
       ["codex", "-a never"],
+      ["codex", "-anever"],
+      ["codex", "-a=never"],
+      ["codex", "--ask-for-approval=never"],
+      ["codex", "-s danger-full-access"],
+      ["codex", "-sdanger-full-access"],
+      ["codex", "-s=danger-full-access"],
+      ["codex", "--sandbox danger-full-access"],
+      ["codex", "--sandbox=danger-full-access"],
+      ["codex", "--approve-for-me"],
+      ["codex", "--not-so-yolo"],
+      ["codex", "--dangerously-bypass-hook-trust"],
+      ["codex", "--remote ws://localhost:1234"],
+      ["codex", "-c 'approval_policy=\"never\"'"],
+      ["codex", '-capproval_policy="never"'],
+      ["codex", '--config=approval_policy="never"'],
+      ["codex", '--config \'"approval_policy"="never"\''],
+      ["codex", "-c 'sandbox_mode=\"danger-full-access\"'"],
+      ["codex", "-c 'sandbox_mode=\"danger-full-access\"' -s workspace-write"],
+      ["codex", "-c 'approvals_reviewer=\"auto_review\"'"],
+      ["codex", "-c 'approval_policy={ sandbox_approval=false }'"],
       ["claudeAgent", "--dangerously-skip-permissions"],
       ["claudeAgent", "--permission-mode auto"],
     ] as const) {
@@ -109,6 +153,72 @@ describe("native agent shell launch", () => {
         "requires supervised",
       );
     }
+  });
+  it("retains safe sandbox flags and their stricter config overrides", () => {
+    for (const launchArgs of [
+      "-s read-only",
+      "-sread-only",
+      "-s=read-only",
+      "--sandbox=read-only",
+      "-c 'sandbox_mode=\"read-only\"'",
+    ]) {
+      const { args } = nativeAgentLaunch({ driver: "codex", config: { launchArgs }, home: "/tmp" });
+      expect(args).toContain('sandbox_mode="read-only"');
+      expect(args.slice(args.indexOf("--sandbox"), args.indexOf("--sandbox") + 2)).toEqual([
+        "--sandbox",
+        "read-only",
+      ]);
+    }
+  });
+  it("applies safe launch policy after personal profile configuration", () => {
+    const { args } = nativeAgentLaunch({
+      driver: "codex",
+      home: "/tmp",
+      config: { launchArgs: "--profile company --model company-model -c 'plugins.enabled=true'" },
+    });
+    expect(args.slice(0, 6)).toEqual([
+      "--profile",
+      "company",
+      "--model",
+      "company-model",
+      "-c",
+      "plugins.enabled=true",
+    ]);
+    expect(args.slice(6)).toEqual([...defaultCodexPolicy, ...CODEX_PRIVACY_ARGS]);
+  });
+  it("puts enforced policy and privacy before a prompt delimiter", () => {
+    const { args } = nativeAgentLaunch({
+      driver: "codex",
+      home: "/tmp",
+      config: {
+        launchArgs: '--profile company -- "explain these flags" --yolo -s danger-full-access',
+      },
+    });
+    expect(args).toEqual([
+      "--profile",
+      "company",
+      ...defaultCodexPolicy,
+      ...CODEX_PRIVACY_ARGS,
+      "--",
+      "explain these flags",
+      "--yolo",
+      "-s",
+      "danger-full-access",
+    ]);
+  });
+  it("normalises repeated safe policy flags without duplicate CLI options", () => {
+    const { args } = nativeAgentLaunch({
+      driver: "codex",
+      home: "/tmp",
+      config: {
+        launchArgs:
+          "-s workspace-write --sandbox read-only -a on-request --ask-for-approval untrusted",
+      },
+    });
+    expect(args.filter((arg) => arg === "--sandbox")).toHaveLength(1);
+    expect(args.filter((arg) => arg === "--ask-for-approval")).toHaveLength(1);
+    expect(args).toContain('sandbox_mode="read-only"');
+    expect(args).toContain('approval_policy="untrusted"');
   });
   it("rejects unsupported providers instead of launching a different agent", () => {
     expect(() => nativeAgentLaunch({ driver: "unknown", config: {}, home: "/Users/test" })).toThrow(

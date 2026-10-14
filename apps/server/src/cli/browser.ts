@@ -1,3 +1,4 @@
+import { BRAND } from "@t3tools/shared/branding";
 /**
  * `t3 browser setup` - prepares a Linux host for T3's headless browser, which
  * server browser tabs and HTML render previews share. It is the fix every
@@ -68,7 +69,7 @@ const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Opti
     .pipe(Effect.orElseSucceed(() => ""));
   const home = entry.trim().split(":")[5];
   const path = yield* Path.Path;
-  return home ? path.join(home, ".t3") : yield* resolveBaseDir(undefined);
+  return home ? path.join(home, BRAND.dataDirectory) : yield* resolveBaseDir(undefined);
 });
 
 /** Whether apt has an installable candidate for `name`. */

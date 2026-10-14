@@ -391,6 +391,7 @@ interface TerminalViewportProps {
   worktreePath?: string | null;
   runtimeEnv?: Record<string, string>;
   providerInstanceId?: ProviderInstanceId;
+  agentShell?: boolean;
   onSessionExited: () => void;
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
   focusRequestId: number;
@@ -417,6 +418,7 @@ export function TerminalViewport({
   worktreePath,
   runtimeEnv,
   providerInstanceId,
+  agentShell,
   onSessionExited,
   onAddTerminalContext,
   focusRequestId,
@@ -494,6 +496,7 @@ export function TerminalViewport({
       ...(worktreePath !== undefined ? { worktreePath } : {}),
       ...(runtimeEnv ? { env: runtimeEnv } : {}),
       ...(providerInstanceId ? { providerInstanceId } : {}),
+      ...(agentShell ? { agentShell: true } : {}),
     },
   });
   const canResizeTerminal =
@@ -1051,7 +1054,16 @@ export function TerminalViewport({
         mount.focus({ preventScroll: true });
       }
     };
-  }, [cwd, environmentId, runtimeEnvKey, terminalId, threadId, worktreePath]);
+  }, [
+    cwd,
+    environmentId,
+    runtimeEnvKey,
+    terminalId,
+    threadId,
+    worktreePath,
+    providerInstanceId,
+    agentShell,
+  ]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

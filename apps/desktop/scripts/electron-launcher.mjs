@@ -1,3 +1,4 @@
+import BRAND from "../../../stark.brand.json" with { type: "json" };
 // This file mostly exists because we want dev mode to say "T3 Code (Dev)" instead of "electron"
 
 import * as NodeChildProcess from "node:child_process";
@@ -15,19 +16,17 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+const APP_DISPLAY_NAME = `${BRAND.productName} (${isDevelopment ? "Dev" : "Alpha"})`;
 const APP_BUNDLE_ID = isDevelopment
-  ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
-  : "com.t3tools.t3code";
+  ? `${BRAND.bundleId}.dev.${devBundleIdSuffix || "local"}`
+  : BRAND.bundleId;
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
-const LAUNCHER_VERSION = 20;
+const LAUNCHER_VERSION = 21;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,
-  "assets",
-  "dev",
-  "blueprint-macos-1024.png",
+  ...BRAND.iconPath.split("/"),
 );
-const productionMacIconPngPath = NodePath.join(repoRoot, "assets", "prod", "black-macos-1024.png");
+const productionMacIconPngPath = NodePath.join(repoRoot, ...BRAND.iconPath.split("/"));
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
@@ -137,6 +136,9 @@ export function makeDevelopmentLauncherScript({
 }) {
   return [
     "#!/bin/sh",
+    "export T3CODE_TELEMETRY_ENABLED=false",
+    "export T3CODE_DISABLE_AUTO_UPDATE=1",
+    "export T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED=1",
     `if [ -f ${shellSingleQuote(environmentFilePath)} ]; then . ${shellSingleQuote(environmentFilePath)}; fi`,
     `exec ${shellSingleQuote(electronBinaryPath)} --t3code-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
     "",
@@ -176,14 +178,30 @@ export function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryP
   return true;
 }
 
-function registerMacLauncherBundle(appBundlePath) {
-  runChecked(
+let macProtocolRegistrationManaged = true;
+
+export function registerMacLauncherBundle(
+  appBundlePath,
+  { development = isDevelopment, run = NodeChildProcess.spawnSync } = {},
+) {
+  const registration = run(
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
     ["-f", appBundlePath],
+    { encoding: "utf8" },
   );
+  if (registration.status !== 0) {
+    const details = [registration.stdout, registration.stderr].filter(Boolean).join("\n");
+    // kLSServerCommunicationErr: sandboxed tooling can build and run Electron
+    // while the user's Launch Services registration process is unavailable.
+    if (development && /(?:^|\s)-10822(?:\s|$)/.test(details)) {
+      console.warn("macOS app registration is unavailable; launching without managed protocol links.");
+      return false;
+    }
+    throw new Error(`Failed to register macOS app ${appBundlePath}: ${details}`.trim());
+  }
 
-  if (!isDevelopment) {
-    return;
+  if (!development || !BRAND.cloudServicesEnabled) {
+    return true;
   }
 
   for (const scheme of APP_PROTOCOL_SCHEMES) {
@@ -200,6 +218,7 @@ function registerMacLauncherBundle(appBundlePath) {
       ].join(" "),
     ]);
   }
+  return true;
 }
 
 // Bundle-internal paths are macOS paths whatever host builds them.
@@ -255,7 +274,21 @@ function ensureMacIconIcns(runtimeDir) {
       ]);
     }
 
-    runChecked("iconutil", ["-c", "icns", iconsetDir, "-o", generatedIconPath]);
+    // Write modern PNG-backed ICNS entries directly. This also works when
+    // iconutil rejects an otherwise valid iconset in a sandboxed dev launch.
+    const entries = [
+      ["icp4", "icon_16x16.png"],
+      ["icp5", "icon_32x32.png"],
+      ["icp6", "icon_32x32@2x.png"],
+      ["ic07", "icon_128x128.png"],
+      ["ic08", "icon_256x256.png"],
+      ["ic09", "icon_512x512.png"],
+      ["ic10", "icon_512x512@2x.png"],
+    ].map(([type, fileName]) => ({
+      type,
+      png: NodeFS.readFileSync(NodePath.join(iconsetDir, fileName)),
+    }));
+    NodeFS.writeFileSync(generatedIconPath, encodePngIcns(entries));
     return generatedIconPath;
   } finally {
     NodeFS.rmSync(iconsetRoot, { recursive: true, force: true });
@@ -271,7 +304,8 @@ export function resolveMacBundleInfoPlistStrings(executableName) {
     CFBundleIconFile: "icon.icns",
     NSScreenCaptureUsageDescription:
       "T3 Code captures the active window when you use the snapshot shortcut.",
-    NSDocumentsFolderUsageDescription: "T3 Code reads project files you open in the desktop app.",
+    NSDocumentsFolderUsageDescription:
+      "T3 Code reads project files you open in the desktop app.",
   };
 }
 
@@ -382,7 +416,7 @@ function buildMacLauncher(electronBinaryPath) {
         signMacLauncherBundle(targetAppBundlePath);
       }
     }
-    registerMacLauncherBundle(targetAppBundlePath);
+    macProtocolRegistrationManaged = registerMacLauncherBundle(targetAppBundlePath);
     return launcherBinaryPath;
   }
 
@@ -412,7 +446,7 @@ function buildMacLauncher(electronBinaryPath) {
   }
   signMacLauncherBundle(targetAppBundlePath);
   NodeFS.writeFileSync(metadataPath, `${JSON.stringify(expectedMetadata, null, 2)}\n`);
-  registerMacLauncherBundle(targetAppBundlePath);
+  macProtocolRegistrationManaged = registerMacLauncherBundle(targetAppBundlePath);
 
   return launcherBinaryPath;
 }
@@ -481,5 +515,22 @@ export function resolveDevProtocolClient() {
   return {
     appBundlePath: NodePath.resolve(launcherBinaryPath, "..", "..", ".."),
     appBundleId: APP_BUNDLE_ID,
+    registrationManaged: macProtocolRegistrationManaged,
   };
+}
+
+/** Standard ICNS container with lossless PNG payloads at each native icon size. */
+export function encodePngIcns(entries) {
+  const chunks = entries.map(({ type, png }) => {
+    if (!/^[a-zA-Z0-9]{4}$/.test(type))
+      throw new Error("ICNS entry codes must have four characters.");
+    const header = Buffer.alloc(8);
+    header.write(type, 0, 4, "ascii");
+    header.writeUInt32BE(png.length + 8, 4);
+    return Buffer.concat([header, png]);
+  });
+  const header = Buffer.alloc(8);
+  header.write("icns", 0, 4, "ascii");
+  header.writeUInt32BE(8 + chunks.reduce((sum, chunk) => sum + chunk.length, 0), 4);
+  return Buffer.concat([header, ...chunks]);
 }

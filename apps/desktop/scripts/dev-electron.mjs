@@ -71,7 +71,9 @@ delete childEnv.ELECTRON_RUN_AS_NODE;
 const devProtocolClient = resolveDevProtocolClient();
 if (devProtocolClient) {
   childEnv.T3CODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
-  childEnv.T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
+  if (devProtocolClient.registrationManaged) {
+    childEnv.T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
+  }
 }
 
 let shuttingDown = false;
@@ -87,16 +89,6 @@ function killChildTreeByPid(pid, signal) {
   }
 
   NodeChildProcess.spawnSync("pkill", [`-${signal}`, "-P", String(pid)], { stdio: "ignore" });
-}
-
-function cleanupStaleDevApps() {
-  if (hostPlatform === "win32") {
-    return;
-  }
-
-  NodeChildProcess.spawnSync("pkill", ["-f", "--", `--t3code-dev-root=${desktopDir}`], {
-    stdio: "ignore",
-  });
 }
 
 function startApp() {
@@ -125,7 +117,7 @@ function startApp() {
     }
 
     if (!shuttingDown) {
-      scheduleRestart();
+      void shutdown(1);
     }
   });
 
@@ -136,7 +128,8 @@ function startApp() {
 
     const exitedAbnormally = signal !== null || code !== 0;
     if (!shuttingDown && !expectedExits.has(app) && exitedAbnormally) {
-      scheduleRestart();
+      console.error(`Electron exited before shutdown (code=${code}, signal=${signal}).`);
+      void shutdown(1);
     }
   });
 }
@@ -165,7 +158,6 @@ async function stopApp() {
     app.once("exit", finish);
     app.kill("SIGTERM");
     killChildTreeByPid(app.pid, "TERM");
-    cleanupStaleDevApps();
 
     setTimeout(() => {
       if (settled) {
@@ -174,7 +166,7 @@ async function stopApp() {
 
       app.kill("SIGKILL");
       killChildTreeByPid(app.pid, "KILL");
-      cleanupStaleDevApps();
+
       finish();
     }, forcedShutdownTimeoutMs).unref();
   });
@@ -212,10 +204,16 @@ function startWatchers() {
           return;
         }
 
-        scheduleRestart();
+        void shutdown(1);
       },
     );
 
+    watcher.on("error", (error) => {
+      // Native bundle reload is optional; watcher exhaustion must not take the
+      // app down after a successful build. Restart the launcher for new bundles.
+      watcher.close();
+      console.warn(`Native reload unavailable for ${directory}: ${error.message}`);
+    });
     watchers.push(watcher);
   }
 }
@@ -255,7 +253,7 @@ async function shutdown(exitCode) {
 }
 
 startWatchers();
-cleanupStaleDevApps();
+
 startApp();
 
 process.once("SIGINT", () => {

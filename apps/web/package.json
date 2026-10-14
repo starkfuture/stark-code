@@ -70,7 +70,8 @@
     "remark-gfm": "catalog:",
     "tailwind-merge": "^3.4.0",
     "unbash": "^5.0.0",
-    "zustand": "^5.0.11"
+    "zustand": "^5.0.11",
+    "@clerk/clerk-js": "catalog:"
   },
   "devDependencies": {
     "@effect/platform-node": "catalog:",

@@ -5,6 +5,8 @@ import * as NodePath from "node:path";
 import { assert, describe, it } from "vite-plus/test";
 
 import {
+  encodePngIcns,
+  registerMacLauncherBundle,
   makeDevelopmentEnvironmentScript,
   makeDevelopmentLauncherScript,
   resolveElectronBinaryPath,
@@ -16,6 +18,17 @@ import {
 } from "./electron-launcher.mjs";
 
 describe("electron development launcher", () => {
+  it("allows development launch when the macOS registration service is unavailable", () => {
+    const run = () => ({ status: 1, stderr: "failed to scan app: -10822\n" });
+    assert.equal(registerMacLauncherBundle("/dev.app", { development: true, run }), false);
+    assert.throws(() => registerMacLauncherBundle("/prod.app", { development: false, run }));
+  });
+
+  it("still rejects invalid application bundles in development", () => {
+    const run = () => ({ status: 1, stderr: "invalid application bundle: -10811\n" });
+    assert.throws(() => registerMacLauncherBundle("/dev.app", { development: true, run }));
+  });
+
   it("uses captured values only as fallbacks for a live runner environment", () => {
     const environmentScript = makeDevelopmentEnvironmentScript({
       VITE_DEV_SERVER_URL: "http://127.0.0.1:8526",
@@ -76,18 +89,18 @@ describe("electron development launcher", () => {
 
   it("keeps the native Electron executable name inside the branded macOS bundle", () => {
     const paths = resolveMacLauncherPaths(
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app",
-      "T3 Code (Dev)",
+      "/repo/apps/desktop/.electron-runtime/Stark Code (Dev).app",
+      "Stark Code (Dev)",
     );
 
-    assert.equal(paths.launcherExecutableName, "T3 Code (Dev) Launcher");
+    assert.equal(paths.launcherExecutableName, "Stark Code (Dev) Launcher");
     assert.equal(
       paths.launcherBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/T3 Code (Dev) Launcher",
+      "/repo/apps/desktop/.electron-runtime/Stark Code (Dev).app/Contents/MacOS/Stark Code (Dev) Launcher",
     );
     assert.equal(
       paths.runtimeElectronBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron",
+      "/repo/apps/desktop/.electron-runtime/Stark Code (Dev).app/Contents/MacOS/Electron",
     );
 
     const script = makeDevelopmentLauncherScript({
@@ -98,32 +111,32 @@ describe("electron development launcher", () => {
     });
     assert.include(
       script,
-      "exec '/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron'",
+      "exec '/repo/apps/desktop/.electron-runtime/Stark Code (Dev).app/Contents/MacOS/Electron'",
     );
     assert.notInclude(script, "node_modules/electron");
   });
 
   it("declares why the macOS app needs protected access", () => {
-    const values = resolveMacBundleInfoPlistStrings("T3 Code (Dev) Launcher");
+    const values = resolveMacBundleInfoPlistStrings("Stark Code (Dev) Launcher");
 
     assert.equal(
       values.NSScreenCaptureUsageDescription,
-      "T3 Code captures the active window when you use the snapshot shortcut.",
+      "Stark Code captures the active window when you use the snapshot shortcut.",
     );
     assert.equal(
       values.NSDocumentsFolderUsageDescription,
-      "T3 Code reads project files you open in the desktop app.",
+      "Stark Code reads project files you open in the desktop app.",
     );
   });
 
   it("ad-hoc signs the complete development app bundle", () => {
-    assert.deepEqual(resolveMacCodeSignArguments("/runtime/T3 Code (Dev).app"), [
+    assert.deepEqual(resolveMacCodeSignArguments("/runtime/Stark Code (Dev).app"), [
       "--force",
       "--deep",
       "--sign",
       "-",
       "--timestamp=none",
-      "/runtime/T3 Code (Dev).app",
+      "/runtime/Stark Code (Dev).app",
     ]);
   });
 
@@ -150,5 +163,19 @@ describe("electron development launcher", () => {
     assert.equal(development.generatedIconPath, "/runtime/icon-dev.icns");
     assert.match(production.sourceIconPath, /assets[\\/]prod[\\/]black-macos-1024\.png$/);
     assert.equal(production.generatedIconPath, "/runtime/icon-prod.icns");
+  });
+});
+
+describe("PNG-backed macOS application icons", () => {
+  it("encodes a complete icon family with correctly bounded PNG payloads", () => {
+    const png = NodeFS.readFileSync(
+      NodePath.resolve(import.meta.dirname, "../../../assets/dev/blueprint-macos-1024.png"),
+    );
+    const icon = encodePngIcns([{ type: "ic10", png }]);
+    assert.equal(icon.toString("ascii", 0, 4), "icns");
+    assert.equal(icon.readUInt32BE(4), icon.length);
+    assert.equal(icon.toString("ascii", 8, 12), "ic10");
+    assert.equal(icon.readUInt32BE(12), icon.length - 8);
+    assert.deepEqual(icon.subarray(16), png);
   });
 });

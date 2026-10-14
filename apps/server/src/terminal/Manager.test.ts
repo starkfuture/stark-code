@@ -241,6 +241,9 @@ interface CreateManagerOptions {
   resolveProviderInstanceEnvironment?: Parameters<
     typeof TerminalManager.makeWithOptions
   >[0]["resolveProviderInstanceEnvironment"];
+  resolveAgentShellLaunch?: Parameters<
+    typeof TerminalManager.makeWithOptions
+  >[0]["resolveAgentShellLaunch"];
   managedBinaryCacheDir?: string;
   managedBinaryToolsDir?: string;
 }
@@ -290,6 +293,9 @@ const createManager = (
           : {}),
         ...(options.resolveProviderInstanceEnvironment !== undefined
           ? { resolveProviderInstanceEnvironment: options.resolveProviderInstanceEnvironment }
+          : {}),
+        ...(options.resolveAgentShellLaunch
+          ? { resolveAgentShellLaunch: options.resolveAgentShellLaunch }
           : {}),
         ...(options.managedBinaryCacheDir === undefined
           ? {}
@@ -2112,9 +2118,9 @@ it.layer(
       const appDir = "/tmp/.mount_T3Codeabc123";
       const { manager, ptyAdapter } = yield* createManager(5, {
         env: {
-          APPIMAGE: "/home/user/T3-Code.AppImage",
+          APPIMAGE: "/home/user/Stark-Code.AppImage",
           APPDIR: appDir,
-          ARGV0: "/home/user/T3-Code.AppImage",
+          ARGV0: "/home/user/Stark-Code.AppImage",
           OWD: "/home/user/project",
           PATH: `${appDir}/usr/bin:${appDir}:/usr/local/bin:/usr/bin:/bin`,
           LD_LIBRARY_PATH: `${appDir}/usr/lib:/home/user/.local/lib`,
@@ -2421,6 +2427,56 @@ it.layer(
     }).pipe(Effect.provide(ServerSettings.ServerSettingsService.layerTest())),
   );
 
+  it.effect(
+    "keeps the native CLI and its account environment alive across terminal reattachments",
+    () =>
+      Effect.gen(function* () {
+        const providerInstanceId = ProviderInstanceId.make("claude_work");
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          env: { CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "sdk", KEEP_USER_SETTING: "yes" },
+          resolveProviderInstanceEnvironment: () =>
+            Effect.succeed({ CLAUDE_CONFIG_DIR: "/tmp/claude-work" }),
+          resolveAgentShellLaunch: () =>
+            Effect.succeed({ shell: "/installed/claude", args: ["--plugin-dir", "/my plugins"] }),
+        });
+        const input = openInput({ providerInstanceId, agentShell: true });
+        const opened = yield* manager.open(input);
+        expect(opened.agentShell).toBe(true);
+        const metadata = yield* Ref.make<ReadonlyArray<TerminalMetadataStreamEvent>>([]);
+        const stopMetadata = yield* manager.subscribeMetadata((event) =>
+          Ref.update(metadata, (events) => [...events, event]),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(stopMetadata));
+        expect((yield* Ref.get(metadata))[0]).toMatchObject({
+          type: "snapshot",
+          terminals: [{ agentShell: true, hasRunningSubprocess: true }],
+        });
+        yield* manager.closeIdle({ threadId: input.threadId });
+        expect(ptyAdapter.processes[0]?.killed).toBe(false);
+        const detach = yield* manager.attachStream(input, () => Effect.void);
+        detach();
+        yield* manager.write({
+          threadId: input.threadId,
+          terminalId: input.terminalId,
+          data: "/plugins\r",
+        });
+        yield* manager.attachStream(input, () => Effect.void);
+        expect(ptyAdapter.spawnInputs).toHaveLength(1);
+        expect(ptyAdapter.spawnInputs[0]).toMatchObject({
+          shell: "/installed/claude",
+          args: ["--plugin-dir", "/my plugins"],
+          cwd: input.cwd,
+          env: { CLAUDE_CONFIG_DIR: "/tmp/claude-work", KEEP_USER_SETTING: "yes" },
+        });
+        expect(ptyAdapter.spawnInputs[0]?.env.CLAUDECODE).toBeUndefined();
+        expect(ptyAdapter.spawnInputs[0]?.env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+        expect(ptyAdapter.processes[0]?.writes).toContain("/plugins\r");
+        yield* manager.restart({ ...input, cols: 120, rows: 40 });
+        expect(ptyAdapter.spawnInputs[1]?.shell).toBe("/installed/claude");
+        expect(ptyAdapter.spawnInputs[1]?.args).toEqual(["--plugin-dir", "/my plugins"]);
+      }),
+  );
+
   it.effect("restarts a running terminal when the resolved provider environment changes", () =>
     Effect.gen(function* () {
       const providerInstanceId = ProviderInstanceId.make("codex_work");
@@ -2512,7 +2568,9 @@ it.layer(
           Layer.provide(ServerSecretStore.layer),
           Layer.provide(SqlitePersistence.layerMemory),
           Layer.provide(
-            ServerConfig.layerTest(process.cwd(), { prefix: "t3code-terminal-provider-restart-" }),
+            ServerConfig.layerTest(process.cwd(), {
+              prefix: "t3code-terminal-provider-restart-",
+            }),
           ),
         ),
       ),

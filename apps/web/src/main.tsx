@@ -1,3 +1,4 @@
+import { BRAND } from "@t3tools/shared/branding";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
@@ -27,7 +28,9 @@ if (isElectron) {
   syncDocumentWindowControlsOverlayClass();
 }
 
-const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
+const clerkPublishableKey = BRAND.cloudServicesEnabled
+  ? import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined
+  : undefined;
 
 // A failed split-chunk fetch usually means the hashed assets went stale under
 // a deploy; one guarded reload picks up the fresh index.html.

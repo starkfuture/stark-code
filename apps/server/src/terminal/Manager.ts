@@ -6,6 +6,7 @@
  *
  * @module TerminalManager
  */
+import { nativeAgentLaunch } from "./NativeAgentLaunch.ts";
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import {
   DEFAULT_TERMINAL_ID,
@@ -308,6 +309,7 @@ interface TerminalSessionState {
   /** Normalized child command name when `hasRunningSubprocess`; cleared when idle. */
   childCommandLabel: string | null;
   runtimeEnv: Record<string, string> | null;
+  agentShell: boolean;
 }
 
 interface PersistHistoryRequest {
@@ -368,6 +370,7 @@ function normalizeChildCommandName(raw: string, platform: NodeJS.Platform): stri
 }
 
 function terminalWireLabel(session: TerminalSessionState): string {
+  if (session.agentShell) return "Native agent shell";
   if (session.hasRunningSubprocess && session.childCommandLabel) {
     const trimmed = session.childCommandLabel.trim();
     if (trimmed.length > 0) {
@@ -389,6 +392,7 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     exitCode: session.exitCode,
     exitSignal: session.exitSignal,
     label: terminalWireLabel(session),
+    ...(session.agentShell ? { agentShell: true } : {}),
     updatedAt: session.updatedAt,
     sequence: session.eventSequence,
   };
@@ -404,8 +408,10 @@ function summary(session: TerminalSessionState): TerminalSummary {
     pid: session.pid,
     exitCode: session.exitCode,
     exitSignal: session.exitSignal,
-    hasRunningSubprocess: session.hasRunningSubprocess,
+    hasRunningSubprocess:
+      session.hasRunningSubprocess || (session.agentShell && session.status === "running"),
     label: terminalWireLabel(session),
+    ...(session.agentShell ? { agentShell: true } : {}),
     updatedAt: session.updatedAt,
   };
 }
@@ -1393,6 +1399,12 @@ interface TerminalManagerOptions {
     readonly threadId: string;
     readonly terminalId: string;
   }) => Effect.Effect<void>;
+  resolveAgentShellLaunch?: (
+    providerInstanceId: string,
+  ) => Effect.Effect<
+    ShellCandidate,
+    TerminalProviderInstanceNotFoundError | TerminalProviderEnvironmentError
+  >;
   resolveProviderInstanceEnvironment?: (
     providerInstanceId: string,
     env: Record<string, string> | undefined,
@@ -1474,6 +1486,24 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
     registerTerminalProcesses: portDiscovery.registerTerminalProcesses,
     unregisterTerminal: portDiscovery.unregisterTerminal,
     resolveProviderInstanceEnvironment,
+    resolveAgentShellLaunch: (rawId) =>
+      Effect.gen(function* () {
+        const providerInstanceId = ProviderInstanceId.make(rawId);
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.mapError(
+            (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
+          ),
+        );
+        const instance = deriveProviderInstanceConfigMap(settings)[providerInstanceId];
+        if (instance === undefined || instance.enabled === false)
+          return yield* new TerminalProviderInstanceNotFoundError({ providerInstanceId });
+        const home = yield* HostProcess.HomeDirectory;
+        return yield* Effect.try({
+          try: () =>
+            nativeAgentLaunch({ driver: instance.driver, config: instance.config ?? {}, home }),
+          catch: (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
+        });
+      }),
   });
 });
 
@@ -2262,13 +2292,32 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            const shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
+            let shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
+            if (input.agentShell === true) {
+              if (
+                input.providerInstanceId === undefined ||
+                options.resolveAgentShellLaunch === undefined
+              ) {
+                return yield* new TerminalProviderEnvironmentError({
+                  providerInstanceId:
+                    input.providerInstanceId ?? ProviderInstanceId.make("missing"),
+                  cause: new Error(
+                    "Select a Claude or Codex account before opening native shell mode.",
+                  ),
+                });
+              }
+              shellCandidates = [yield* options.resolveAgentShellLaunch(input.providerInstanceId)];
+            }
             const terminalEnv = createTerminalSpawnEnv(
               baseEnv,
               session.runtimeEnv,
               platform,
               yield* HostProcess.HomeDirectory,
             );
+            if (input.agentShell === true) {
+              delete terminalEnv.CLAUDECODE;
+              delete terminalEnv.CLAUDE_CODE_ENTRYPOINT;
+            }
             // Append (never prepend) managed ACP agent install directories so
             // `kimi login` and friends resolve by name without shadowing any
             // system or user tool of the same name.
@@ -2637,6 +2686,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         hasRunningSubprocess: false,
         childCommandLabel: null,
         runtimeEnv: normalizedRuntimeEnv(input.env),
+        agentShell: input.agentShell === true,
       };
 
       const createdSession = session;
@@ -2657,6 +2707,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           cols,
           rows,
           ...(input.env ? { env: input.env } : {}),
+          ...(input.providerInstanceId ? { providerInstanceId: input.providerInstanceId } : {}),
+          ...(input.agentShell === true ? { agentShell: true } : {}),
         },
         "started",
       );
@@ -2672,12 +2724,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     const nextWorktreePath =
       input.worktreePath !== undefined ? (input.worktreePath ?? null) : liveSession.worktreePath;
     const launchContextChanged =
+      liveSession.agentShell !== (input.agentShell === true) ||
       liveSession.cwd !== input.cwd ||
       runtimeEnvChanged ||
       liveSession.worktreePath !== nextWorktreePath;
 
     if (launchContextChanged) {
       yield* stopProcess(liveSession);
+      liveSession.agentShell = input.agentShell === true;
       liveSession.cwd = input.cwd;
       liveSession.worktreePath = nextWorktreePath;
       liveSession.runtimeEnv = nextRuntimeEnv;
@@ -2709,6 +2763,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           cols: targetCols,
           rows: targetRows,
           ...(input.env ? { env: input.env } : {}),
+          ...(input.providerInstanceId ? { providerInstanceId: input.providerInstanceId } : {}),
+          ...(input.agentShell === true ? { agentShell: true } : {}),
         },
         "started",
       );
@@ -3077,6 +3133,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           hasRunningSubprocess: false,
           childCommandLabel: null,
           runtimeEnv: normalizedRuntimeEnv(input.env),
+          agentShell: input.agentShell === true,
         };
         const createdSession = session;
         yield* modifyManagerState((state) => {
@@ -3088,6 +3145,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       } else {
         session = existingSession.value;
         yield* stopProcess(session);
+        session.agentShell = input.agentShell === true;
         session.cwd = input.cwd;
         session.worktreePath = input.worktreePath ?? null;
         session.runtimeEnv = normalizedRuntimeEnv(input.env);
@@ -3112,6 +3170,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           cols,
           rows,
           ...(input.env ? { env: input.env } : {}),
+          ...(input.providerInstanceId ? { providerInstanceId: input.providerInstanceId } : {}),
+          ...(input.agentShell === true ? { agentShell: true } : {}),
         },
         "restarted",
       );
@@ -3160,6 +3220,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         const running = (yield* sessionsForThread(input.threadId)).filter(
           (session): session is TerminalSessionState & { pid: number } =>
             session.status === "running" &&
+            !session.agentShell &&
             Number.isInteger(session.pid) &&
             (input.terminalId === undefined || session.terminalId === input.terminalId),
         );

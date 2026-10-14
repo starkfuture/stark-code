@@ -1,5 +1,7 @@
 "use client";
 
+import { toggleNativeAgentShell } from "../nativeAgentShell";
+
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -1804,6 +1806,17 @@ function OpenCommandPaletteDialog(props: {
   }, [clearOpenIntent, browseNavigation, openIntent, projectThreadItems, pushPaletteView]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  if (activeThread || activeDraftThread) {
+    actionItems.push({
+      kind: "action",
+      value: "action:native-agent-shell",
+      title: "Toggle native agent shell",
+      searchTerms: ["shell", "terminal", "claude", "codex", "plugins", "native"],
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "agentShell.toggle",
+      run: async () => toggleNativeAgentShell(),
+    });
+  }
 
   if (projects.length > 0) {
     const activeProjectTitle =
@@ -2268,7 +2281,7 @@ function OpenCommandPaletteDialog(props: {
         "grouping",
         "checkout",
         "remove",
-        "t3.json",
+        "stark.json",
       ],
       title: "Project settings",
       description: contextualProjectGroup.displayName,

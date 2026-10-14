@@ -45,6 +45,8 @@ export const TerminalOpenInput = Schema.Struct({
   rows: Schema.optional(TerminalRowsSchema),
   env: Schema.optional(TerminalEnvSchema),
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  /** Start this provider’s full interactive CLI in the PTY. */
+  agentShell: Schema.optional(Schema.Boolean),
 });
 export type TerminalOpenInput = typeof TerminalOpenInput.Type;
 
@@ -56,6 +58,8 @@ export const TerminalAttachInput = Schema.Struct({
   rows: Schema.optional(TerminalRowsSchema),
   env: Schema.optional(TerminalEnvSchema),
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  /** Start this provider’s full interactive CLI in the PTY. */
+  agentShell: Schema.optional(Schema.Boolean),
   restartIfNotRunning: Schema.optional(Schema.Boolean),
 });
 export type TerminalAttachInput = typeof TerminalAttachInput.Type;
@@ -87,6 +91,8 @@ export const TerminalRestartInput = Schema.Struct({
   rows: TerminalRowsSchema,
   env: Schema.optional(TerminalEnvSchema),
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  /** Start this provider’s full interactive CLI in the PTY. */
+  agentShell: Schema.optional(Schema.Boolean),
 });
 export type TerminalRestartInput = typeof TerminalRestartInput.Type;
 
@@ -112,6 +118,7 @@ export const TerminalSessionSnapshot = Schema.Struct({
   exitSignal: Schema.NullOr(Schema.Int),
   /** Server-computed display title (idle shell vs subprocess command). */
   label: Schema.String.check(Schema.isMaxLength(128)),
+  agentShell: Schema.optional(Schema.Boolean),
   updatedAt: Schema.String,
   sequence: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 });
@@ -129,6 +136,7 @@ export const TerminalSummary = Schema.Struct({
   hasRunningSubprocess: Schema.Boolean,
   /** Server-computed display title (idle shell vs subprocess command). */
   label: Schema.String.check(Schema.isMaxLength(128)),
+  agentShell: Schema.optional(Schema.Boolean),
   updatedAt: Schema.String,
 });
 export type TerminalSummary = typeof TerminalSummary.Type;

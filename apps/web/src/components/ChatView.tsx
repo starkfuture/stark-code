@@ -1,3 +1,5 @@
+import { NATIVE_AGENT_SHELL_TOGGLE_EVENT, toggleNativeAgentShell } from "../nativeAgentShell";
+import { NativeAgentShell, nativeAgentTerminalId } from "./NativeAgentShell";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -1619,6 +1621,9 @@ export default function ChatView(props: ChatViewProps) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useOrchestrationCommand(threadEnvironment.create, { reportFailure: false });
+  const launchNativeThread = useOrchestrationCommand(threadEnvironment.launch, {
+    reportFailure: false,
+  });
   const deleteThread = useOrchestrationCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -2255,6 +2260,13 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadKnownSessions]);
   const activeThreadRef = useActiveThreadRef(activeThread);
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const [nativeShellThreadKey, setNativeShellThreadKey] = useState<string | null>(null);
+  const [nativeShellPreparing, setNativeShellPreparing] = useState(false);
+  const [nativeShellSelection, setNativeShellSelection] = useState<{
+    instanceId: ProviderInstanceId;
+    driver: string;
+  } | null>(null);
+  const nativeShellMode = activeThreadKey !== null && nativeShellThreadKey === activeThreadKey;
   const activeEnvironmentServerBrowser = useEnvironmentSupportsServerBrowser(
     activeThreadRef?.environmentId ?? null,
   );
@@ -3545,7 +3557,7 @@ export default function ChatView(props: ChatViewProps) {
         : null,
     [environmentId, usageLimitsPanel, usageLimitsReport],
   );
-  // T3 owns /usage-limits only where Limits has data for the selected provider;
+  // Stark owns /usage-limits only where Limits has data for the selected provider;
   // elsewhere the name stays the provider's own and is sent through untouched.
   const usageLimitsOffered =
     activeProviderStatus !== null &&
@@ -8146,6 +8158,13 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "agentShell.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) toggleNativeAgentShell();
+        return;
+      }
+
       if (command === "terminal.toggle") {
         if (!terminalUiState.terminalOpen && !canReadTerminal && !canOperateTerminal) return;
         event.preventDefault();
@@ -8825,6 +8844,140 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
 
+  useEffect(() => {
+    const toggle = async () => {
+      if (nativeShellMode) {
+        setNativeShellThreadKey(null);
+        return;
+      }
+      if (
+        !activeThread ||
+        !activeProject ||
+        !activeThreadKey ||
+        !activeProviderInstanceId ||
+        !canOperateTerminal ||
+        sendInFlightRef.current ||
+        nativeShellPreparing ||
+        isWorking
+      )
+        return;
+      if (serverConfig?.environment.capabilities.nativeAgentShell !== true) return;
+      if (selectedProvider !== "codex" && selectedProvider !== "claudeAgent") return;
+      const selection = { instanceId: activeProviderInstanceId, driver: selectedProvider };
+      const wantedId = nativeAgentTerminalId(selection.instanceId);
+      const otherNative = runningTerminalIds.find(
+        (id) => id.startsWith("native-agent-") && id !== wantedId,
+      );
+      if (otherNative) {
+        setThreadError(
+          activeThread.id,
+          `A native session for ${otherNative.slice("native-agent-".length)} is already running here. Select that account, or use another thread for parallel work.`,
+        );
+        return;
+      }
+      if (isServerThread) {
+        setNativeShellSelection(selection);
+        setNativeShellThreadKey(activeThreadKey);
+        return;
+      }
+      const modelSelection = composerRef.current?.getSendContext()?.selectedModelSelection;
+      if (!modelSelection) {
+        setThreadError(activeThread.id, "Choose a provider and model before opening shell mode.");
+        return;
+      }
+      if (envMode === "worktree" && !activeThread.worktreePath && !activeThreadBranch) {
+        setThreadError(
+          activeThread.id,
+          "Select a base branch before opening a shell in a new worktree.",
+        );
+        return;
+      }
+      const routeAtStart = currentRouteThreadKeyRef.current;
+      setNativeShellPreparing(true);
+      sendInFlightRef.current = true;
+      try {
+        const result = await launchNativeThread({
+          environmentId,
+          input: {
+            commandId: CommandId.make(randomUUID()),
+            creationSource: "web",
+            threadId: activeThread.id,
+            projectId: activeProject.id,
+            title: `${selectedProvider === "codex" ? "Codex" : "Claude"} native shell`,
+            generateTitle: false,
+            modelSelection,
+            runtimeMode: defaultRuntimeMode,
+            interactionMode: "default",
+            workspaceStrategy: activeThread.worktreePath
+              ? {
+                  type: "existing_worktree",
+                  worktreePath: activeThread.worktreePath,
+                  ...(activeThreadBranch ? { branch: activeThreadBranch } : {}),
+                }
+              : envMode === "worktree"
+                ? {
+                    type: "worktree",
+                    baseRef: activeThreadBranch!,
+                    startFromOrigin: activeProjectSettings.settings.newWorktreesStartFromOrigin,
+                  }
+                : { type: "root", ...(activeThreadBranch ? { branch: activeThreadBranch } : {}) },
+          },
+        });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            setThreadError(
+              activeThread.id,
+              error instanceof Error
+                ? error.message
+                : "Could not prepare the native shell workspace.",
+            );
+          }
+          return;
+        }
+        if (currentRouteThreadKeyRef.current !== routeAtStart) return;
+        const threadRef = scopeThreadRef(environmentId, result.value.threadId);
+        setNativeShellSelection(selection);
+        setNativeShellThreadKey(scopedThreadKey(threadRef));
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: { environmentId, threadId: result.value.threadId },
+        });
+      } finally {
+        sendInFlightRef.current = false;
+        setNativeShellPreparing(false);
+      }
+    };
+    const handler = () => {
+      void toggle();
+    };
+    window.addEventListener(NATIVE_AGENT_SHELL_TOGGLE_EVENT, handler);
+    return () => window.removeEventListener(NATIVE_AGENT_SHELL_TOGGLE_EVENT, handler);
+  }, [
+    nativeShellMode,
+    activeThread,
+    activeProject,
+    activeThreadKey,
+    activeProviderInstanceId,
+    canOperateTerminal,
+    sendInFlightRef,
+    nativeShellPreparing,
+    isWorking,
+    serverConfig?.environment.capabilities.nativeAgentShell,
+    selectedProvider,
+    runningTerminalIds,
+    setThreadError,
+    isServerThread,
+    composerRef,
+    envMode,
+    activeThreadBranch,
+    launchNativeThread,
+    environmentId,
+    defaultRuntimeMode,
+    activeProjectSettings.settings.newWorktreesStartFromOrigin,
+    navigate,
+  ]);
+
   const onSend = async (
     e?: { preventDefault: () => void },
     dispatchMode: ComposerDispatchMode = "auto",
@@ -8835,6 +8988,15 @@ export default function ChatView(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
+    if (nativeShellMode) return;
+    if (runningTerminalIds.some((id) => id.startsWith("native-agent-"))) {
+      if (activeThreadId)
+        setThreadError(
+          activeThreadId,
+          "The native agent is still running. Exit it in Shell mode, or use another thread and worktree for parallel work.",
+        );
+      return;
+    }
     // Typed out in full rather than picked from the menu. Attachments or contexts
     // mean the user is sending a prompt, so those go through as usual.
     if (
@@ -11479,10 +11641,47 @@ export default function ChatView(props: ChatViewProps) {
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
           />
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-pressed={nativeShellMode}
+            title={
+              serverConfig?.environment.capabilities.nativeAgentShell !== true
+                ? "This environment needs a T3 Code server with native shell support"
+                : "Open the full native Claude or Codex CLI"
+            }
+            disabled={
+              !nativeShellMode &&
+              (!activeProject ||
+                !activeProviderInstanceId ||
+                !canOperateTerminal ||
+                nativeShellPreparing ||
+                isWorking ||
+                serverConfig?.environment.capabilities.nativeAgentShell !== true ||
+                (selectedProvider !== "codex" && selectedProvider !== "claudeAgent"))
+            }
+            onClick={toggleNativeAgentShell}
+          >
+            {nativeShellPreparing ? "Opening shell…" : nativeShellMode ? "Chat mode" : "Shell mode"}
+          </Button>
         </header>
 
         {/* Main content area with optional plan sidebar */}
         <div className="relative flex min-h-0 min-w-0 flex-1">
+          {nativeShellMode && activeThreadRef && nativeShellSelection && activeProject ? (
+            <div className="absolute inset-0 z-30">
+              <NativeAgentShell
+                key={`${activeThreadKey}:${nativeShellSelection.instanceId}`}
+                threadRef={activeThreadRef}
+                providerInstanceId={nativeShellSelection.instanceId}
+                driver={nativeShellSelection.driver}
+                cwd={activeThreadWorktreePath ?? activeProject.workspaceRoot}
+                worktreePath={activeThreadWorktreePath ?? null}
+                keybindings={keybindings}
+                onBackToChat={() => setNativeShellThreadKey(null)}
+              />
+            </div>
+          ) : null}
           {/* Chat column */}
           <ThreadFindCanvas
             findOptions={{
@@ -11496,7 +11695,9 @@ export default function ChatView(props: ChatViewProps) {
             controlsRef={threadFindControlsRef}
             onOpenChange={setIsThreadFindActive}
             detailsCardTopInset={isThreadFindActive ? THREAD_FIND_BAR_RESERVED_HEIGHT : 0}
-            composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
+            composerOverlayElement={
+              nativeShellMode || isDraftHeroState ? null : composerOverlayElement
+            }
             data-chat-workspace-drop-target="true"
             onDragEnter={workspaceFileDropHandlers.onDragEnter}
             onDragOver={workspaceFileDropHandlers.onDragOver}

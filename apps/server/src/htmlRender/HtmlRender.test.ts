@@ -250,7 +250,7 @@ describe("HtmlRender", () => {
               '<img src="/nonexistent/stark-missing.png" hidden>',
               "<script>",
               "const root = getComputedStyle(document.documentElement);",
-              'const page = document.getElementById("page"); page.focus();',
+              'const page = document.getElementById("page"); page.focus({ focusVisible: true });',
               'const focus = getComputedStyle(page); console.log("focus", focus.outlineWidth, focus.outlineOffset, page.getBoundingClientRect().width, document.documentElement.scrollWidth);',
               'console.log("ready", 3); console.info(root.getPropertyValue("--font-sans"));',
               'console.warn(root.getPropertyValue("--background")); console.error("boom");',
@@ -325,6 +325,31 @@ describe("HtmlRender", () => {
           expect(texts.join(" ")).not.toContain("abc123");
         }).pipe(Effect.scoped, Effect.provide(layerHtmlRender(executable)));
       }),
+    30_000,
+  );
+
+  it.live(
+    "blocks public network resources in agent-authored previews",
+    (ctx) =>
+      Effect.gen(function* () {
+        const executable = (yield* HostProcess.Environment)[TEST_BROWSER_ENV];
+        if (!executable) return ctx.skip(`Set ${TEST_BROWSER_ENV} to run this test.`);
+        const htmlRender = yield* HtmlRender.HtmlRender;
+        const preview = yield* htmlRender.preview({
+          html: [
+            '<script>document.addEventListener("securitypolicyviolation", event => console.log("blocked", event.violatedDirective, event.blockedURI));</script>',
+            '<img src="https://example.com/stark-network-test.png">',
+            '<iframe src="https://example.com/stark-network-test-frame"></iframe>',
+            '<script>fetch("https://example.com/stark-network-test").catch(() => {}); try { new Worker("https://example.com/worker.js"); } catch {}</script>',
+            "<p>Offline response</p>",
+          ].join(""),
+        });
+        const messages = preview.consoleMessages.map((message) => message.text).join("\n");
+        expect(messages).toContain("blocked connect-src https://example.com/stark-network-test");
+        expect(messages).toContain("blocked img-src https://example.com/stark-network-test.png");
+        // Cross-origin frame violation events deliberately expose only the origin.
+        expect(messages).toContain("blocked frame-src https://example.com");
+      }).pipe(Effect.provide(layerHtmlRender(process.env[TEST_BROWSER_ENV]))),
     30_000,
   );
 

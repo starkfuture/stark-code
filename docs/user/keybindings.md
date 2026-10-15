@@ -130,6 +130,18 @@ update an older server to enable it. Select **Retry** if a search fails. It defa
 `mod+f` outside terminals and previews. Press **Enter** or **Shift+Enter** to move between matches,
 and **Escape** to close find.
 
+## Navigate conversation turns
+
+On web and desktop, **Turns** lists prompt and response previews from the whole conversation.
+Search these previews or switch to **Saved** after bookmarking a turn. Bookmarks stay on this
+device and are separate for each environment and conversation. Opening an older turn loads its
+conversation history; use **Cancel** if you change your mind. For a full-text search within
+responses, use `chat.find` instead.
+
+In a wide chat, drag the conversation rail to scrub through loaded turns. The **Turns** menu
+remains available in narrow windows and with touch or keyboard navigation. Arrow keys move
+between turn entries, and Enter opens the focused turn.
+
 ## Precedence
 
 The last rule whose key and condition both match wins, even if it belongs to a

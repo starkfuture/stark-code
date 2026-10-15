@@ -11,6 +11,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import { publicProxy } from "./publicProxy.ts";
+import { HTML_RENDER_CONTENT_SECURITY_POLICY } from "@starkfuture/shared/htmlRender";
 
 export class HtmlRenderBrowserError extends Schema.TaggedError<HtmlRenderBrowserError>()(
   "HtmlRenderBrowserError",
@@ -43,10 +44,10 @@ const CAPTURE_TIMEOUT = "20 seconds";
 // read files the agent's provider withholds; local images reach it already
 // inlined as data URIs. `.localhost` keeps it a secure context that may still
 // load plain-http resources, and the request never leaves the browser.
-// All of the browser's traffic goes through `publicProxy`, which only reaches
-// public addresses, so a page cannot reach this machine's local network. The
-// main frame also stays on the page and the browser opens no popups, so a
-// capture always shows the page itself.
+// Fetch interception denies every request except the supplied main document.
+// CSP blocks connections and workers too; the public-only proxy remains a
+// backstop against local-network access outside page targets. The main frame
+// stays on the page and the browser opens no popups.
 const PAGE_ORIGIN = "http://stark-page.localhost";
 const PAGE_URL = `${PAGE_ORIGIN}/page.html`;
 // Stack traces and load errors name the page this way instead of its URL.
@@ -265,7 +266,12 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
   const fulfillPage = (sessionId: string, requestId: string, body: Uint8Array) =>
     Queue.offerAll(outgoing, [
       textEncoder.encode(
-        `{"id":${++nextId},"sessionId":${JSON.stringify(sessionId)},"method":"Fetch.fulfillRequest","params":{"requestId":${JSON.stringify(requestId)},"responseCode":200,"responseHeaders":[{"name":"Content-Type","value":"text/html; charset=utf-8"}],"body":"`,
+        `{"id":${++nextId},"sessionId":${JSON.stringify(sessionId)},"method":"Fetch.fulfillRequest","params":{"requestId":${JSON.stringify(requestId)},"responseCode":200,"responseHeaders":${JSON.stringify(
+          [
+            { name: "Content-Type", value: "text/html; charset=utf-8" },
+            { name: "Content-Security-Policy", value: HTML_RENDER_CONTENT_SECURITY_POLICY },
+          ],
+        )},"body":"`,
       ),
       body,
       textEncoder.encode('"}}\0'),
@@ -298,22 +304,16 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       if (!paused) return Effect.void;
       const body = page.body;
       const url = paused.request.url.split("#", 1)[0]!;
-      if (url === PAGE_URL && body !== undefined) {
+      if (url === PAGE_URL && paused.frameId === page.mainFrameId && body !== undefined) {
         return fulfillPage(sessionId, paused.requestId, body);
       }
-      // A frame inside the page may show another site; Local Network Access
-      // still covers it. The main frame and Stark's own origin serve nothing else.
-      const otherSiteFrame =
-        paused.resourceType === "Document" &&
-        paused.frameId !== page.mainFrameId &&
-        !url.startsWith(`${PAGE_ORIGIN}/`);
-      return otherSiteFrame
-        ? post("Fetch.continueRequest", { requestId: paused.requestId }, sessionId)
-        : post(
-            "Fetch.failRequest",
-            { requestId: paused.requestId, errorReason: "AccessDenied" },
-            sessionId,
-          );
+      // Intercept every resource before the browser can send a request. A
+      // public-only proxy is not sufficient: public sites can receive secrets.
+      return post(
+        "Fetch.failRequest",
+        { requestId: paused.requestId, errorReason: "AccessDenied" },
+        sessionId,
+      );
     }
     const consoleMessage = consoleMessageFromEvent(message.method, message.params);
     if (!consoleMessage) return Effect.void;
@@ -432,15 +432,11 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       Ignored,
       sessionId,
     );
-    // Pauses Stark's own origin, to serve the page, and every document, to keep
-    // the main frame on it.
+    // Fulfill only our main document. All other network requests fail closed.
     yield* send(
       "Fetch.enable",
       {
-        patterns: [
-          { urlPattern: `${PAGE_ORIGIN}/*` },
-          { urlPattern: "*", resourceType: "Document" },
-        ],
+        patterns: [{ urlPattern: "*" }],
       },
       Ignored,
       sessionId,

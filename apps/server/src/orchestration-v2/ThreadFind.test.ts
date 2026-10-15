@@ -1010,3 +1010,137 @@ describe("V2 history materialization", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 });
+
+describe("lightweight conversation turn index", () => {
+  it.effect("pages every turn by stable identity, bounds previews, and ignores tool bodies", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      yield* putItems(
+        Array.from({ length: 205 }, (_, index) => [
+          item(
+            `prompt:${index}`,
+            index * 3,
+            `Prompt ${index} ${"x".repeat(1_000)}`,
+            "user_message",
+          ),
+          item(`thought:${index}`, index * 3 + 1, "Working"),
+          item(`answer:${index}`, index * 3 + 2, `Answer ${index} ${"y".repeat(2_000)}`),
+        ]).flat(),
+      );
+      const sql = yield* SqlClient.SqlClient;
+      // A tool body deliberately cannot be decoded; navigation must never request it.
+      yield* sql`INSERT INTO orchestration_v2_projection_turn_items
+        (turn_item_id, thread_id, run_id, node_id, type, ordinal, status, updated_at, payload_json)
+        VALUES ('tool:unreadable', ${threadId}, ${runId}, NULL, 'command_execution', 1, 'completed', '2026-10-15T00:00:00Z', 'not-json')`;
+      const recent = yield* projection.getThreadTurnIndex({ threadId });
+      assert.equal(recent.totalTurns, 205);
+      assert.equal(recent.items.length, 200);
+      assert.equal(recent.items[0]?.entryId, "prompt:5");
+      assert.equal(recent.items.at(-1)?.entryId, "prompt:204");
+      assert.equal(recent.nextBeforeEntryId, "prompt:5");
+      assert.equal(recent.items[0]?.userText.length, 320);
+      assert.equal(recent.items[0]?.assistantText?.length, 600);
+      assert.match(recent.items[0]!.assistantText!, /^Answer 5 /);
+      yield* putItems([item("new-prompt", 1000, "New turn", "user_message")]);
+      const earlier = yield* projection.getThreadTurnIndex({
+        threadId,
+        beforeEntryId: recent.nextBeforeEntryId!,
+      });
+      assert.deepEqual(
+        earlier.items.map((turn) => turn.entryId),
+        ["prompt:0", "prompt:1", "prompt:2", "prompt:3", "prompt:4"],
+      );
+      assert.equal(earlier.nextBeforeEntryId, null);
+      assert.equal(earlier.totalTurns, 206);
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect(
+    "indexes inherited prompts only through a fork boundary and keeps local replies separate",
+    () =>
+      Effect.gen(function* () {
+        const projection = yield* setup;
+        const parent = ThreadId.make("index:parent");
+        const parentRun = RunId.make("index:parent-run");
+        const laterRun = RunId.make("index:later-run");
+        yield* commit([
+          thread(parent, projectId),
+          run(parent, parentRun),
+          run(parent, laterRun, 2),
+        ]);
+        yield* putItems([
+          {
+            ...item("parent-prompt", 0, "Inherited prompt", "user_message", parent),
+            runId: parentRun,
+          },
+          {
+            ...item("parent-answer", 1, "Inherited answer", "assistant_message", parent),
+            runId: parentRun,
+          },
+          {
+            ...item("later-prompt", 2, "Excluded prompt", "user_message", parent),
+            runId: laterRun,
+          },
+        ]);
+        const child = thread(threadId, projectId);
+        if (child.type !== "thread.created") return;
+        yield* commit([
+          {
+            ...child,
+            id: EventId.make("index:fork"),
+            type: "thread.metadata-updated",
+            payload: {
+              ...child.payload,
+              forkedFrom: { type: "run", threadId: parent, runId: parentRun },
+            },
+          },
+        ]);
+        const steering = item("steering", 1, "Adjust the task", "user_message");
+        if (steering.type !== "user_message")
+          return yield* Effect.die("Expected a user message fixture");
+        yield* putItems([
+          item("child-prompt", 0, "Local prompt", "user_message"),
+          { ...steering, inputIntent: "steer" },
+          item("child-answer", 2, "Local answer"),
+        ]);
+        const page = yield* projection.getThreadTurnIndex({ threadId });
+        assert.deepEqual(
+          page.items.map(({ entryId, userText, assistantText }) => ({
+            entryId,
+            userText,
+            assistantText,
+          })),
+          [
+            {
+              entryId: "parent-prompt",
+              userText: "Inherited prompt",
+              assistantText: "Inherited answer",
+            },
+            { entryId: "child-prompt", userText: "Local prompt", assistantText: "Local answer" },
+          ],
+        );
+      }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect(
+    "refuses deleted threads and stale index cursors instead of returning a misleading page",
+    () =>
+      Effect.gen(function* () {
+        const projection = yield* setup;
+        yield* putItems([item("prompt", 0, "Hello", "user_message")]);
+        const stale = yield* Effect.flip(
+          projection.getThreadTurnIndex({ threadId, beforeEntryId: "removed" }),
+        );
+        assert.equal(stale._tag, "ProjectionStoreReadError");
+        const deleted = thread(threadId, projectId, { deletedAt: at(2) });
+        if (deleted.type !== "thread.created") return;
+        yield* projection.apply({
+          ...deleted,
+          id: EventId.make("index:deleted"),
+          type: "thread.deleted",
+        });
+        const missing = yield* Effect.flip(projection.getThreadTurnIndex({ threadId }));
+        assert.equal(missing._tag, "ProjectionStoreThreadNotFoundError");
+      }).pipe(Effect.provide(layerTest)),
+  );
+});

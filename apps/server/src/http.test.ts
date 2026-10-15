@@ -760,6 +760,18 @@ describe("assetResponseHeaders", () => {
     }
   });
 
+  it("blocks network resources in generated HTML responses", () => {
+    const policy = assetResponseHeaders("/attachments/thread-artifact-html.html")[
+      "Content-Security-Policy"
+    ]!;
+    expect(policy).toContain("default-src 'none'");
+    expect(policy).toContain("connect-src 'none'");
+    expect(policy).toContain("worker-src 'none'");
+    expect(policy).toContain("form-action 'none'");
+    expect(policy).toContain("sandbox allow-scripts");
+    expect(policy).not.toContain("allow-forms");
+  });
+
   it("downloads uploaded documents without executing their content", () => {
     expect(assetResponseHeaders("/attachments/upload.html", { download: true })).toMatchObject({
       "Content-Disposition": "attachment",

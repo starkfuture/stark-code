@@ -1,4 +1,6 @@
 import type {
+  OrchestrationV2ThreadTurnIndexInput,
+  OrchestrationV2ThreadTurnIndexPage,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
 } from "@starkfuture/contracts";
@@ -301,6 +303,9 @@ export type ThreadManagementError = typeof ThreadManagementError.Type;
 type ThreadManagementFailure = ThreadManagementError | Orchestrator.OrchestratorV2Error;
 
 export interface ThreadManagementServiceShape {
+  readonly getThreadTurnIndex: (
+    input: OrchestrationV2ThreadTurnIndexInput,
+  ) => Effect.Effect<OrchestrationV2ThreadTurnIndexPage, Orchestrator.OrchestratorV2Error>;
   readonly searchThreadStream: (
     input: OrchestrationV2SearchThreadInput,
   ) => Stream.Stream<OrchestrationV2SearchThreadResult, Orchestrator.OrchestratorV2Error>;
@@ -1155,6 +1160,10 @@ const make = Effect.gen(function* () {
 
   return ThreadManagementService.of({
     ensureLegacyTranscript,
+    getThreadTurnIndex: (input) =>
+      ensureProjectionTranscript(input.threadId).pipe(
+        Effect.andThen(orchestrator.getThreadTurnIndex(input)),
+      ),
     searchThreadStream: (input) =>
       Stream.unwrap(
         ensureProjectionTranscript(input.threadId).pipe(

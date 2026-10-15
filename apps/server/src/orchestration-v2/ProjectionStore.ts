@@ -1,8 +1,11 @@
+import { selectThreadTurnIndexPage } from "./threadTurnIndex.ts";
 import { applyThreadPullRequestLinkUpdate } from "@starkfuture/shared/threadPullRequests";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
 import { makeThreadFind, findProjectedThreadItems } from "./ThreadFind.ts";
 import type {
+  OrchestrationV2ThreadTurnIndexInput,
+  OrchestrationV2ThreadTurnIndexPage,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
@@ -340,6 +343,9 @@ export interface ShellSnapshotOptions {
 }
 
 export interface ProjectionStoreV2Shape {
+  readonly getThreadTurnIndex: (
+    input: OrchestrationV2ThreadTurnIndexInput,
+  ) => Effect.Effect<OrchestrationV2ThreadTurnIndexPage, ProjectionStoreV2Error>;
   readonly searchThreadStream: (
     input: OrchestrationV2SearchThreadInput,
   ) => Stream.Stream<OrchestrationV2SearchThreadResult, ProjectionStoreV2Error>;
@@ -4966,6 +4972,59 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       readTimelineIndex(threadId, new Set()).pipe(Effect.map((index) => index.visible)),
     );
 
+    const getThreadTurnIndex: ProjectionStoreV2Shape["getThreadTurnIndex"] = Effect.fn(
+      "ProjectionStore.getThreadTurnIndex",
+    )(function* (input) {
+      return yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const index = yield* readTimelineIndex(input.threadId, new Set());
+            if (index.records.thread.deletedAt !== null)
+              return yield* new ProjectionStoreThreadNotFoundError({ threadId: input.threadId });
+            const page = yield* Effect.try({
+              try: () => selectThreadTurnIndexPage(index.visible, input.beforeEntryId),
+              catch: (cause) => new ProjectionStoreReadError({ threadId: input.threadId, cause }),
+            });
+            const rows = page.turns.flatMap(({ user, assistant }) =>
+              assistant ? [user, assistant] : [user],
+            );
+            const sources = yield* encodeTimelineSources(
+              rows.map((row) => ({ threadId: row.sourceThreadId, id: row.sourceItemId })),
+            );
+            // SQLite trims text before crossing the database boundary; no attachment or tool payloads are hydrated.
+            const previews = yield* sql<{ thread_id: string; turn_item_id: string; text: string }>`
+          SELECT item.thread_id, item.turn_item_id,
+            substr(json_extract(item.payload_json, '$.text'), 1,
+              CASE WHEN item.type = 'user_message' THEN 320 ELSE 600 END) AS text
+          FROM orchestration_v2_projection_turn_items item JOIN json_each(${sources}) wanted
+          ON item.thread_id = json_extract(wanted.value, '$.threadId')
+            AND item.turn_item_id = json_extract(wanted.value, '$.id')`;
+            const byIdentity = new Map(
+              previews.map((row) => [`${row.thread_id}:${row.turn_item_id}`, row.text]),
+            );
+            const preview = (row: (typeof rows)[number]) =>
+              byIdentity.get(`${row.sourceThreadId}:${row.sourceItemId}`) ?? "";
+            return {
+              totalTurns: page.totalTurns,
+              nextBeforeEntryId: page.nextBeforeEntryId,
+              items: page.turns.map(({ user, assistant }) => ({
+                entryId: user.item.messageId ?? user.sourceItemId,
+                runId: user.item.runId,
+                userText: preview(user).slice(0, 320),
+                assistantText: assistant ? preview(assistant).slice(0, 600) : null,
+              })),
+            };
+          }),
+        )
+        .pipe(
+          Effect.mapError((cause) =>
+            isProjectionStoreThreadNotFoundError(cause) || isProjectionStoreReadError(cause)
+              ? cause
+              : new ProjectionStoreReadError({ threadId: input.threadId, cause }),
+          ),
+        );
+    });
+
     const getThreadHistoryPage: ProjectionStoreV2Shape["getThreadHistoryPage"] = (
       threadId,
       cursor,
@@ -6006,6 +6065,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThreadSnapshotWindow,
       getTimelinePage,
       getThreadHistoryPage,
+      getThreadTurnIndex,
       searchThread,
       searchThreadStream,
       getThreadAttachmentIds,
@@ -6580,6 +6640,39 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 projection,
               })),
             ),
+          ),
+        ),
+      getThreadTurnIndex: (input) =>
+        service.getThreadSnapshot(input.threadId).pipe(
+          Effect.flatMap(({ projection }) =>
+            Effect.try({
+              try: () => {
+                if (projection.thread.deletedAt !== null)
+                  throw new ProjectionStoreThreadNotFoundError({ threadId: input.threadId });
+                const page = selectThreadTurnIndexPage(
+                  projection.visibleTurnItems,
+                  input.beforeEntryId,
+                );
+                return {
+                  totalTurns: page.totalTurns,
+                  nextBeforeEntryId: page.nextBeforeEntryId,
+                  items: page.turns.map(({ user, assistant }) => ({
+                    entryId:
+                      user.item.type === "user_message" ? user.item.messageId : user.sourceItemId,
+                    runId: user.item.runId,
+                    userText: user.item.type === "user_message" ? user.item.text.slice(0, 320) : "",
+                    assistantText:
+                      assistant?.item.type === "assistant_message"
+                        ? assistant.item.text.slice(0, 600)
+                        : null,
+                  })),
+                };
+              },
+              catch: (cause) =>
+                isProjectionStoreThreadNotFoundError(cause)
+                  ? cause
+                  : new ProjectionStoreReadError({ threadId: input.threadId, cause }),
+            }),
           ),
         ),
       searchThreadStream: (input) => Stream.fromEffect(service.searchThread(input)),

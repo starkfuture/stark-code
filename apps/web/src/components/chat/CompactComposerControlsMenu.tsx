@@ -14,10 +14,10 @@ import { useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
 import {
   composerModeOptions,
-  resolveComposerModeSelection,
   type RuntimeModeOption,
   type ComposerMode,
 } from "./runtimeModeConfig";
+import { applyComposerModeSelection, type ConfirmRuntimeModeChange } from "./composerModeSelection";
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
@@ -34,7 +34,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
    */
   hidden?: boolean;
   onToggleInteractionMode: () => void;
-  onRuntimeModeChange: (mode: RuntimeMode) => void;
+  onRuntimeModeChange: ConfirmRuntimeModeChange;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const size = props.size ?? "sm";
@@ -95,10 +95,10 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           value={selectedMode}
           onValueChange={(value) => {
             if (!value || value === selectedMode) return;
-            const next = resolveComposerModeSelection(value as ComposerMode, props.runtimeMode);
-            if (props.combinePlanMode && next.interactionMode !== props.interactionMode)
-              props.onToggleInteractionMode();
-            if (next.runtimeMode !== props.runtimeMode) props.onRuntimeModeChange(next.runtimeMode);
+            void applyComposerModeSelection(value as ComposerMode, {
+              ...props,
+              combinePlanMode: props.combinePlanMode && props.showInteractionModeToggle,
+            });
           }}
         >
           {options.map((option) => (

@@ -43,6 +43,28 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Work alongside a conversation
+
+On web and desktop, open **Workspace → Side chat** to ask a separate question
+while keeping the main conversation visible. A new side chat receives a bounded
+excerpt of recent conversation text and starts in Plan with Manual permissions.
+It shares the current folder; it does not create a separate worktree. Terminal
+history is never copied, so paste any terminal context you want it to use.
+
+Use **Workspace → Format** to have a separate agent turn a completed answer into
+an HTML/CSS response. Review the source text, add any formatting instructions and
+start it. Its answer and tool approvals appear in the panel. Nothing is added to
+the main conversation or published as a Stark Page.
+
+Both kinds of side work are saved as ordinary chats. The panel remembers their
+association on this device; they also remain available in the chat sidebar.
+Open a side chat to answer structured questions or use its full controls.
+
+**Workspace → Agents** groups the current folder's chats by worktree, shows
+running agents, pending approvals and active terminals, and lets you open chats
+or stop their structured agent runs. Stopping an agent does not stop its native
+terminal sessions.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

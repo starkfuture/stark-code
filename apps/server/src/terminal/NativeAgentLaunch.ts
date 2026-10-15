@@ -11,11 +11,25 @@ export { NativeAgentLaunchRefused } from "@starkfuture/shared/nativeCodexLaunch"
 const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+// Native Claude owns its permission UI. Keep its in-process agents out of
+// Bypass even when the owner has opted into that mode for the parent session.
+const nativeChildGuard = `let input="";process.stdin.setEncoding("utf8");process.stdin.on("data",chunk=>input+=chunk);process.stdin.on("end",()=>{try{const hook=JSON.parse(input);if(["default","manual","acceptEdits","auto","plan","dontAsk"].includes(hook.permission_mode))return;if(hook.permission_mode==="bypassPermissions"&&!hook.agent_id&&typeof hook.tool_name==="string"&&!/^(Agent|Task)$/.test(hook.tool_name))return;}catch{}process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:"Child agents cannot use Bypass permissions. Switch to Manual, Accept edits or Auto before starting an agent, and remove Bypass from custom agent definitions."}}));});`;
+const quotePosix = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+function nativeChildGuardCommand(platform: NodeJS.Platform, nodeExecutable: string): string {
+  // Exit 2 blocks the tool if the guard runtime itself cannot start.
+  return platform === "win32"
+    ? `node -e "${nativeChildGuard.replaceAll('"', '\\"')}" || exit /b 2`
+    : `ELECTRON_RUN_AS_NODE=1 ${quotePosix(nodeExecutable)} -e ${quotePosix(nativeChildGuard)} || exit 2`;
+}
+
 /** Launch the interactive CLI directly, without SDK or app-server transport flags. */
 export function nativeAgentLaunch(input: {
   readonly driver: string;
   readonly config: unknown;
   readonly home: string;
+  readonly platform?: NodeJS.Platform;
+  readonly nodeExecutable?: string;
 }): { shell: string; args: string[] } {
   const settings =
     input.driver === "codex"
@@ -30,6 +44,20 @@ export function nativeAgentLaunch(input: {
   // arguments are prompt text rather than CLI options.
   const promptArgs = delimiter < 0 ? [] : userArgs.slice(delimiter);
   let args = delimiter < 0 ? userArgs : userArgs.slice(0, delimiter);
+  if (input.driver === "claudeAgent") {
+    const claudeSettings = decodeClaudeSettings(input.config);
+    const bypassRequested = args.some(
+      (arg, index) =>
+        /^--(?:allow-)?dangerously-skip-permissions(?:=|$)/.test(arg) ||
+        arg === "--permission-mode=bypassPermissions" ||
+        (arg === "--permission-mode" && args[index + 1] === "bypassPermissions"),
+    );
+    if (bypassRequested && claudeSettings.allowBypassPermissions !== true) {
+      throw new Error(
+        "Enable Allow Bypass permissions in this Claude account's settings before launching with unsafe permission flags.",
+      );
+    }
+  }
   if (BRAND.requireApprovalsByDefault && input.driver === "codex") {
     args = supervisedNativeCodexArgs(userArgs);
   }
@@ -52,6 +80,28 @@ export function nativeAgentLaunch(input: {
     args.push(
       "--settings",
       JSON.stringify({
+        disableAllHooks: false,
+        hooks: {
+          PreToolUse: [
+            {
+              // Custom agent definitions can override a safe parent's mode.
+              // Inspect child tool calls too, not just parent Agent launches.
+              matcher: "*",
+              hooks: [
+                {
+                  type: "command",
+                  command: nativeChildGuardCommand(
+                    input.platform ?? "linux",
+                    input.nodeExecutable ?? "node",
+                  ),
+                },
+              ],
+            },
+          ],
+        },
+        ...(decodeClaudeSettings(input.config).allowBypassPermissions === true
+          ? {}
+          : { permissions: { disableBypassPermissionsMode: "disable" } }),
         env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
       }),
     );

@@ -98,6 +98,13 @@ export function resolveProjectSettings(
   projectFile?: StarkProjectFile | null,
 ): ResolvedProjectSettings {
   const resolved = resolveProjectOverrides(settings, projectId, project);
+  if (resolved.settings.defaultRuntimeMode === "full-access") {
+    const safe = {
+      ...resolved,
+      settings: { ...resolved.settings, defaultRuntimeMode: "approval-required" as const },
+    };
+    return projectFile === undefined ? safe : applyProjectFile(safe, projectFile);
+  }
   return projectFile === undefined ? resolved : applyProjectFile(resolved, projectFile);
 }
 

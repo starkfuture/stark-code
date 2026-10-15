@@ -3370,6 +3370,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
   searchThread: "orchestration.searchThread",
+  getThreadTurnIndex: "orchestration.getThreadTurnIndex",
   searchThreadStream: "orchestration.searchThreadStream",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   getThreadProjection: "orchestration.getThreadProjection",
@@ -3802,6 +3803,33 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<Orch
 ) {
   override get message(): string {
     return WORKFLOW_SCRIPT_ERROR_MESSAGES[this.reason];
+  }
+}
+
+/** Bounded previews for navigation; message bodies and tool output stay in history pages. */
+export const OrchestrationV2ThreadTurnIndexInput = Schema.Struct({
+  threadId: ThreadId,
+  beforeEntryId: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type OrchestrationV2ThreadTurnIndexInput = typeof OrchestrationV2ThreadTurnIndexInput.Type;
+export const OrchestrationV2ThreadTurnIndexItem = Schema.Struct({
+  entryId: TrimmedNonEmptyString,
+  runId: Schema.NullOr(RunId),
+  userText: Schema.String.check(Schema.isMaxLength(320)),
+  assistantText: Schema.NullOr(Schema.String.check(Schema.isMaxLength(600))),
+});
+export const OrchestrationV2ThreadTurnIndexPage = Schema.Struct({
+  items: Schema.Array(OrchestrationV2ThreadTurnIndexItem).check(Schema.isMaxLength(200)),
+  totalTurns: NonNegativeInt,
+  nextBeforeEntryId: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type OrchestrationV2ThreadTurnIndexPage = typeof OrchestrationV2ThreadTurnIndexPage.Type;
+export class OrchestrationV2ThreadTurnIndexError extends Schema.TaggedError<OrchestrationV2ThreadTurnIndexError>()(
+  "OrchestrationV2ThreadTurnIndexError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not load conversation turns. Please retry.";
   }
 }
 

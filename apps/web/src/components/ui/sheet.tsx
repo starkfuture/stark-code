@@ -10,13 +10,22 @@ const Sheet = SheetPrimitive.Root;
 
 const SheetPortal = SheetPrimitive.Portal;
 
-// Sheets are docked panels, not dialogs: their layer (--z-sheet) sits under dialogs that open
-// from inside them and under anything the app floats above panels.
-function SheetBackdrop({ className, ...props }: SheetPrimitive.Backdrop.Props) {
+// Docked panels share the workspace's floating controls. Modal workspace panels
+// use the dialog layer so those controls cannot intercept their close button.
+type SheetLayer = "panel" | "dialog";
+
+function SheetBackdrop({
+  className,
+  layer = "panel",
+  ...props
+}: SheetPrimitive.Backdrop.Props & {
+  layer?: SheetLayer;
+}) {
   return (
     <SheetPrimitive.Backdrop
       className={cn(
-        "fixed inset-0 z-(--z-sheet) bg-background/60 backdrop-blur-xs transition-all duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "fixed inset-0 bg-background/60 backdrop-blur-xs transition-all duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
+        layer === "dialog" ? "z-50" : "z-(--z-sheet)",
         className,
       )}
       data-slot="sheet-backdrop"
@@ -29,15 +38,18 @@ function SheetViewport({
   className,
   side,
   variant = "default",
+  layer = "panel",
   ...props
 }: SheetPrimitive.Viewport.Props & {
   side?: "right" | "left" | "top" | "bottom";
   variant?: "default" | "inset";
+  layer?: SheetLayer;
 }) {
   return (
     <SheetPrimitive.Viewport
       className={cn(
-        "fixed inset-0 z-(--z-sheet) grid",
+        "fixed inset-0 grid",
+        layer === "dialog" ? "z-50" : "z-(--z-sheet)",
         side === "bottom" && "grid grid-rows-[1fr_auto] pt-12",
         side === "top" && "grid grid-rows-[auto_1fr] pb-12",
         side === "left" && "flex justify-start",
@@ -59,6 +71,7 @@ function SheetPopup({
   transitionDurationMs,
   side = "right",
   variant = "default",
+  layer = "panel",
   style,
   ...props
 }: SheetPrimitive.Popup.Props & {
@@ -67,6 +80,7 @@ function SheetPopup({
   transitionDurationMs?: number;
   side?: "right" | "left" | "top" | "bottom";
   variant?: "default" | "inset";
+  layer?: SheetLayer;
 }) {
   const transitionStyle =
     transitionDurationMs === undefined
@@ -77,6 +91,7 @@ function SheetPopup({
   return (
     <SheetPortal keepMounted={keepMounted}>
       <SheetBackdrop
+        layer={layer}
         className={
           instant
             ? "transition-none! data-ending-style:opacity-100! data-starting-style:opacity-100!"
@@ -84,7 +99,7 @@ function SheetPopup({
         }
         style={transitionStyle}
       />
-      <SheetViewport side={side} variant={variant}>
+      <SheetViewport side={side} variant={variant} layer={layer}>
         <SheetPrimitive.Popup
           className={cn(
             "relative flex max-h-full min-h-0 w-full min-w-0 flex-col bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 transition-[opacity,translate] duration-200 ease-in-out will-change-transform before:pointer-events-none before:absolute before:inset-0 before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:opacity-0 data-starting-style:opacity-0 max-sm:before:hidden dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",

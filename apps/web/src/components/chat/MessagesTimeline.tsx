@@ -1,3 +1,5 @@
+import { useTurnNavigation } from "./useTurnNavigation";
+import { useTurnBookmarks } from "./useTurnBookmarks";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@starkfuture/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
@@ -81,6 +83,7 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent,
   type ReactNode,
 } from "react";
 import {
@@ -688,6 +691,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     setExpandedAttemptIds(paintedExpandedAttemptIds);
   }
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
+  const { bookmarks, toggleBookmark } = useTurnBookmarks(routeThreadKey);
+
   const openPullRequest = useOpenPrLink(citationThreadRef ?? undefined);
   const expandCitedRun = useCallback((runId: RunId) => {
     setExpandedRunIds((current) => (current.has(runId) ? current : new Set([...current, runId])));
@@ -1610,17 +1615,28 @@ const ConversationTimeline = memo(function ConversationTimeline({
     [listRef],
   );
 
-  const selectMinimapItem = useCallback(
-    (item: TimelineMinimapItem) => {
-      onManualNavigation();
+  const scrollToTurn = useCallback(
+    (index: number, animated: boolean) => {
       void listRef.current?.scrollToIndex({
-        index: item.rowIndex,
-        animated: true,
+        index,
+        animated: animated && !prefersReducedMotion,
         viewOffset: 24,
       });
     },
-    [listRef, onManualNavigation],
+    [listRef, prefersReducedMotion],
   );
+  const {
+    selectItem: selectMinimapItem,
+    pending: pendingTurn,
+    cancel: cancelTurnNavigation,
+  } = useTurnNavigation({
+    threadKey: routeThreadKey,
+    items: minimapItems,
+    history: historyControls,
+    historyCursor: loadEarlier?.cursor,
+    onManualNavigation,
+    scrollToTurn,
+  });
 
   if (
     rows.length === 0 &&
@@ -1663,7 +1679,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 onCite={onCiteAssistantText}
               />
             ) : null}
-            {minimapItems.length >= TIMELINE_MINIMAP_MIN_ITEMS ? (
+            {minimapItems.length > 0 ? (
               <div
                 className={cn(
                   "flex shrink-0 px-3 py-1",
@@ -1674,8 +1690,22 @@ const ConversationTimeline = memo(function ConversationTimeline({
                   items={minimapItems}
                   currentId={minimapItems[minimapCurrentIndex ?? -1]?.id ?? null}
                   history={historyControls}
+                  thread={citationThreadRef}
+                  bookmarks={bookmarks}
+                  onToggleBookmark={toggleBookmark}
                   onSelect={selectMinimapItem}
                 />
+              </div>
+            ) : null}
+            {pendingTurn ? (
+              <div
+                className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground"
+                role="status"
+              >
+                Loading selected turn…{" "}
+                <Button size="xs" variant="ghost-muted" onClick={cancelTurnNavigation}>
+                  Cancel
+                </Button>
               </div>
             ) : null}
             <LegendList<MessagesTimelineRow>
@@ -1732,6 +1762,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
               stripMap={minimapStripMap}
               onWheel={forwardMinimapWheel}
               history={historyControls}
+              thread={citationThreadRef}
+              bookmarks={bookmarks}
+              onToggleBookmark={toggleBookmark}
               onSelect={selectMinimapItem}
             />
           </TooltipScrollDismissArea>
@@ -1808,6 +1841,9 @@ export function TimelineMinimap({
   onWheel,
   onSelect,
   history,
+  thread,
+  bookmarks,
+  onToggleBookmark,
 }: {
   hasPersistentGutter: boolean;
   hitStripWidth: number;
@@ -1815,10 +1851,15 @@ export function TimelineMinimap({
   items: ReadonlyArray<TimelineMinimapItem>;
   stripMap: Map<string, HTMLSpanElement>;
   onWheel: (event: WheelEvent) => void;
-  onSelect: (item: TimelineMinimapItem) => void;
+  onSelect: (item: TimelineMinimapItem, animated?: boolean) => void;
   history?: MessagesTimelineHistoryControls | undefined;
+  thread?: ScopedThreadRef | null;
+  bookmarks?: ReadonlySet<string>;
+  onToggleBookmark?: (entryId: string) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  const drag = useRef<{ pointerId: number; lastId: string | null } | null>(null);
+  const suppressClick = useRef(false);
   const wheelTargetRef = useCallback(
     (node: HTMLDivElement | null) => {
       if (!node) return;
@@ -1857,7 +1898,7 @@ export function TimelineMinimap({
   const nextItem = resolvedCurrentIndex === null ? null : (items[resolvedCurrentIndex + 1] ?? null);
 
   const resolveActiveIndexFromPointer = useCallback(
-    (event: MouseEvent<HTMLElement>) => {
+    (event: MouseEvent<HTMLElement> | PointerEvent<HTMLElement>) => {
       const rect = event.currentTarget.getBoundingClientRect();
       return resolveTimelineMinimapIndexFromPointer({
         itemCount: items.length,
@@ -1914,17 +1955,18 @@ export function TimelineMinimap({
             width: resolveTimelineMinimapInteractiveWidth(hitStripWidth, activeItem !== null),
           }}
         >
-          {history?.hasMoreHistory ? (
-            <div className="pointer-events-auto absolute bottom-[calc(100%+1.75rem)] left-0">
-              <TimelineTurnOutline
-                iconOnly
-                items={items}
-                currentId={items[resolvedCurrentIndex ?? -1]?.id ?? null}
-                history={history}
-                onSelect={onSelect}
-              />
-            </div>
-          ) : null}
+          <div className="pointer-events-auto absolute bottom-[calc(100%+1.75rem)] left-0">
+            <TimelineTurnOutline
+              iconOnly
+              items={items}
+              currentId={items[resolvedCurrentIndex ?? -1]?.id ?? null}
+              history={history}
+              thread={thread}
+              bookmarks={bookmarks}
+              onToggleBookmark={onToggleBookmark}
+              onSelect={onSelect}
+            />
+          </div>
           <TimelineMinimapNavigationButton
             direction="previous"
             disabled={previousItem === null}
@@ -1938,6 +1980,10 @@ export function TimelineMinimap({
             className="absolute inset-y-0 left-0 w-full cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
             onBlur={() => setActiveId(null)}
             onClick={(event) => {
+              if (suppressClick.current) {
+                suppressClick.current = false;
+                return;
+              }
               if (timelineMinimapEventTargetsPreview(event.target)) {
                 return;
               }
@@ -1975,8 +2021,46 @@ export function TimelineMinimap({
                 }
               }
             }}
-            onMouseLeave={() => setActiveId(null)}
+            onMouseLeave={() => {
+              if (!drag.current) setActiveId(null);
+            }}
             onMouseMove={updateActiveIndexFromPointer}
+            onPointerDown={(event) => {
+              if (event.button !== 0 || timelineMinimapEventTargetsPreview(event.target)) return;
+              event.preventDefault();
+              const index = resolveActiveIndexFromPointer(event);
+              const item = index === null ? null : items[index];
+              drag.current = { pointerId: event.pointerId, lastId: item?.id ?? null };
+              suppressClick.current = true;
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+              if (item) {
+                setActiveId(item.id);
+                onSelect(item, false);
+              }
+            }}
+            onPointerMove={(event) => {
+              if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+              const index = resolveActiveIndexFromPointer(event);
+              const item = index === null ? null : items[index];
+              if (item && item.id !== drag.current.lastId) {
+                drag.current.lastId = item.id;
+                setActiveId(item.id);
+                onSelect(item, false);
+              }
+            }}
+            onPointerUp={(event) => {
+              if (drag.current?.pointerId !== event.pointerId) return;
+              drag.current = null;
+              event.currentTarget.releasePointerCapture?.(event.pointerId);
+            }}
+            onPointerCancel={() => {
+              drag.current = null;
+              suppressClick.current = false;
+              setActiveId(null);
+            }}
+            onLostPointerCapture={() => {
+              drag.current = null;
+            }}
             onMouseDown={(event) => {
               if (timelineMinimapEventTargetsPreview(event.target)) {
                 return;
@@ -2014,6 +2098,7 @@ export function TimelineMinimap({
                   data-in-view="false"
                   data-current={index === resolvedCurrentIndex ? "true" : "false"}
                   data-minimap-strip
+                  data-bookmarked={bookmarks?.has(item.entryId ?? item.id) ? "true" : "false"}
                   key={item.id}
                   ref={(node) => {
                     if (node) {
@@ -2024,6 +2109,9 @@ export function TimelineMinimap({
                   }}
                   style={{ top }}
                 >
+                  {bookmarks?.has(item.entryId ?? item.id) ? (
+                    <span className="absolute -left-2 top-1/2 size-1 -translate-y-1/2 rounded-full bg-primary" />
+                  ) : null}
                   <span className="absolute inset-0 rounded-full bg-foreground/90 opacity-0 transition-opacity duration-150 group-data-[in-view=true]/strip:opacity-100 group-data-[current=true]/strip:opacity-100" />
                 </span>
               );

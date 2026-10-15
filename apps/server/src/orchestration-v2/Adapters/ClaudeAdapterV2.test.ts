@@ -108,11 +108,16 @@ import {
   projectionFor,
 } from "../testkit/fixtures/shared.ts";
 
-const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
+// Integration fixtures deliberately run in Bypass to isolate provider protocol behavior.
+const OPTED_IN_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
+  allowBypassPermissions: true,
+});
 const AUTO_COMPACT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
+  allowBypassPermissions: true,
   autoCompactWindow: "300000",
 });
 const CUSTOM_MODEL_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
+  allowBypassPermissions: true,
   customModels: [
     // A bare custom slug that shadows the built-in "opus" alias.
     "opus",
@@ -219,6 +224,163 @@ function makeClaudeTestTurnInput(input: {
 }
 
 describe("ClaudeAdapterV2 runtime query policy", () => {
+  const safetyOptions = (
+    extra: Partial<Parameters<typeof ClaudeAdapterV2.makeClaudeQueryOptions>[0]> = {},
+  ) =>
+    ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "permission-guard",
+      resume: false,
+      cwd: "/workspace",
+      ...extra,
+    });
+  it("locks Bypass until the account opts in, without disabling Auto", () => {
+    const options = safetyOptions();
+    assert.deepInclude(options.settings, {
+      permissions: { disableBypassPermissionsMode: "disable" },
+    });
+    assert.notProperty(options.settings, "disableAutoMode");
+    assert.throws(
+      () => safetyOptions({ permissionMode: "bypassPermissions" }),
+      "Enable Allow Bypass",
+    );
+    assert.throws(
+      () => safetyOptions({ allowDangerouslySkipPermissions: true }),
+      "Enable Allow Bypass",
+    );
+    assert.equal(safetyOptions({ permissionMode: "auto" }).permissionMode, "auto");
+  });
+
+  it.each(["allow", "deny", "missing", "aborted"] as const)(
+    "publishing in Bypass obeys the %s host decision",
+    async (decision) => {
+      let calls = 0;
+      const controller = new AbortController();
+      const options = safetyOptions({
+        permissionMode: "bypassPermissions",
+        settings: { ...OPTED_IN_CLAUDE_SETTINGS, allowBypassPermissions: true },
+        ...(decision === "missing"
+          ? {}
+          : {
+              canUseTool: async () => {
+                calls++;
+                if (decision === "aborted") controller.abort();
+                return decision === "deny"
+                  ? { behavior: "deny" as const, message: "Declined" }
+                  : {
+                      behavior: "allow" as const,
+                      updatedInput: { command: "spage publish reviewed-page" },
+                    };
+              },
+            }),
+      });
+      const hook = options.hooks!.PreToolUse![0]!.hooks[0]!;
+      const result = await hook(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "guard",
+          transcript_path: "/tmp/guard",
+          cwd: "/workspace",
+          tool_name: "Bash",
+          tool_input: { command: "spage publish page" },
+          tool_use_id: "publish-1",
+          permission_mode: "bypassPermissions",
+        },
+        "publish-1",
+        { signal: controller.signal },
+      );
+      assert.equal(calls, decision === "missing" ? 0 : 1);
+      assert.deepInclude(result, {
+        hookSpecificOutput:
+          decision === "allow"
+            ? {
+                hookEventName: "PreToolUse",
+                permissionDecision: "allow",
+                updatedInput: { command: "spage publish reviewed-page" },
+              }
+            : decision === "aborted"
+              ? {
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
+                  updatedInput: { command: "spage publish reviewed-page" },
+                }
+              : {
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
+                  permissionDecisionReason:
+                    decision === "deny"
+                      ? "Declined"
+                      : "Publishing requires an interactive approval.",
+                },
+      });
+    },
+  );
+
+  it.each(["Agent", "Task"])("denies inherited Bypass for Claude's %s tool", async (toolName) => {
+    const options = safetyOptions({
+      settings: { ...OPTED_IN_CLAUDE_SETTINGS, allowBypassPermissions: true },
+    });
+    const hook = options.hooks!.PreToolUse![0]!.hooks[0]!;
+    const result = await hook(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "guard",
+        transcript_path: "/tmp/guard",
+        cwd: "/workspace",
+        tool_name: toolName,
+        tool_input: {},
+        tool_use_id: "child-1",
+        permission_mode: "bypassPermissions",
+      },
+      "child-1",
+      { signal: new AbortController().signal },
+    );
+    assert.include(JSON.stringify(result), '"permissionDecision":"deny"');
+  });
+
+  it.each([
+    {
+      toolName: "Bash",
+      permissionMode: "bypassPermissions",
+      agentId: "custom-agent",
+      denied: true,
+    },
+    {
+      toolName: "Write",
+      permissionMode: "bypassPermissions",
+      agentId: "custom-agent",
+      denied: true,
+    },
+    { toolName: "Bash", permissionMode: "bypassPermissions", agentId: undefined, denied: false },
+    { toolName: "Write", permissionMode: "acceptEdits", agentId: "custom-agent", denied: false },
+  ])(
+    "checks custom-agent Bypass on each tool: $toolName $permissionMode $agentId",
+    async ({ toolName, permissionMode, agentId, denied }) => {
+      const options = safetyOptions({
+        permissionMode: "default",
+        settings: { ...OPTED_IN_CLAUDE_SETTINGS, allowBypassPermissions: true },
+      });
+      const hook = options.hooks!.PreToolUse![0]!.hooks[0]!;
+      const result = await hook(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "guard",
+          transcript_path: "/tmp/guard",
+          cwd: "/workspace",
+          tool_name: toolName,
+          tool_input: {},
+          tool_use_id: "custom-agent-tool",
+          permission_mode: permissionMode,
+          ...(agentId === undefined ? {} : { agent_id: agentId }),
+        },
+        "custom-agent-tool",
+        { signal: new AbortController().signal },
+      );
+      if (denied) assert.include(JSON.stringify(result), '"permissionDecision":"deny"');
+      else assert.deepEqual(result, {});
+    },
+  );
+
   it.each([false, true])("requests thinking summaries with resume=%s", (resume) => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
@@ -237,7 +399,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       nativeThreadId: "thinking-thread",
       resume: false,
       cwd: "/workspace",
-      settings: { ...DEFAULT_CLAUDE_SETTINGS, launchArgs: "--thinking-display omitted" },
+      settings: { ...OPTED_IN_CLAUDE_SETTINGS, launchArgs: "--thinking-display omitted" },
     });
     assert.isUndefined(options.thinking);
     assert.equal(options.extraArgs?.["thinking-display"], "omitted");
@@ -271,7 +433,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       nativeThreadId: "native-permission-override",
       resume: false,
       cwd: "/workspace",
-      settings: { ...AUTO_COMPACT_CLAUDE_SETTINGS, launchArgs },
+      settings: { ...AUTO_COMPACT_CLAUDE_SETTINGS, launchArgs, allowBypassPermissions: true },
     });
     assert.equal(options.permissionMode, expected);
     assert.isUndefined(options.extraArgs?.["permission-mode"]);
@@ -301,7 +463,11 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
         ...(policy.allowDangerouslySkipPermissions
           ? { allowDangerouslySkipPermissions: true }
           : {}),
-        settings: { ...DEFAULT_CLAUDE_SETTINGS, launchArgs: "--permission-mode acceptEdits" },
+        settings: {
+          ...OPTED_IN_CLAUDE_SETTINGS,
+          launchArgs: "--permission-mode acceptEdits",
+          allowBypassPermissions: expected === "bypassPermissions",
+        },
       });
       assert.equal(options.permissionMode, expected);
       assert.equal(policy.installPermissionCallback, expected !== "bypassPermissions");
@@ -310,7 +476,11 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
         expected === "bypassPermissions",
       );
       assert.notProperty(options.settings, "disableAutoMode");
-      assert.notProperty(options.settings, "permissions");
+      if (expected !== "bypassPermissions") {
+        assert.deepInclude(options.settings, {
+          permissions: { disableBypassPermissionsMode: "disable" },
+        });
+      }
     },
   );
 
@@ -1110,7 +1280,7 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
         let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,
@@ -1291,7 +1461,7 @@ const captureSdkExecutablePaths = Effect.fn("captureSdkExecutablePaths")(functio
       displayName: undefined,
       environment,
       enabled: true,
-      config: { ...DEFAULT_CLAUDE_SETTINGS, binaryPath },
+      config: { ...OPTED_IN_CLAUDE_SETTINGS, binaryPath },
     },
     {},
   ).pipe(
@@ -1414,7 +1584,7 @@ describe("ClaudeAdapterV2 resume compaction", () => {
         let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,
@@ -1639,7 +1809,7 @@ describe("ClaudeAdapterV2 attachments", () => {
         const offeredMessages: Array<SDKUserMessage> = [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,
@@ -1785,7 +1955,7 @@ describe("ClaudeAdapterV2 attachments", () => {
         let openCount = 0;
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,
@@ -1880,7 +2050,7 @@ describe("ClaudeAdapterV2 native fork", () => {
         }> = [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,
@@ -2172,7 +2342,7 @@ describe("ClaudeAdapterV2 native session identity", () => {
         const openedQueries: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOpenInput> = [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,
@@ -2512,7 +2682,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
       const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
         instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-        settings: options?.settings ?? DEFAULT_CLAUDE_SETTINGS,
+        settings: options?.settings ?? OPTED_IN_CLAUDE_SETTINGS,
         environment: options?.environment ?? {},
         attachmentsDir,
         fileSystem,
@@ -5693,7 +5863,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,
@@ -5948,7 +6118,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
           const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
             instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-            settings: DEFAULT_CLAUDE_SETTINGS,
+            settings: OPTED_IN_CLAUDE_SETTINGS,
             environment: {},
             attachmentsDir,
             fileSystem,
@@ -11045,7 +11215,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,
@@ -11235,7 +11405,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             [];
           const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
             instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-            settings: DEFAULT_CLAUDE_SETTINGS,
+            settings: OPTED_IN_CLAUDE_SETTINGS,
             environment: {},
             attachmentsDir,
             fileSystem,
@@ -11477,7 +11647,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             [];
           const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
             instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-            settings: DEFAULT_CLAUDE_SETTINGS,
+            settings: OPTED_IN_CLAUDE_SETTINGS,
             environment: {},
             attachmentsDir,
             fileSystem,
@@ -11683,7 +11853,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,
@@ -11855,7 +12025,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
           const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
             instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-            settings: DEFAULT_CLAUDE_SETTINGS,
+            settings: OPTED_IN_CLAUDE_SETTINGS,
             environment: {},
             attachmentsDir,
             fileSystem,
@@ -11991,7 +12161,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             [];
           const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
             instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-            settings: DEFAULT_CLAUDE_SETTINGS,
+            settings: OPTED_IN_CLAUDE_SETTINGS,
             environment: {},
             attachmentsDir,
             fileSystem,
@@ -12191,7 +12361,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          settings: DEFAULT_CLAUDE_SETTINGS,
+          settings: OPTED_IN_CLAUDE_SETTINGS,
           environment: {},
           attachmentsDir,
           fileSystem,

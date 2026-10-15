@@ -18,17 +18,22 @@ export function StarkPagesSidebar(props: {
   readonly onClose: () => void;
 }) {
   const { projectRoot, agent, canPublish, onPublishRequest, onClose } = props;
+  const publishingEnabled = canPublish && agent === "claude";
   const frame = useRef<HTMLIFrameElement>(null);
   const trusted = useRef<{ key: string; ready: boolean } | null>(null);
+  const connectionTimer = useRef<number | null>(null);
+  const [retry, setRetry] = useState(0);
   const [discovery, setDiscovery] = useState<{
     projectRoot: string;
+    retry: number;
     mirror: StarkPagesMirror | null;
   } | null>(null);
   const [notice, setNotice] = useState<{ key: string; message: string } | null>(null);
-  const mirror = discovery?.projectRoot === projectRoot ? discovery.mirror : null;
+  const mirror =
+    discovery?.projectRoot === projectRoot && discovery.retry === retry ? discovery.mirror : null;
   const origin = mirror ? `http://127.0.0.1:${mirror.port}` : null;
 
-  const panelKey = `${projectRoot}:${origin ?? ""}`;
+  const panelKey = `${projectRoot}:${origin ?? ""}:${retry}`;
   const mirrorRoot = mirror?.root;
   const mirrorPort = mirror?.port;
   const activeNotice = notice?.key === panelKey ? notice.message : null;
@@ -41,9 +46,9 @@ export function StarkPagesSidebar(props: {
       pending = true;
       try {
         const result = (await window.desktopBridge?.getStarkPagesMirror?.(projectRoot)) ?? null;
-        if (!cancelled) setDiscovery({ projectRoot: projectRoot, mirror: result });
+        if (!cancelled) setDiscovery({ projectRoot, retry, mirror: result });
       } catch {
-        if (!cancelled) setDiscovery({ projectRoot: projectRoot, mirror: null });
+        if (!cancelled) setDiscovery({ projectRoot, retry, mirror: null });
       } finally {
         pending = false;
       }
@@ -56,11 +61,26 @@ export function StarkPagesSidebar(props: {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [projectRoot]);
+  }, [projectRoot, retry]);
 
   useEffect(() => {
     trusted.current = { key: panelKey, ready: false };
   }, [panelKey]);
+  useEffect(() => {
+    if (!origin) return;
+    connectionTimer.current = window.setTimeout(() => {
+      if (trusted.current?.key === panelKey && trusted.current.ready) return;
+      setNotice({
+        key: panelKey,
+        message:
+          "The Pages panel did not connect. Check that the page mirror is running, then retry.",
+      });
+    }, 8000);
+    return () => {
+      if (connectionTimer.current !== null) window.clearTimeout(connectionTimer.current);
+      connectionTimer.current = null;
+    };
+  }, [origin, panelKey]);
   useEffect(() => {
     if (!origin || mirrorRoot === undefined || mirrorPort === undefined) return;
     const sendHost = () => {
@@ -70,7 +90,7 @@ export function StarkPagesSidebar(props: {
             v: 1,
             source: "stark-host",
             type: "host",
-            canPublish: canPublish,
+            canPublish: publishingEnabled,
             agent: agent,
           },
           origin,
@@ -90,34 +110,64 @@ export function StarkPagesSidebar(props: {
           return;
         }
         trusted.current = { key: panelKey, ready: true };
+        if (connectionTimer.current !== null) window.clearTimeout(connectionTimer.current);
+        connectionTimer.current = null;
         setNotice(null);
         sendHost();
         return;
       }
       if (trusted.current?.key !== panelKey || !trusted.current.ready) return;
       if (message.type === "publish-request") {
-        if (!canPublish) {
+        if (!publishingEnabled) {
           setNotice({
             key: panelKey,
-            message: "Publishing works in a Claude thread with the Stark plugin loaded.",
+            message: "Publishing works in native Claude shell mode with the Stark plugin loaded.",
           });
           return;
         }
         // This stages text only. The user sends it, and the plugin's publish guard still asks.
         onPublishRequest(message.page.slug, message.page.title);
       } else if (message.type === "open-external" && isMirrorFollowUrl(message.url, mirrorPort)) {
-        void window.desktopBridge?.openStarkPagesExternal?.({
-          projectRoot: projectRoot,
-          url: message.url,
-        });
+        void window.desktopBridge
+          ?.openStarkPagesExternal?.({ projectRoot, url: message.url })
+          .then((opened) => {
+            if (!opened)
+              setNotice({
+                key: panelKey,
+                message:
+                  "Could not open this page in your browser. Retry after the mirror reconnects.",
+              });
+          })
+          .catch(() => {
+            setNotice({ key: panelKey, message: "Could not open this page in your browser." });
+          });
       } else if (message.type === "open-link" && isOpenableStarkPageLink(message.url)) {
-        void window.desktopBridge?.openStarkPagesLink?.(message.url);
+        void window.desktopBridge
+          ?.openStarkPagesLink?.(message.url)
+          .then((opened) => {
+            if (!opened)
+              setNotice({ key: panelKey, message: "Could not open this link in your browser." });
+          })
+          .catch(() => {
+            setNotice({ key: panelKey, message: "Could not open this link in your browser." });
+          });
       }
     };
     window.addEventListener("message", onMessage);
     sendHost();
-    return () => window.removeEventListener("message", onMessage);
-  }, [origin, mirrorRoot, mirrorPort, panelKey, projectRoot, agent, canPublish, onPublishRequest]);
+    return () => {
+      window.removeEventListener("message", onMessage);
+    };
+  }, [
+    origin,
+    mirrorRoot,
+    mirrorPort,
+    panelKey,
+    projectRoot,
+    agent,
+    publishingEnabled,
+    onPublishRequest,
+  ]);
 
   return (
     <aside
@@ -131,13 +181,16 @@ export function StarkPagesSidebar(props: {
         </Button>
       </div>
       {activeNotice ? (
-        <p role="status" className="border-b border-border px-3 py-2 text-sm text-muted-foreground">
-          {activeNotice}
-        </p>
+        <div className="space-y-2 border-b border-border px-3 py-2 text-sm text-muted-foreground">
+          <p role="status">{activeNotice}</p>
+          <Button size="sm" variant="outline" onClick={() => setRetry((value) => value + 1)}>
+            Retry Pages
+          </Button>
+        </div>
       ) : null}
       {origin && mirror ? (
         <iframe
-          key={`${mirror.root}:${mirror.port}`}
+          key={panelKey}
           ref={frame}
           src={`${origin}/panel`}
           sandbox="allow-scripts allow-same-origin allow-forms"

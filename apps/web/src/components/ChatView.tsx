@@ -1,6 +1,9 @@
 import { NATIVE_AGENT_SHELL_TOGGLE_EVENT, toggleNativeAgentShell } from "../nativeAgentShell";
+import { requestConfirmDialog } from "../confirmDialog";
 import { NativeAgentShell, nativeAgentTerminalId } from "./NativeAgentShell";
-import { StarkPagesSidebar } from "./StarkPagesSidebar";
+import { StarkPagesPanel } from "./StarkPagesPanel";
+import { SideWorkButton, SideWorkPanel } from "./chat/SideWorkPanel";
+import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
 import { CheckpointRestoreChoices } from "./chat/CheckpointRestoreChoices";
 import {
   userShellCommandAvailability,
@@ -414,6 +417,7 @@ import {
 import { type ReviewCommentContext } from "../reviewCommentContext";
 import { environmentCatalog } from "../connection/catalog";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
+import { isStarkPagesLocalConnectionTarget } from "../connection/starkPagesConnection";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
@@ -2285,6 +2289,8 @@ export default function ChatView(props: ChatViewProps) {
   const [nativeShellThreadKey, setNativeShellThreadKey] = useState<string | null>(null);
   const [nativeShellPreparing, setNativeShellPreparing] = useState(false);
   const [nativeShellFocusRequest, setNativeShellFocusRequest] = useState(1);
+  const [sideWorkThreadKey, setSideWorkThreadKey] = useState<string | null>(null);
+  const sideWorkOpen = sideWorkThreadKey === activeThreadKey && activeThreadKey !== null;
   const [pagesProjectKeys, setPagesProjectKeys] = useState<ReadonlySet<string>>(new Set());
   const [nativeShellSelection, setNativeShellSelection] = useState<{
     instanceId: ProviderInstanceId;
@@ -2715,13 +2721,23 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeProjectRef, activeThreadRef]);
   const activeEnvironment =
     activeThread == null ? null : (environmentById.get(activeThread.environmentId) ?? null);
-  const pagesAvailable =
-    isElectron &&
-    activeProject !== null &&
-    activeEnvironment !== null &&
-    isDesktopLocalConnectionTarget(activeEnvironment.entry.target);
+  const pagesTarget = activeEnvironment?.entry.target;
+  const hasPagesWorkspace = activeProject !== null;
+  const pagesAvailable = useMemo(() => {
+    if (!isElectron || !hasPagesWorkspace || !pagesTarget) return false;
+    try {
+      return isStarkPagesLocalConnectionTarget(
+        pagesTarget,
+        window.desktopBridge?.getLocalEnvironmentBootstraps() ?? [],
+      );
+    } catch {
+      return false;
+    }
+  }, [hasPagesWorkspace, pagesTarget]);
   const pagesOpen =
     pagesAvailable && activeProjectKey !== null && pagesProjectKeys.has(activeProjectKey);
+  const pagesInline = pagesOpen && !shouldUsePlanSidebarSheet && !rightPanelOpen;
+  const sideWorkInline = sideWorkOpen && !shouldUsePlanSidebarSheet && !rightPanelOpen;
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
   const activeEnvironmentUnavailable =
     activeEnvironment !== null && activeEnvironmentConnectionPhase !== "connected";
@@ -5458,13 +5474,24 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   const handleRuntimeModeChange = useCallback(
-    (mode: RuntimeMode) => {
-      if (mode === runtimeMode) return;
-      setComposerDraftRuntimeMode(composerDraftTarget, mode);
-      if (isLocalDraftThread) {
-        setDraftThreadContext(composerDraftTarget, { runtimeMode: mode });
+    async (mode: RuntimeMode): Promise<boolean> => {
+      if (mode === runtimeMode && mode !== "full-access") return true;
+      const apply = () => {
+        setComposerDraftRuntimeMode(composerDraftTarget, mode);
+        if (isLocalDraftThread) {
+          setDraftThreadContext(composerDraftTarget, { runtimeMode: mode });
+        }
+        scheduleComposerFocus();
+      };
+      if (mode === "full-access") {
+        const confirmed = await requestConfirmDialog(
+          "Enable Bypass permissions for this chat? Claude may run commands and change files without asking. Child agents will still require approvals. Publishing still requires your confirmation.",
+          { variant: "destructive" },
+        );
+        if (!confirmed) return false;
       }
-      scheduleComposerFocus();
+      apply();
+      return true;
     },
     [
       isLocalDraftThread,
@@ -11882,8 +11909,18 @@ export default function ChatView(props: ChatViewProps) {
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
-            actions={
+            actions={(closeTools) => (
               <>
+                {activeProject && isServerThread ? (
+                  <SideWorkButton
+                    open={sideWorkOpen}
+                    onToggle={() => {
+                      closeTools();
+                      closePages();
+                      setSideWorkThreadKey(sideWorkOpen ? null : activeThreadKey);
+                    }}
+                  />
+                ) : null}
                 {pagesAvailable ? (
                   <Button
                     variant="ghost"
@@ -11891,6 +11928,8 @@ export default function ChatView(props: ChatViewProps) {
                     aria-pressed={pagesOpen}
                     onClick={() => {
                       if (!activeProjectKey) return;
+                      closeTools();
+                      setSideWorkThreadKey(null);
                       setPagesProjectKeys((current) => {
                         const next = new Set(current);
                         if (next.has(activeProjectKey)) next.delete(activeProjectKey);
@@ -11921,7 +11960,10 @@ export default function ChatView(props: ChatViewProps) {
                       serverConfig?.environment.capabilities.nativeAgentShell !== true ||
                       (selectedProvider !== "codex" && selectedProvider !== "claudeAgent"))
                   }
-                  onClick={toggleNativeAgentShell}
+                  onClick={() => {
+                    closeTools();
+                    void toggleNativeAgentShell();
+                  }}
                 >
                   {nativeShellPreparing
                     ? "Opening shell…"
@@ -11930,7 +11972,7 @@ export default function ChatView(props: ChatViewProps) {
                       : "Shell mode"}
                 </Button>
               </>
-            }
+            )}
           />
         </header>
 
@@ -11980,7 +12022,10 @@ export default function ChatView(props: ChatViewProps) {
         <div className="relative flex min-h-0 min-w-0 flex-1">
           {nativeShellMode && activeThreadRef && nativeShellSelection && activeProject ? (
             <div
-              className={cn("absolute inset-y-0 left-0 z-30", pagesOpen ? "right-96" : "right-0")}
+              className={cn(
+                "absolute inset-y-0 left-0 z-30",
+                pagesInline || sideWorkInline ? "right-96" : "right-0",
+              )}
             >
               <NativeAgentShell
                 key={`${activeThreadKey}:${nativeShellSelection.instanceId}`}
@@ -12582,53 +12627,93 @@ export default function ChatView(props: ChatViewProps) {
             ) : null}
           </ThreadFindCanvas>
           {/* end chat column */}
+          {sideWorkOpen && activeProject ? (
+            sideWorkInline ? (
+              <div className="min-h-0 w-96 shrink-0">
+                <SideWorkPanel
+                  key={activeThreadKey}
+                  parent={activeThread}
+                  projection={serverProjection}
+                  workspaceRoot={activeProject.workspaceRoot}
+                  nativeShellMode={nativeShellMode}
+                  onOpenThread={onOpenRelatedThread}
+                  onClose={() => setSideWorkThreadKey(null)}
+                />
+              </div>
+            ) : (
+              <Sheet
+                open
+                onOpenChange={(open) => {
+                  if (!open) setSideWorkThreadKey(null);
+                }}
+              >
+                <SheetPopup
+                  side="right"
+                  layer="dialog"
+                  showCloseButton={false}
+                  aria-describedby={undefined}
+                >
+                  <div className="sr-only">
+                    <SheetTitle>Workspace</SheetTitle>
+                  </div>
+                  <SideWorkPanel
+                    key={activeThreadKey}
+                    parent={activeThread}
+                    projection={serverProjection}
+                    workspaceRoot={activeProject.workspaceRoot}
+                    nativeShellMode={nativeShellMode}
+                    onOpenThread={onOpenRelatedThread}
+                    onClose={() => setSideWorkThreadKey(null)}
+                  />
+                </SheetPopup>
+              </Sheet>
+            )
+          ) : null}
           {pagesOpen && activeProject ? (
-            <div className="min-h-0 w-96 shrink-0">
-              <StarkPagesSidebar
-                key={activeProjectKey}
-                projectRoot={activeProject.workspaceRoot}
-                agent={
-                  (nativeShellMode ? nativeShellSelection?.driver : selectedProvider) ===
-                  "claudeAgent"
-                    ? "claude"
-                    : "codex"
-                }
-                // Chat publishing is enabled only after the SDK's plugin loading and publish guard
-                // have been verified live. The native CLI keeps its own plugin and approval flow.
-                canPublish={
+            <StarkPagesPanel
+              key={activeThreadWorktreePath ?? activeProject.workspaceRoot}
+              inline={pagesInline}
+              projectRoot={activeThreadWorktreePath ?? activeProject.workspaceRoot}
+              agent={
+                (nativeShellMode ? nativeShellSelection?.driver : selectedProvider) ===
+                "claudeAgent"
+                  ? "claude"
+                  : "codex"
+              }
+              // Chat publishing is enabled only after the SDK's plugin loading and publish guard
+              // have been verified live. The native CLI keeps its own plugin and approval flow.
+              canPublish={
+                nativeShellMode &&
+                nativeShellSelection?.driver === "claudeAgent" &&
+                pagesPluginKnown &&
+                canOperateTerminal
+              }
+              onPublishRequest={(slug) => {
+                const command = `/stark-workbench:publish ${slug}`;
+                if (
                   nativeShellMode &&
                   nativeShellSelection?.driver === "claudeAgent" &&
-                  pagesPluginKnown &&
+                  activeThreadRef &&
                   canOperateTerminal
+                ) {
+                  // Deliberately no newline: the user reviews this in Claude and presses Enter.
+                  void writeTerminal({
+                    environmentId: activeThreadRef.environmentId,
+                    input: {
+                      threadId: activeThreadRef.threadId,
+                      terminalId: nativeAgentTerminalId(nativeShellSelection.instanceId),
+                      data: command,
+                    },
+                  }).then((result) => {
+                    if (result._tag === "Success") setNativeShellFocusRequest((value) => value + 1);
+                  });
+                } else {
+                  setComposerDraftPrompt(composerDraftTarget, command);
+                  focusComposer();
                 }
-                onPublishRequest={(slug) => {
-                  const command = `/stark-workbench:publish ${slug}`;
-                  if (
-                    nativeShellMode &&
-                    nativeShellSelection?.driver === "claudeAgent" &&
-                    activeThreadRef &&
-                    canOperateTerminal
-                  ) {
-                    // Deliberately no newline: the user reviews this in Claude and presses Enter.
-                    void writeTerminal({
-                      environmentId: activeThreadRef.environmentId,
-                      input: {
-                        threadId: activeThreadRef.threadId,
-                        terminalId: nativeAgentTerminalId(nativeShellSelection.instanceId),
-                        data: command,
-                      },
-                    }).then((result) => {
-                      if (result._tag === "Success")
-                        setNativeShellFocusRequest((value) => value + 1);
-                    });
-                  } else {
-                    setComposerDraftPrompt(composerDraftTarget, command);
-                    focusComposer();
-                  }
-                }}
-                onClose={closePages}
-              />
-            </div>
+              }}
+              onClose={closePages}
+            />
           ) : null}
         </div>
         {/* end horizontal flex container */}

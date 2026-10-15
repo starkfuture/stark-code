@@ -581,6 +581,29 @@ export function resolveRuntimeMode(
   );
 }
 
+/** Only new child work is downgraded; stopping an existing Bypass run must remain possible. */
+export function resolveChildRuntimeMode(
+  parentMode: RuntimeMode,
+  requested: OrchestratorMcpRuntimeMode | undefined,
+  target?: Pick<ResolvedTarget, "modelSelection" | "supportedRuntimeModes">,
+): Effect.Effect<RuntimeMode, OrchestratorMcpFailure> {
+  if (requested === "full-access") {
+    return Effect.fail(
+      failure(
+        "runtime_mode_escalation_denied",
+        "Child agents cannot use Bypass permissions. Select Manual, Accept edits, Auto or Plan.",
+      ),
+    );
+  }
+  return resolveRuntimeMode(
+    parentMode === "full-access" ? "auto" : parentMode,
+    parentMode === "full-access" && (requested === undefined || requested === "inherit")
+      ? "approval-required"
+      : requested,
+    target,
+  );
+}
+
 export function resolveInteractionMode(
   parentMode: ProviderInteractionMode,
   requested: OrchestratorMcpInteractionMode | undefined,
@@ -1646,6 +1669,9 @@ const make = Effect.gen(function* () {
         const derivedTitle = input.prompt.split("\n")[0]?.trim() ?? "";
         const title =
           input.title ?? (derivedTitle.length > 0 ? derivedTitle.slice(0, 80) : "Scheduled task");
+        const runtimeMode = bindToCurrentThread
+          ? limits.runtimeMode
+          : yield* resolveChildRuntimeMode(limits.runtimeMode, undefined);
         const upsertInput: ScheduledTaskUpsertInput = {
           title,
           prompt: input.prompt,
@@ -1655,7 +1681,7 @@ const make = Effect.gen(function* () {
           threadId: bindToCurrentThread && parent !== undefined ? parent.thread.id : null,
           workspaceStrategy: scheduledTaskWorkspaceStrategy(bindToCurrentThread),
           modelSelection,
-          runtimeMode: limits.runtimeMode,
+          runtimeMode,
           interactionMode: limits.interactionMode,
           createdBy: "agent",
           creationSource: "mcp",
@@ -1993,7 +2019,7 @@ const make = Effect.gen(function* () {
           providers,
           skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
         });
-        const runtimeMode = yield* resolveRuntimeMode(
+        const runtimeMode = yield* resolveChildRuntimeMode(
           parent.thread.runtimeMode,
           input.runtimeMode,
           target,
@@ -2310,7 +2336,7 @@ const make = Effect.gen(function* () {
                 target: request.target,
                 providers,
               });
-              const runtimeMode = yield* resolveRuntimeMode(
+              const runtimeMode = yield* resolveChildRuntimeMode(
                 parent.thread.runtimeMode,
                 request.runtimeMode,
                 target,

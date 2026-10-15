@@ -1135,6 +1135,7 @@ export function makeClaudeQueryOptions(input: {
   const {
     "permission-mode": launchArgPermissionMode,
     "dangerously-skip-permissions": launchArgSkipPermissions,
+    "allow-dangerously-skip-permissions": launchArgAllowSkipPermissions,
     ...extraArgs
   } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
   const requestThinkingSummaries =
@@ -1171,6 +1172,10 @@ export function makeClaudeQueryOptions(input: {
       : {};
   effectiveQuerySettings = {
     ...current,
+    ...(input.canUseTool === undefined ? {} : { disableAllHooks: false }),
+    ...(input.settings?.allowBypassPermissions === true
+      ? {}
+      : { permissions: { ...current.permissions, disableBypassPermissionsMode: "disable" } }),
     env: { ...current.env, ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
   } as ClaudeSdkSettings;
   // The thread's selected mode wins over account launch arguments. Without a
@@ -1183,10 +1188,80 @@ export function makeClaudeQueryOptions(input: {
     (launchArgSkipPermissions === null || launchArgSkipPermissions === "true"
       ? "bypassPermissions"
       : "default");
+  if (
+    (permissionMode === "bypassPermissions" ||
+      input.allowDangerouslySkipPermissions === true ||
+      launchArgAllowSkipPermissions === null ||
+      launchArgAllowSkipPermissions === "true") &&
+    input.settings?.allowBypassPermissions !== true
+  ) {
+    throw new Error(
+      "Enable Allow Bypass permissions in this Claude account's settings before selecting Bypass.",
+    );
+  }
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
     permissionMode,
+    hooks: {
+      PreToolUse: [
+        {
+          hooks: [
+            async (hook, toolUseId, options) => {
+              if (hook.hook_event_name !== "PreToolUse") return {};
+              if (
+                (hook.permission_mode ?? permissionMode) === "bypassPermissions" &&
+                (hook.agent_id !== undefined || /^(?:Agent|Task)$/.test(hook.tool_name))
+              ) {
+                return {
+                  hookSpecificOutput: {
+                    hookEventName: "PreToolUse",
+                    permissionDecision: "deny",
+                    permissionDecisionReason:
+                      "Child agents cannot use Bypass permissions. Switch this chat to Manual, Accept edits or Auto before starting an agent, and remove Bypass from custom agent definitions.",
+                  },
+                };
+              }
+              if (!isStarkPublishRequest(hook.tool_name, hook.tool_input)) return {};
+              const result =
+                input.canUseTool === undefined
+                  ? {
+                      behavior: "deny" as const,
+                      message: "Publishing requires an interactive approval.",
+                    }
+                  : await input.canUseTool(
+                      hook.tool_name,
+                      typeof hook.tool_input === "object" && hook.tool_input !== null
+                        ? (hook.tool_input as Record<string, unknown>)
+                        : {},
+                      {
+                        signal: options.signal,
+                        toolUseID: toolUseId ?? hook.tool_use_id,
+                        requestId: `stark-publish-${toolUseId ?? hook.tool_use_id}`,
+                        decisionReason:
+                          "Publishing always requires approval, including in Bypass mode.",
+                      },
+                    );
+              return {
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse",
+                  permissionDecision:
+                    result?.behavior === "allow" && !options.signal.aborted ? "allow" : "deny",
+                  ...(result?.behavior === "allow"
+                    ? result.updatedInput === undefined
+                      ? {}
+                      : { updatedInput: result.updatedInput }
+                    : {
+                        permissionDecisionReason:
+                          result?.message ?? "Publishing requires an interactive approval.",
+                      }),
+                },
+              };
+            },
+          ],
+        },
+      ],
+    },
     includePartialMessages: true,
     includeHookEvents: true,
     enableFileCheckpointing: true,
@@ -1266,8 +1341,6 @@ export const CLAUDE_READ_ONLY_STARK_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__stark-code__stark_environment_read",
   "mcp__stark-code__stark_queue_list",
   "mcp__stark-code__stark_queue_read",
-  "mcp__stark-code__html_preview",
-  "mcp__stark-code__html_render",
 ];
 
 // Claude Code aborts an HTTP MCP call after 60 s ("The operation timed out.")

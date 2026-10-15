@@ -87,6 +87,10 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         }
         const targetThread: OrchestrationV2AppThread = {
           ...input.sourceProjection.thread,
+          runtimeMode:
+            input.sourceProjection.thread.runtimeMode === "full-access"
+              ? "approval-required"
+              : input.sourceProjection.thread.runtimeMode,
           createdBy: input.createdBy,
           creationSource: input.creationSource,
           id: input.targetThreadId,

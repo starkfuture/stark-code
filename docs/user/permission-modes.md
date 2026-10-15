@@ -26,8 +26,14 @@ changes; select a working mode to leave planning. Manual remains the initial def
 mode changes apply to the next turn. Auto uses Claude's own action review and can still ask
 you for approval. Your organization's Claude settings can restrict which modes are available.
 
+Bypass is hidden until you enable **Allow Bypass permissions** in that Claude account's
+provider settings and confirm. Selecting it for a chat asks again. It cannot be a new-chat
+default, and child agents, forks and scheduled new chats do not inherit it. Publishing
+still asks for approval.
+
 In native shell mode, use Claude's own mode controls, including **Shift+Tab**. Explicit
-permission modes in the provider's launch arguments are honored.
+permission modes in the provider's launch arguments are honored; flags that bypass
+permissions require the same account opt-in. Child agents cannot run in Bypass.
 
 ## Remember an approval
 

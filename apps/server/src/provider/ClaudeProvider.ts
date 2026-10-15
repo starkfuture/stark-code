@@ -61,6 +61,17 @@ const CLAUDE_PRESENTATION = {
   showInteractionModeToggle: true,
   reportsContextWindow: true,
 } as const;
+function claudePresentation(settings: ClaudeSettings) {
+  return {
+    ...CLAUDE_PRESENTATION,
+    supportedRuntimeModes: [
+      "approval-required" as const,
+      "auto-accept-edits" as const,
+      "auto" as const,
+      ...(settings.allowBypassPermissions === true ? ["full-access" as const] : []),
+    ],
+  };
+}
 function toTitleCaseWords(value: string): string {
   const parts: Array<string> = [];
   for (const part of value.split(/[\s_-]+/g)) {
@@ -515,7 +526,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   if (!claudeSettings.enabled) {
     return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
+      presentation: claudePresentation(claudeSettings),
       enabled: false,
       checkedAt,
       models: allModels,
@@ -541,7 +552,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       errorTag: error._tag,
     });
     return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
+      presentation: claudePresentation(claudeSettings),
       enabled: claudeSettings.enabled,
       checkedAt,
       models: allModels,
@@ -559,7 +570,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   if (Option.isNone(versionProbe.success)) {
     return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
+      presentation: claudePresentation(claudeSettings),
       enabled: claudeSettings.enabled,
       checkedAt,
       models: allModels,
@@ -583,7 +594,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       stderrLength: version.stderr.length,
     });
     return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
+      presentation: claudePresentation(claudeSettings),
       enabled: claudeSettings.enabled,
       checkedAt,
       models: allModels,
@@ -614,7 +625,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   if (!capabilities) {
     return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
+      presentation: claudePresentation(claudeSettings),
       enabled: claudeSettings.enabled,
       checkedAt,
       models,
@@ -633,7 +644,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   if (claudeAuthStatus(capabilities) === "unauthenticated") {
     return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
+      presentation: claudePresentation(claudeSettings),
       enabled: claudeSettings.enabled,
       checkedAt,
       models,
@@ -670,7 +681,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       ? yield* resolveResetCredits(parsedVersion)
       : undefined;
   return buildServerProvider({
-    presentation: CLAUDE_PRESENTATION,
+    presentation: claudePresentation(claudeSettings),
     enabled: claudeSettings.enabled,
     checkedAt,
     models,
@@ -709,7 +720,7 @@ export const makePendingClaudeProvider = (
 
     if (!claudeSettings.enabled) {
       return buildServerProvider({
-        presentation: CLAUDE_PRESENTATION,
+        presentation: claudePresentation(claudeSettings),
         enabled: false,
         checkedAt,
         models,
@@ -724,7 +735,7 @@ export const makePendingClaudeProvider = (
     }
 
     return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
+      presentation: claudePresentation(claudeSettings),
       enabled: true,
       checkedAt,
       models,

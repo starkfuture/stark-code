@@ -1,5 +1,8 @@
 import {
   OrchestrationV2SearchThreadError,
+  OrchestrationV2ThreadTurnIndexInput,
+  OrchestrationV2ThreadTurnIndexPage,
+  OrchestrationV2ThreadTurnIndexError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
 } from "./orchestrationV2.ts";
@@ -1743,6 +1746,15 @@ const WsOrchestrationV2GetFullThreadDiffRpc = Rpc.make(
   },
 );
 
+const WsOrchestrationV2ThreadTurnIndexRpc = Rpc.make(
+  ORCHESTRATION_V2_WS_METHODS.getThreadTurnIndex,
+  {
+    payload: OrchestrationV2ThreadTurnIndexInput,
+    success: OrchestrationV2ThreadTurnIndexPage,
+    error: Schema.Union([OrchestrationV2ThreadTurnIndexError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsOrchestrationV2SearchThreadRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.searchThread, {
   payload: OrchestrationV2SearchThreadInput,
   success: OrchestrationV2SearchThreadResult,
@@ -2180,6 +2192,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2GetFullThreadDiffRpc,
   WsOrchestrationV2SearchThreadsRpc,
   WsOrchestrationV2SearchThreadRpc,
+  WsOrchestrationV2ThreadTurnIndexRpc,
   WsOrchestrationV2SearchThreadStreamRpc,
   WsOrchestrationV2GetArchivedShellSnapshotRpc,
   WsOrchestrationV2GetThreadProjectionRpc,

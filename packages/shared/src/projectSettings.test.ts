@@ -42,7 +42,7 @@ describe("resolveProjectSettings", () => {
       },
       projectId,
     );
-    expect(resolved.settings.defaultRuntimeMode).toBe("full-access");
+    expect(resolved.settings.defaultRuntimeMode).toBe("approval-required");
     expect(resolved.sources.defaultRuntimeMode).toBe("environment");
     expect(
       hasProjectSettingsOverrides({

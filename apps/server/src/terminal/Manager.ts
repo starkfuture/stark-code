@@ -1290,9 +1290,19 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
         if (instance === undefined || instance.enabled === false)
           return yield* new TerminalProviderInstanceNotFoundError({ providerInstanceId });
         const home = yield* HostProcess.HomeDirectory;
+        const nativePlatform = yield* HostProcess.Platform;
+        const nodeExecutable = (yield* HostProcess.IsExecutable)
+          ? "node"
+          : yield* HostProcess.ExecutablePath;
         const launch = yield* Effect.try({
           try: () =>
-            nativeAgentLaunch({ driver: instance.driver, config: instance.config ?? {}, home }),
+            nativeAgentLaunch({
+              driver: instance.driver,
+              config: instance.config ?? {},
+              home,
+              platform: nativePlatform,
+              nodeExecutable,
+            }),
           catch: (cause) =>
             cause instanceof NativeAgentLaunchRefused
               ? new TerminalNativeLaunchRefusedError({

@@ -679,6 +679,14 @@ const CLAUDE_AUTO_COMPACT_WINDOW_PATTERN = /^(?:|[1-9]\d{5}|1000000)$/;
 
 export const ClaudeSettings = makeProviderSettingsSchema(
   {
+    allowBypassPermissions: Schema.optionalKey(Schema.Boolean).pipe(
+      Schema.annotateKey({
+        title: "Allow Bypass permissions",
+        description:
+          "Allow explicitly confirmed Bypass sessions. Never used as a new-thread default or inherited by child agents.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
     enabled: Schema.Boolean.pipe(
       Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
@@ -730,7 +738,7 @@ export const ClaudeSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["binaryPath", "homePath", "autoCompactWindow", "launchArgs"],
+    order: ["binaryPath", "homePath", "autoCompactWindow", "allowBypassPermissions", "launchArgs"],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;

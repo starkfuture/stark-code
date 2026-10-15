@@ -53,7 +53,10 @@ it("selects native Claude modes and leaves Plan when Manual or Auto is selected"
           runtimeMode={runtimeMode}
           interactionMode={interactionMode}
           runtimeModeOptions={runtimeModeOptionsForProvider("claudeAgent")}
-          onRuntimeModeChange={setRuntimeMode}
+          onRuntimeModeChange={(mode) => {
+            setRuntimeMode(mode);
+            return true;
+          }}
           onToggleInteractionMode={() =>
             setInteractionMode((mode) => (mode === "plan" ? "default" : "plan"))
           }
@@ -88,3 +91,52 @@ it("selects native Claude modes and leaves Plan when Manual or Auto is selected"
     expect(renderer!.root.findByType("select").props.value).toBe(mode);
   }
 });
+
+it.each([false, true])(
+  "keeps the compact picker in Plan until Bypass is accepted=%s",
+  async (accepted) => {
+    let confirm!: (value: boolean) => void;
+    const pending = new Promise<boolean>((resolve) => {
+      confirm = resolve;
+    });
+    function Composer() {
+      const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>("approval-required");
+      const [interactionMode, setInteractionMode] = useState<ProviderInteractionMode>("plan");
+      return (
+        <>
+          <output>
+            {runtimeMode}:{interactionMode}
+          </output>
+          <CompactComposerControlsMenu
+            combinePlanMode
+            showInteractionModeToggle
+            runtimeMode={runtimeMode}
+            interactionMode={interactionMode}
+            runtimeModeOptions={runtimeModeOptionsForProvider("claudeAgent")}
+            onRuntimeModeChange={async (mode) => {
+              const confirmed = await pending;
+              if (confirmed) setRuntimeMode(mode);
+              return confirmed;
+            }}
+            onToggleInteractionMode={() =>
+              setInteractionMode((mode) => (mode === "plan" ? "default" : "plan"))
+            }
+          />
+        </>
+      );
+    }
+    await act(async () => {
+      renderer = create(<Composer />);
+    });
+    await act(async () =>
+      renderer!.root.findByType("select").props.onChange({ target: { value: "full-access" } }),
+    );
+    expect(renderer!.root.findByType("select").props.value).toBe("plan");
+    expect(renderer!.root.findByType("output").children.join("")).toBe("approval-required:plan");
+    await act(async () => confirm(accepted));
+    expect(renderer!.root.findByType("select").props.value).toBe(accepted ? "full-access" : "plan");
+    expect(renderer!.root.findByType("output").children.join("")).toBe(
+      accepted ? "full-access:default" : "approval-required:plan",
+    );
+  },
+);

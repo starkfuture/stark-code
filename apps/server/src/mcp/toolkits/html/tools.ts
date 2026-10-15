@@ -20,7 +20,7 @@ const Html = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512_0
 });
 
 const PAGE_RULES =
-  'Write one self-contained document with inline <style> and <script>. Local images written as absolute file paths (src="/abs/shot.png", CSS url(/abs/bg.webp), or a JS string) are inlined automatically; remote http(s) URLs, such as a CDN chart library, load as-is.';
+  'Write one self-contained document with inline <style> and <script>. Local images written as absolute file paths (src="/abs/shot.png", CSS url(/abs/bg.webp), or a JS string) are inlined automatically. Network access is blocked: embed libraries, fonts and images rather than referencing a CDN. Forms, nested pages and workers are disabled.';
 
 export const HtmlPreviewTool = Tool.make("html_preview", {
   description: `Render an HTML page in Stark's headless browser and get back a PNG screenshot, contentHeight (the height the page needs at this width), and its console output: log, info, warning, error, and uncaught exceptions, with stack traces pointing into page.html. console.log is a fine way to report your own checks. Use it to check and iterate on a page before html_render. The first preview on a machine can report that Stark is still installing its preview browser; call again a minute later. ${PAGE_RULES} The page gets the theme variables and layout described in html_render.`,
@@ -63,14 +63,13 @@ export const HtmlPreviewTool = Tool.make("html_preview", {
   ],
 })
   .annotate(Tool.Title, "Preview HTML")
-  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, true);
 
-// Read-only in the MCP sense: it shows a page in the caller's own thread and
-// touches no workspace, so plan mode and read-only sandboxes can use it.
-// Open-world, since the page may load remote resources, as in a preview.
+// Rendering creates an attachment and may read local images. Do not preapprove
+// it as a read-only operation even though the resulting document is offline.
 const HtmlRenderTool = Tool.make(HTML_RENDER_TOOL_NAME, {
   description: `Show a finished HTML page (chart, table, diagram, collage, mockup) inline in this thread, above your final text reply; call it before writing that reply. The reader already sees the page, so the reply should not announce it, say where it is, or restate it: add only what the page doesn't say. Preview with html_preview first. Stark fits the frame to the page's height at each reader's width. A height below the page's contentHeight caps the frame there, and the rest scrolls inside it. ${PAGE_RULES} ${HTML_RENDER_LAYOUT_GUIDE} ${HTML_RENDER_THEME_GUIDE}`,
   parameters: Schema.Struct({
@@ -101,7 +100,7 @@ const HtmlRenderTool = Tool.make(HTML_RENDER_TOOL_NAME, {
   ],
 })
   .annotate(Tool.Title, "Render HTML")
-  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, true);

@@ -18,6 +18,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import {
@@ -1995,6 +1996,86 @@ describe("OrchestratorMcpService provider resolution", () => {
         ),
       );
 
+    it.effect("downgrades new scheduled chats from Bypass while preserving bound-chat mode", () =>
+      Effect.gen(function* () {
+        const callerId = ThreadId.make("thread:scheduled-bypass-parent");
+        const shell = { ...liveThreadShell(callerId, { runtimeMode: "full-access" }), projectId };
+        const saved = yield* Ref.make<
+          ReadonlyArray<Pick<ScheduledTask, "threadId" | "runtimeMode">>
+        >([]);
+        const layer = layerOrchestratorService.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              ServerSettings.layerTest(),
+              Layer.mock(ThreadManagementService.ThreadManagementService)({
+                getThreadRecords: () => Effect.succeed(idleThreadProjection(shell)),
+                getThreadShell: () => Effect.succeed(shell),
+              }),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+              Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+                list: () => Effect.succeed([]),
+              }),
+              Layer.mock(ProjectService.ProjectService)({
+                getById: () =>
+                  Effect.succeed(
+                    Option.some({
+                      id: projectId,
+                      title: "Scheduled project",
+                      workspaceRoot: "/work",
+                      defaultModelSelection: shell.modelSelection,
+                      scripts: [],
+                      createdAt: "2026-10-15T00:00:00Z",
+                      updatedAt: "2026-10-15T00:00:00Z",
+                      deletedAt: null,
+                    }),
+                  ),
+              }),
+              Layer.mock(SecretRequests.SecretRequests)({}),
+              Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+                upsert: (input) =>
+                  Ref.update(saved, (current) => [
+                    ...current,
+                    { threadId: input.threadId ?? null, runtimeMode: input.runtimeMode },
+                  ]).pipe(
+                    Effect.as({
+                      task: task({
+                        threadId: input.threadId ?? null,
+                        runtimeMode: input.runtimeMode,
+                      }),
+                    }),
+                  ),
+              }),
+            ),
+          ),
+        );
+        const mcp = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
+          Effect.provide(layer),
+        );
+        const caller: McpInvocationScope = {
+          ...supervisedClient,
+          client: undefined,
+          thread: {
+            threadId: callerId,
+            providerSessionId: "scheduled-bypass",
+            providerInstanceId: shell.providerInstanceId,
+          },
+        };
+        for (const bindToCurrentThread of [false, true]) {
+          yield* mcp.scheduleTask(caller, {
+            prompt: "Review the changes",
+            projectId,
+            bindToCurrentThread,
+            schedule: { type: "interval", everyMs: 60_000 },
+          });
+        }
+        assert.deepEqual(yield* Ref.get(saved), [
+          { threadId: null, runtimeMode: "approval-required" },
+          { threadId: callerId, runtimeMode: "full-access" },
+        ]);
+      }),
+    );
+
     it.effect("hides a webhook URL from a caller below the task's modes", () =>
       Effect.gen(function* () {
         const upserted = yield* Ref.make(0);
@@ -2187,16 +2268,26 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
     );
 
-    it.effect("steps an inherited mode down to the broadest one the provider offers", () =>
+    it.effect("never inherits Bypass and steps other modes down to a supported mode", () =>
       Effect.gen(function* () {
         assert.equal(
-          yield* OrchestratorMcpService.resolveRuntimeMode("full-access", "inherit", muse),
-          "full-access",
+          yield* OrchestratorMcpService.resolveChildRuntimeMode("full-access", "inherit", muse),
+          "approval-required",
         );
         assert.equal(
           yield* OrchestratorMcpService.resolveRuntimeMode("auto", undefined, muse),
           "approval-required",
         );
+      }),
+    );
+    it.effect("refuses explicit Bypass even when the parent uses it", () =>
+      Effect.gen(function* () {
+        const error = yield* OrchestratorMcpService.resolveChildRuntimeMode(
+          "full-access",
+          "full-access",
+          muse,
+        ).pipe(Effect.flip);
+        assert.equal(error.code, "runtime_mode_escalation_denied");
       }),
     );
   });

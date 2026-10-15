@@ -1,4 +1,6 @@
 import type {
+  OrchestrationV2ThreadTurnIndexInput,
+  OrchestrationV2ThreadTurnIndexPage,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
@@ -310,6 +312,9 @@ export interface OrchestratorV2Shape {
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<OrchestratorV2DispatchResult, OrchestratorV2Error>;
+  readonly getThreadTurnIndex: (
+    input: OrchestrationV2ThreadTurnIndexInput,
+  ) => Effect.Effect<OrchestrationV2ThreadTurnIndexPage, OrchestratorV2Error>;
   readonly searchThreadStream: (
     input: OrchestrationV2SearchThreadInput,
   ) => Stream.Stream<OrchestrationV2SearchThreadResult, OrchestratorV2Error>;
@@ -11637,6 +11642,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     awaitRestartContinuation: (run) =>
       effectOutbox.awaitSettled(`effect:restart-continuation:${run.id}`).pipe(Effect.ignore),
     dispatch: dispatchWithReceipt,
+    getThreadTurnIndex: (input) =>
+      projectionStore
+        .getThreadTurnIndex(input)
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: input.threadId, cause }),
+          ),
+        ),
     searchThreadStream: (input) =>
       projectionStore
         .searchThreadStream(input)
@@ -11794,6 +11807,8 @@ const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
           cause: "Orchestration V2 live runtime is not configured.",
         }),
       ),
+    getThreadTurnIndex: (input) =>
+      Effect.fail(new OrchestratorProjectionError({ threadId: input.threadId })),
     searchThreadStream: (input) =>
       Stream.fail(new OrchestratorProjectionError({ threadId: input.threadId })),
     searchThread: (input) =>

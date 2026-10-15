@@ -10,10 +10,10 @@ import {
   runtimeModeConfig,
   runtimeModeOptionsForProvider,
   composerModeOptions,
-  resolveComposerModeSelection,
   type RuntimeModeOption,
   type ComposerMode,
 } from "./runtimeModeConfig";
+import { applyComposerModeSelection, type ConfirmRuntimeModeChange } from "./composerModeSelection";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -1269,7 +1269,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   size?: "sm" | "xs";
   hidden?: boolean;
   onToggleInteractionMode: () => void;
-  onRuntimeModeChange: (mode: RuntimeMode) => void;
+  onRuntimeModeChange: ConfirmRuntimeModeChange;
 }) {
   const size = props.size ?? "sm";
   const composerFloatingLayerProps = useComposerMenuProps();
@@ -1340,10 +1340,10 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           value={selectedMode}
           onValueChange={(value) => {
             if (!value) return;
-            const next = resolveComposerModeSelection(value as ComposerMode, props.runtimeMode);
-            if (props.combinePlanMode && next.interactionMode !== props.interactionMode)
-              props.onToggleInteractionMode();
-            if (next.runtimeMode !== props.runtimeMode) props.onRuntimeModeChange(next.runtimeMode);
+            void applyComposerModeSelection(value as ComposerMode, {
+              ...props,
+              combinePlanMode: props.combinePlanMode && props.showInteractionModeToggle,
+            });
           }}
         >
           <TooltipTrigger
@@ -1738,7 +1738,7 @@ export interface ChatComposerProps {
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
-  handleRuntimeModeChange: (mode: RuntimeMode) => void;
+  handleRuntimeModeChange: ConfirmRuntimeModeChange;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
 
   focusComposer: () => void;

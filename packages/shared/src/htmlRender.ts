@@ -15,6 +15,9 @@ import { EVENT_CODE_SHORTCUT_KEYS } from "./keybindings.ts";
  */
 
 export const HTML_RENDER_TOOL_NAME = "html_render";
+/** Generated responses are self-contained; they may not send data off the device. */
+export const HTML_RENDER_CONTENT_SECURITY_POLICY =
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
 export const HTML_RENDER_MIN_HEIGHT = 80;
 export const HTML_RENDER_MAX_HEIGHT = 2000;
 export const HTML_RENDER_MAX_TITLE_LENGTH = 200;
@@ -429,6 +432,7 @@ function bootstrapMarkup(markup: string): string {
   // without a fragment) the page follows the OS appearance.
   const defaultCss = `${rootRule(dark)}@media (prefers-color-scheme: light){${rootRule(light)}}${BASE_CSS}`;
   return [
+    `<meta http-equiv="Content-Security-Policy" content="${HTML_RENDER_CONTENT_SECURITY_POLICY}">`,
     /<meta\s[^>]*charset/i.test(markup.slice(0, 4096)) ? "" : '<meta charset="utf-8">',
     /<meta\s[^>]*name\s*=\s*["']?viewport/i.test(markup)
       ? ""

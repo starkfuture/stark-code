@@ -31,6 +31,7 @@ export type SettingsFormDefinition = Pick<ProviderClientDefinition, "settingsSch
   readonly driverKind?: ProviderClientDefinition["driverKind"];
 };
 import { SettingsRow } from "./settingsLayout";
+import { requestConfirmDialog } from "../../confirmDialog";
 
 export interface ProviderSettingsFieldModel {
   readonly key: string;
@@ -374,6 +375,17 @@ function ProviderSettingsFieldRow({
   onChange,
 }: ProviderSettingsFieldRowProps) {
   const inputId = `${idPrefix}-${field.key}`;
+  const changeSwitch = (checked: boolean) => {
+    const apply = () => onChange(nextProviderConfigWithFieldValue(value, field, checked));
+    if (field.key === "allowBypassPermissions" && checked) {
+      void requestConfirmDialog(
+        "Allow Bypass permissions for this Claude account? This enables explicitly selected sessions that skip Claude's permission checks. It will not become the default for new chats.",
+        { variant: "destructive" },
+      )?.then((confirmed) => {
+        if (confirmed) apply();
+      });
+    } else apply();
+  };
   const descriptionClassName =
     variant === "dialog"
       ? "text-2xs text-muted-foreground"
@@ -389,9 +401,7 @@ function ProviderSettingsFieldRow({
       field.control === "switch" ? (
         <Switch
           checked={readProviderConfigBoolean(value, field.key, field.defaultBooleanValue)}
-          onCheckedChange={(checked) =>
-            onChange(nextProviderConfigWithFieldValue(value, field, Boolean(checked)))
-          }
+          onCheckedChange={(checked) => changeSwitch(Boolean(checked))}
           aria-label={field.label}
           aria-describedby={descriptionId}
         />
@@ -466,9 +476,7 @@ function ProviderSettingsFieldRow({
           </div>
           <Switch
             checked={readProviderConfigBoolean(value, field.key, field.defaultBooleanValue)}
-            onCheckedChange={(checked) =>
-              onChange(nextProviderConfigWithFieldValue(value, field, Boolean(checked)))
-            }
+            onCheckedChange={(checked) => changeSwitch(Boolean(checked))}
             aria-label={field.label}
           />
         </div>

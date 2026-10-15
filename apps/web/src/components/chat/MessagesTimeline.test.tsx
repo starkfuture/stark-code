@@ -228,6 +228,8 @@ function matchMedia() {
 }
 
 let MessagesTimeline: typeof import("./MessagesTimeline").MessagesTimeline;
+vi.mock("./TimelineTurnOutline", () => ({ TimelineTurnOutline: () => null }));
+
 let TimelineMinimap: typeof import("./MessagesTimeline").TimelineMinimap;
 let resolvePreviewAnnotationImage: typeof import("./MessagesTimeline").resolvePreviewAnnotationImage;
 
@@ -327,6 +329,67 @@ describe("conversation turn navigation", () => {
         rail.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
       );
       expect(onSelect).toHaveBeenCalledExactlyOnceWith(prepended[2]);
+    } finally {
+      await act(() => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("scrubs across turns with pointer capture and stops after release or cancellation", async () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const onSelect = vi.fn();
+    const items = [
+      { id: "a", rowIndex: 0, userText: "First", assistantText: "Answer" },
+      { id: "b", rowIndex: 2, userText: "Middle", assistantText: "Answer" },
+      { id: "c", rowIndex: 4, userText: "Last", assistantText: "Answer" },
+    ];
+    try {
+      await act(() =>
+        root.render(
+          <TimelineMinimap
+            items={items}
+            currentIndex={0}
+            hasPersistentGutter
+            hitStripWidth={40}
+            stripMap={new Map()}
+            onSelect={onSelect}
+            onWheel={() => {}}
+          />,
+        ),
+      );
+      const rail = container.querySelector<HTMLButtonElement>('button[aria-label^="Jump to"]')!;
+      rail.getBoundingClientRect = () => ({ top: 0, height: 100 }) as DOMRect;
+      rail.setPointerCapture = vi.fn();
+      rail.releasePointerCapture = vi.fn();
+      const pointer = (type: string, y: number) => {
+        const event = new MouseEvent(type, { bubbles: true, clientY: y, button: 0 });
+        Object.defineProperty(event, "pointerId", { value: 7 });
+        rail.dispatchEvent(event);
+      };
+      await act(() => pointer("pointerdown", 0));
+      await act(() => pointer("pointermove", 50));
+      await act(() => pointer("pointermove", 51));
+      await act(() => pointer("pointermove", 100));
+      expect(onSelect.mock.calls).toEqual([
+        [items[0], false],
+        [items[1], false],
+        [items[2], false],
+      ]);
+      expect(rail.setPointerCapture).toHaveBeenCalledWith(7);
+      await act(() => pointer("pointerup", 100));
+      await act(() => rail.click());
+      await act(() => pointer("pointermove", 0));
+      expect(onSelect).toHaveBeenCalledTimes(3);
+      expect(rail.releasePointerCapture).toHaveBeenCalledWith(7);
+      await act(() => pointer("pointerdown", 50));
+      await act(() => pointer("pointercancel", 50));
+      await act(() => pointer("pointermove", 0));
+      expect(onSelect).toHaveBeenCalledTimes(4);
     } finally {
       await act(() => root.unmount());
       container.remove();

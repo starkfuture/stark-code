@@ -302,8 +302,17 @@ function normalizeReplayFrame(value: unknown): unknown {
   if (typeof value !== "object" || value === null) {
     return value;
   }
+  if ("type" in value && value.type === "query.open" && "options" in value) {
+    const options = value.options as ClaudeAdapterV2.ClaudeAgentSdkQueryOptions;
+    if (typeof options.settings === "object" && options.settings !== null) {
+      // Host approval hooks are covered by policy tests; old query recordings
+      // predate the explicit switch that keeps them enabled.
+      const { disableAllHooks, ...settings } = options.settings;
+      if (disableAllHooks === false) value = { ...value, options: { ...options, settings } };
+    }
+  }
   return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [key, normalizeReplayFrame(entry)]),
+    Object.entries(value as object).map(([key, entry]) => [key, normalizeReplayFrame(entry)]),
   );
 }
 
@@ -996,6 +1005,8 @@ function layerClaudeProviderAdapterRegistryReplay(
     configMap: {
       [ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID]: {
         driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+        // Recorded protocol scenarios intentionally use Bypass.
+        config: { allowBypassPermissions: true },
       },
     },
   }).pipe(

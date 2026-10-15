@@ -127,7 +127,9 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     return null;
   }
 
-  const permissionOptions = runtimeModeOptionsForProvider(activeEntry?.driverKind ?? "codex");
+  const permissionOptions = runtimeModeOptionsForProvider(
+    activeEntry?.driverKind ?? "codex",
+  ).filter((option) => option.mode !== "full-access");
   const currentPermissionOption = permissionOptions.find(
     (option) => option.mode === settings.defaultRuntimeMode,
   );

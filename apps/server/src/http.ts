@@ -5,6 +5,7 @@ import {
   EnvironmentHttpApi,
 } from "@starkfuture/contracts";
 import { isDevProxiedPath } from "@starkfuture/shared/devProxy";
+import { HTML_RENDER_CONTENT_SECURITY_POLICY } from "@starkfuture/shared/htmlRender";
 import {
   injectMcpAppCookieBootstrap,
   injectMcpAppThemeBootstrap,
@@ -105,6 +106,9 @@ export function assetResponseHeaders(
   },
 ): Record<string, string> {
   const lowerPath = filePath.toLowerCase();
+  const htmlPolicy = lowerPath.endsWith("-html.html")
+    ? `${HTML_RENDER_CONTENT_SECURITY_POLICY}; sandbox allow-scripts`
+    : HTML_CONTENT_SECURITY_POLICY;
   const inlineMimeType = options?.mimeType?.split(";", 1)[0]?.trim();
   return {
     "Cache-Control": "private, max-age=3600",
@@ -127,13 +131,13 @@ export function assetResponseHeaders(
                   ? "text/html; charset=utf-8"
                   : "application/pdf",
               ...(inlineMimeType.toLowerCase() === "text/html"
-                ? { "Content-Security-Policy": HTML_CONTENT_SECURITY_POLICY }
+                ? { "Content-Security-Policy": htmlPolicy }
                 : {}),
             }
           : lowerPath.endsWith(".html") || lowerPath.endsWith(".htm")
             ? {
                 "Content-Type": "text/html; charset=utf-8",
-                "Content-Security-Policy": HTML_CONTENT_SECURITY_POLICY,
+                "Content-Security-Policy": htmlPolicy,
               }
             : {}),
     ...(!options?.download && lowerPath.endsWith(".svg")

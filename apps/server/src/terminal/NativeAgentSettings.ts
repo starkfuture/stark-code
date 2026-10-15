@@ -24,11 +24,27 @@ export function mergeNativeSettings(
   base: Record<string, unknown>,
   next: Record<string, unknown>,
 ): Record<string, unknown> {
+  return mergeSettingsObjects(base, next, []);
+}
+
+function mergeSettingsObjects(
+  base: Record<string, unknown>,
+  next: Record<string, unknown>,
+  path: ReadonlyArray<string>,
+): Record<string, unknown> {
   const result = { ...base };
   for (const [key, value] of Object.entries(next)) {
-    const previous = result[key];
+    const previous = Object.hasOwn(result, key) ? result[key] : undefined;
+    // Each event has independent matchers. The session guard must coexist with
+    // custom publishing hooks, while ordinary settings arrays still override.
+    const merged =
+      path.length === 1 && path[0] === "hooks" && Array.isArray(previous) && Array.isArray(value)
+        ? [...previous, ...value]
+        : isObject(previous) && isObject(value)
+          ? mergeSettingsObjects(previous, value, [...path, key])
+          : value;
     Object.defineProperty(result, key, {
-      value: isObject(previous) && isObject(value) ? mergeNativeSettings(previous, value) : value,
+      value: merged,
       enumerable: true,
       configurable: true,
       writable: true,
@@ -48,10 +64,20 @@ export const prepareNativeClaudeSettings = Effect.fn("terminal.prepareNativeClau
   }) {
     const sources: string[] = [];
     const args: string[] = [];
+    let promptArgs: ReadonlyArray<string> = [];
     for (let index = 0; index < input.args.length; index++) {
       const arg = input.args[index]!;
-      if (arg === "--settings") sources.push(input.args[++index] ?? "");
-      else if (arg.startsWith("--settings=")) sources.push(arg.slice("--settings=".length));
+      if (arg === "--") {
+        promptArgs = input.args.slice(index);
+        break;
+      }
+      if (arg === "--settings") {
+        const source = input.args[++index];
+        if (source === undefined || source === "--") {
+          return yield* new NativeAgentSettingsInvalidError({});
+        }
+        sources.push(source);
+      } else if (arg.startsWith("--settings=")) sources.push(arg.slice("--settings=".length));
       else args.push(arg);
     }
     if (sources.length < 2) return [...input.args];
@@ -79,6 +105,6 @@ export const prepareNativeClaudeSettings = Effect.fn("terminal.prepareNativeClau
       input.lifetime,
       fs.remove(directory, { recursive: true }).pipe(Effect.ignore),
     );
-    return [...args, "--settings", filename];
+    return [...args, "--settings", filename, ...promptArgs];
   },
 );

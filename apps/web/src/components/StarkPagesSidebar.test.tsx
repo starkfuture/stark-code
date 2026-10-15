@@ -9,6 +9,7 @@ import { StarkPagesSidebar } from "./StarkPagesSidebar";
 let renderer: ReactTestRenderer | undefined;
 let listeners: Set<(event: MessageEvent) => void>;
 let intervals: Set<() => void>;
+let timeouts: Set<() => void>;
 const frameWindow = { postMessage: vi.fn() };
 const findMirror = vi.fn();
 const openFollow = vi.fn();
@@ -47,9 +48,12 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   listeners = new Set();
   intervals = new Set();
+  timeouts = new Set();
   for (const mock of [findMirror, openFollow, openLink, publish, frameWindow.postMessage])
     mock.mockReset();
   findMirror.mockImplementation(async (root: string) => ({ root, port: 4317 }));
+  openFollow.mockResolvedValue(true);
+  openLink.mockResolvedValue(true);
   vi.stubGlobal("window", {
     desktopBridge: {
       getStarkPagesMirror: findMirror,
@@ -61,6 +65,11 @@ beforeEach(() => {
       return callback;
     },
     clearInterval: (callback: () => void) => intervals.delete(callback),
+    setTimeout: (callback: () => void) => {
+      timeouts.add(callback);
+      return callback;
+    },
+    clearTimeout: (callback: () => void) => timeouts.delete(callback),
     addEventListener: (_name: string, callback: (event: MessageEvent) => void) =>
       listeners.add(callback),
     removeEventListener: (_name: string, callback: (event: MessageEvent) => void) =>
@@ -71,6 +80,7 @@ afterEach(async () => {
   await act(async () => renderer?.unmount());
   renderer = undefined;
   expect(intervals.size).toBe(0);
+  expect(timeouts.size).toBe(0);
   expect(listeners.size).toBe(0);
   vi.unstubAllGlobals();
 });
@@ -174,4 +184,48 @@ it("shows the empty state when a mirror stops and resets trust when it returns",
   await ready();
   await message(request);
   expect(publish).toHaveBeenCalledTimes(1);
+});
+
+it("keeps publishing disabled for Codex even if the caller requests it", async () => {
+  await mount();
+  await act(async () => renderer!.update(<StarkPagesSidebar {...props()} agent="codex" />));
+  await ready();
+  expect(frameWindow.postMessage).toHaveBeenLastCalledWith(
+    expect.objectContaining({ canPublish: false, agent: "codex" }),
+    "http://127.0.0.1:4317",
+  );
+  await message(request);
+  expect(publish).not.toHaveBeenCalled();
+});
+
+it("explains a missing handshake and retries with a fresh, untrusted frame", async () => {
+  await mount();
+  await act(async () => {
+    for (const timeout of timeouts) timeout();
+  });
+  expect(renderer!.root.findByProps({ role: "status" }).children.join("")).toContain(
+    "did not connect",
+  );
+  const retry = renderer!.root
+    .findAllByType("button")
+    .find((button) => button.children.includes("Retry Pages"));
+  await act(async () => retry!.props.onClick());
+  expect(findMirror).toHaveBeenCalledTimes(2);
+  expect(renderer!.root.findAllByProps({ role: "status" })).toHaveLength(0);
+  await message(request);
+  expect(publish).not.toHaveBeenCalled();
+  await ready();
+  await message(request);
+  expect(publish).toHaveBeenCalledTimes(1);
+  expect(timeouts.size).toBe(0);
+});
+
+it("reports a failed browser open without an unhandled rejection", async () => {
+  await mount();
+  await ready();
+  openLink.mockRejectedValue(new Error("Browser unavailable"));
+  await message({ v: 1, source: "stark-pages", type: "open-link", url: "https://starkfuture.com" });
+  expect(renderer!.root.findByProps({ role: "status" }).children.join("")).toContain(
+    "Could not open this link",
+  );
 });

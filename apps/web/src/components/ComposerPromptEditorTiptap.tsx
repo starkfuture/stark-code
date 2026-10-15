@@ -787,12 +787,23 @@ const ComposerMarkersExtension = Extension.create({
 type TiptapEditor = NonNullable<ReturnType<typeof useEditor>>;
 
 export function ComposerPromptEditorTiptap(props: ComposerPromptEditorProps) {
+  const modeFocusRef = useRef(false);
+  const saveModeFocus = useCallback((focused: boolean) => {
+    modeFocusRef.current = focused;
+  }, []);
+  const takeModeFocus = useCallback(() => {
+    const focused = modeFocusRef.current;
+    modeFocusRef.current = false;
+    return focused;
+  }, []);
   // Extensions are creation-time, so changing text mode remounts the editor.
   // Every mode initializes from the controlled value, preserving the draft.
   return (
     <ComposerPromptEditorTiptapInner
       key={props.literalText ? "literal" : props.richTextEnabled ? "rich" : "plain"}
       {...props}
+      saveModeFocus={saveModeFocus}
+      takeModeFocus={takeModeFocus}
     />
   );
 }
@@ -817,7 +828,12 @@ const ComposerUndoGroupingExtension = Extension.create<
   },
 });
 
-function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
+function ComposerPromptEditorTiptapInner(
+  props: ComposerPromptEditorProps & {
+    saveModeFocus: (focused: boolean) => void;
+    takeModeFocus: () => boolean;
+  },
+) {
   const {
     value,
     cursor,
@@ -1607,6 +1623,17 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
     skillLabelFor,
     value,
   ]);
+
+  // A text-mode change recreates the view. Capture focus before its DOM is removed,
+  // then restore it after the replacement has applied the controlled caret.
+  useLayoutEffect(() => {
+    if (!editor) return;
+    const root = editor.view.dom;
+    if (props.takeModeFocus() && !disabled) editor.view.focus();
+    return () => {
+      props.saveModeFocus(root.contains(root.ownerDocument.activeElement));
+    };
+  }, [disabled, editor, props.saveModeFocus, props.takeModeFocus]);
 
   const focusAt = useCallback(
     (nextCursor: number) => {

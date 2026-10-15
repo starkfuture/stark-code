@@ -27,7 +27,6 @@ import { toastManager } from "../ui/toast";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { readLocalApi } from "~/localApi";
 import { threadEnvironment } from "../../state/threads";
-import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -41,6 +40,7 @@ import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { useClientSettings } from "../../hooks/useSettings";
 import { McpServersChip } from "./McpServersPanel";
+import { ThreadToolsPopover } from "./ThreadToolsPopover";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -52,7 +52,7 @@ interface ChatHeaderProps {
   parentThreadLink: { threadId: ThreadId; title: string } | null;
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
-  actions?: ReactNode;
+  actions?: (closeTools: () => void) => ReactNode;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
 }
@@ -78,6 +78,7 @@ export function resolveRenameCommit(input: {
 // events (the second click dismisses it and dblclick still fires), so it
 // opens immediately.
 const TITLE_MENU_OPEN_DELAY_MS = 500;
+const NO_TOOLS_POPOVER = () => {};
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
   activeThreadId,
@@ -96,6 +97,17 @@ export const ChatHeader = memo(function ChatHeader({
   const interfaceFont = useClientSettings((settings) => settings.fontFamilySans);
   const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
   const [collapseParentTitle, setCollapseParentTitle] = useState(false);
+  const [compactTools, setCompactTools] = useState(true);
+  // The chat column can be narrow inside a wide window when a side panel is open.
+  // Measure this header, rather than using a viewport breakpoint, so its actions
+  // never compete with the fixed panel controls in the title bar.
+  useEffect(() => {
+    const container = breadcrumbContainerRef.current;
+    if (!container) return;
+    const measure = () => setCompactTools(container.clientWidth < 600);
+    measure();
+    return observeResize(container, measure);
+  }, []);
   const activeThreadRef = useMemo(
     () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
     [activeThreadEnvironmentId, activeThreadId],
@@ -440,10 +452,15 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
-      {isServerThread ? <McpServersChip threadRef={activeThreadRef} /> : null}
-      {actions ? (
+      {compactTools && (isServerThread || actions) ? (
+        <ThreadToolsPopover
+          tools={isServerThread ? <McpServersChip threadRef={activeThreadRef} /> : null}
+          {...(actions ? { actions } : {})}
+        />
+      ) : isServerThread || actions ? (
         <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
-          {actions}
+          {isServerThread ? <McpServersChip threadRef={activeThreadRef} /> : null}
+          {actions?.(NO_TOOLS_POPOVER)}
         </div>
       ) : null}
     </div>

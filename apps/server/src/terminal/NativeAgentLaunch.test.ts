@@ -2,6 +2,10 @@ import { CODEX_PRIVACY_ARGS, PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/pr
 import { STARK_PAGES_ENV } from "@starkfuture/shared/starkPages";
 import { describe, expect, it } from "@effect/vitest";
 import { nativeAgentLaunch } from "./NativeAgentLaunch.ts";
+// @effect-diagnostics nodeBuiltinImport:off -- exercise the generated native CLI hook command.
+import * as NodeChildProcess from "node:child_process";
+import * as HostProcess from "@starkfuture/shared/HostProcess";
+import * as Effect from "effect/Effect";
 
 const defaultCodexPolicy = [
   "--ask-for-approval",
@@ -23,31 +27,30 @@ describe("native agent shell launch", () => {
     });
   });
   it("keeps Claude plugin arguments and executable paths as distinct argv values", () => {
-    expect(
-      nativeAgentLaunch({
-        driver: "claudeAgent",
-        config: {
-          binaryPath: "~/Tools/Claude Code/claude",
-          launchArgs: '--plugin-dir "/Users/test/My plugins"',
-        },
-        home: "/Users/test",
-      }),
-    ).toEqual({
-      shell: "/Users/test/Tools/Claude Code/claude",
-      args: [
-        "--plugin-dir",
-        "/Users/test/My plugins",
-        "--permission-mode",
-        "default",
-        "--settings",
-        JSON.stringify({
-          env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
-        }),
-      ],
+    const launch = nativeAgentLaunch({
+      driver: "claudeAgent",
+      config: {
+        binaryPath: "~/Tools/Claude Code/claude",
+        launchArgs: '--plugin-dir "/Users/test/My plugins"',
+      },
+      home: "/Users/test",
+    });
+    expect(launch.shell).toBe("/Users/test/Tools/Claude Code/claude");
+    expect(launch.args.slice(0, 5)).toEqual([
+      "--plugin-dir",
+      "/Users/test/My plugins",
+      "--permission-mode",
+      "default",
+      "--settings",
+    ]);
+    expect(JSON.parse(launch.args[5]!)).toMatchObject({
+      disableAllHooks: false,
+      permissions: { disableBypassPermissionsMode: "disable" },
+      env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
     });
   });
-  it.each(["manual", "auto", "acceptEdits", "plan", "dontAsk", "bypassPermissions"])(
-    "preserves Claude's explicit %s mode without disabling native mode switching",
+  it.each(["manual", "auto", "acceptEdits", "plan", "dontAsk"])(
+    "preserves Claude's explicit %s mode while keeping Bypass locked",
     (mode) => {
       const { args } = nativeAgentLaunch({
         driver: "claudeAgent",
@@ -55,10 +58,103 @@ describe("native agent shell launch", () => {
         config: { launchArgs: `--permission-mode ${mode}` },
       });
       expect(args.slice(0, 2)).toEqual(["--permission-mode", mode]);
-      expect(JSON.parse(args[args.indexOf("--settings") + 1]!)).toEqual({
+      expect(JSON.parse(args[args.indexOf("--settings") + 1]!)).toMatchObject({
+        permissions: { disableBypassPermissionsMode: "disable" },
         env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
       });
     },
+  );
+  it.each([
+    "--dangerously-skip-permissions",
+    "--allow-dangerously-skip-permissions",
+    "--permission-mode bypassPermissions",
+    "--permission-mode=bypassPermissions",
+  ])("requires account opt-in for %s", (launchArgs) => {
+    expect(() =>
+      nativeAgentLaunch({ driver: "claudeAgent", home: "/tmp", config: { launchArgs } }),
+    ).toThrow("Enable Allow Bypass");
+    const launch = nativeAgentLaunch({
+      driver: "claudeAgent",
+      home: "/tmp",
+      config: { launchArgs, allowBypassPermissions: true },
+    });
+    expect(JSON.parse(launch.args[launch.args.indexOf("--settings") + 1]!)).not.toHaveProperty(
+      "permissions.disableBypassPermissionsMode",
+    );
+  });
+  it("does not treat prompt text after -- as unsafe flags", () => {
+    const launch = nativeAgentLaunch({
+      driver: "claudeAgent",
+      home: "/tmp",
+      config: { launchArgs: '-- "--dangerously-skip-permissions"' },
+    });
+    expect(launch.args.slice(-2)).toEqual(["--", "--dangerously-skip-permissions"]);
+  });
+  it.effect("runs the native child guard and denies inherited Bypass", (ctx) =>
+    Effect.gen(function* () {
+      if ((yield* HostProcess.Platform) === "win32") return ctx.skip("POSIX hook command");
+      const launch = nativeAgentLaunch({
+        driver: "claudeAgent",
+        home: "/tmp",
+        config: { allowBypassPermissions: true },
+      });
+      const settings = JSON.parse(launch.args[launch.args.indexOf("--settings") + 1]!);
+      expect(settings.hooks.PreToolUse[0].matcher).toBe("*");
+      const command = settings.hooks.PreToolUse[0].hooks[0].command;
+      for (const mode of ["bypassPermissions", undefined]) {
+        const result = NodeChildProcess.execFileSync("/bin/sh", ["-c", command], {
+          input: JSON.stringify({ tool_name: "Agent", permission_mode: mode }),
+          encoding: "utf8",
+        });
+        expect(JSON.parse(result).hookSpecificOutput.permissionDecision).toBe("deny");
+      }
+      expect(
+        NodeChildProcess.execFileSync("/bin/sh", ["-c", command], {
+          input: JSON.stringify({ tool_name: "Agent", permission_mode: "auto" }),
+          encoding: "utf8",
+        }),
+      ).toBe("");
+      for (const toolName of ["Bash", "Write"]) {
+        const result = NodeChildProcess.execFileSync("/bin/sh", ["-c", command], {
+          input: JSON.stringify({
+            tool_name: toolName,
+            permission_mode: "bypassPermissions",
+            agent_id: "custom-agent",
+          }),
+          encoding: "utf8",
+        });
+        expect(JSON.parse(result).hookSpecificOutput.permissionDecision).toBe("deny");
+      }
+      for (const hook of [
+        { tool_name: "Bash", permission_mode: "bypassPermissions" },
+        { tool_name: "Write", permission_mode: "acceptEdits", agent_id: "custom-agent" },
+      ]) {
+        expect(
+          NodeChildProcess.execFileSync("/bin/sh", ["-c", command], {
+            input: JSON.stringify(hook),
+            encoding: "utf8",
+          }),
+        ).toBe("");
+      }
+      expect(
+        JSON.parse(
+          NodeChildProcess.execFileSync("/bin/sh", ["-c", command], {
+            input: "not-json",
+            encoding: "utf8",
+          }),
+        ).hookSpecificOutput.permissionDecision,
+      ).toBe("deny");
+      const refused = nativeAgentLaunch({
+        driver: "claudeAgent",
+        home: "/tmp",
+        config: {},
+        nodeExecutable: "/nonexistent/stark-node",
+      });
+      const refusalCommand = JSON.parse(refused.args.at(-1)!).hooks.PreToolUse[0].hooks[0].command;
+      expect(
+        NodeChildProcess.spawnSync("/bin/sh", ["-c", refusalCommand], { input: "{}" }).status,
+      ).toBe(2);
+    }),
   );
   it("does not interpret shell substitutions in configuration", () => {
     const result = nativeAgentLaunch({

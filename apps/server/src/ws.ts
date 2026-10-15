@@ -1,3 +1,4 @@
+import { OrchestrationV2ThreadTurnIndexError } from "@starkfuture/contracts";
 import { OrchestrationDispatchCommandError } from "@starkfuture/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
@@ -1931,6 +1932,10 @@ const layerWsRpc = (
                 }),
             ),
           ),
+        [ORCHESTRATION_V2_WS_METHODS.getThreadTurnIndex]: (input) =>
+          threadManagement
+            .getThreadTurnIndex(input)
+            .pipe(Effect.mapError((cause) => new OrchestrationV2ThreadTurnIndexError({ cause }))),
         [ORCHESTRATION_V2_WS_METHODS.searchThread]: (input) =>
           threadManagement
             .searchThread(input)

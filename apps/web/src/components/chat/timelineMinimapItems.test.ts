@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MessageId } from "@starkfuture/contracts";
+import { MessageId, ThreadId, TurnItemId } from "@starkfuture/contracts";
+import * as DateTime from "effect/DateTime";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 import { deriveTimelineMinimapItems, resolveTimelineMinimapPreview } from "./timelineMinimapItems";
 import type { ChatMessage } from "../../types";
@@ -47,6 +48,54 @@ describe("timeline minimap previews", () => {
     expect(source[items[0]!.rowIndex]!.id).toBe(items[0]!.id);
     expect(resolveTimelineMinimapPreview(items[1]!)?.assistantText).toBe("Second answer");
     expect(items[0]?.assistantText).toBe(" Done\t now ");
+  });
+
+  it("keeps steering and its final answer inside the original turn, matching the full-history index", () => {
+    const source = rows([
+      ["user", "Task"],
+      ["assistant", "Working"],
+      ["user", "Do it differently"],
+      ["assistant", "Final answer"],
+      ["user", "Next task"],
+    ]);
+    const steering = source[2]!;
+    if (steering.kind !== "message") throw new Error("Expected a message fixture");
+    const at = DateTime.makeUnsafe(0);
+    const threadId = ThreadId.make("thread");
+    const id = TurnItemId.make("steering");
+    steering.projectedItem = {
+      position: 2,
+      visibility: "local",
+      sourceThreadId: threadId,
+      sourceItemId: id,
+      item: {
+        id,
+        threadId,
+        runId: null,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 2,
+        status: "completed",
+        title: null,
+        startedAt: at,
+        completedAt: at,
+        updatedAt: at,
+        type: "user_message",
+        inputIntent: "steer",
+        messageId: steering.message.id,
+        text: steering.message.text,
+        attachments: [],
+        createdBy: "user",
+        creationSource: "web",
+      },
+    };
+    const items = deriveTimelineMinimapItems(source);
+    expect(items).toHaveLength(2);
+    expect(items[0]?.assistantText).toBe("Final answer");
+    expect(items[1]?.userText).toBe("Next task");
   });
 
   it("handles an unanswered prompt, empty responses, and a closed preview", () => {

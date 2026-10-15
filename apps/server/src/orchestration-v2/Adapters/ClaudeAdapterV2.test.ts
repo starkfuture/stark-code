@@ -261,8 +261,9 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
   });
 
   it.each([
-    ["--permission-mode acceptEdits", "default"],
-    ["--dangerously-skip-permissions", "default"],
+    ["--permission-mode acceptEdits", "acceptEdits"],
+    ["--permission-mode manual", "default"],
+    ["--dangerously-skip-permissions", "bypassPermissions"],
     ["--dangerously-skip-permissions --permission-mode plan", "plan"],
   ])("folds %s into the SDK permission mode", (launchArgs, expected) => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
@@ -270,13 +271,48 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       nativeThreadId: "native-permission-override",
       resume: false,
       cwd: "/workspace",
-      permissionMode: "default",
       settings: { ...AUTO_COMPACT_CLAUDE_SETTINGS, launchArgs },
     });
     assert.equal(options.permissionMode, expected);
     assert.isUndefined(options.extraArgs?.["permission-mode"]);
     assert.isUndefined(options.extraArgs?.["dangerously-skip-permissions"]);
   });
+
+  it.each([
+    ["approval-required", "default", "default"],
+    ["auto-accept-edits", "default", "acceptEdits"],
+    ["auto", "default", "auto"],
+    ["full-access", "default", "bypassPermissions"],
+    ["auto", "plan", "plan"],
+  ] as const)(
+    "launches the selected %s / %s mode through the SDK",
+    (runtimeMode, interactionMode, expected) => {
+      const policy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy({
+        runtimeMode,
+        interactionMode,
+        cwd: "/workspace",
+      });
+      const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        nativeThreadId: "selected-mode",
+        resume: false,
+        cwd: "/workspace",
+        permissionMode: policy.permissionMode,
+        ...(policy.allowDangerouslySkipPermissions
+          ? { allowDangerouslySkipPermissions: true }
+          : {}),
+        settings: { ...DEFAULT_CLAUDE_SETTINGS, launchArgs: "--permission-mode acceptEdits" },
+      });
+      assert.equal(options.permissionMode, expected);
+      assert.equal(policy.installPermissionCallback, expected !== "bypassPermissions");
+      assert.equal(
+        options.allowDangerouslySkipPermissions === true,
+        expected === "bypassPermissions",
+      );
+      assert.notProperty(options.settings, "disableAutoMode");
+      assert.notProperty(options.settings, "permissions");
+    },
+  );
 
   it("passes automatic compaction and resume-dialog controls to the SDK", () => {
     const onUserDialog = async () => ({
@@ -454,7 +490,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
 
     assert.deepEqual(queryPolicy, {
       permissionMode: "auto",
-      installPermissionCallback: false,
+      installPermissionCallback: true,
     });
   });
 
@@ -1060,6 +1096,7 @@ describe("ClaudeAdapterV2 session permissions", () => {
 describe("ClaudeAdapterV2 Auto-accept edits", () => {
   it.effect.each([
     { runtimeMode: "auto-accept-edits", hook: false, nativeHookType: false },
+    { runtimeMode: "auto", hook: false, nativeHookType: false },
     { runtimeMode: "full-access", hook: true, nativeHookType: true },
     { runtimeMode: "full-access", hook: true, nativeHookType: false },
   ] as const)("asks before a command with runtime $runtimeMode, hook=$hook", (scenario) =>
@@ -1129,7 +1166,14 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
             runtimePolicy,
           }),
         );
-        assert.equal(openedOptions?.permissionMode, "default");
+        assert.equal(
+          openedOptions?.permissionMode,
+          scenario.runtimeMode === "auto-accept-edits"
+            ? "acceptEdits"
+            : scenario.runtimeMode === "auto"
+              ? "auto"
+              : "bypassPermissions",
+        );
         const canUseTool = openedOptions?.canUseTool;
         assert.isFunction(canUseTool);
 
@@ -4744,7 +4788,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.equal(proposedPlan?.status, "active");
         // The second prompt reuses the live process, which is still in the
         // plan mode Claude entered, so it is put back in the thread's mode.
-        assert.deepEqual(harness.permissionModeChanges, ["default"]);
+        assert.deepEqual(harness.permissionModeChanges, ["bypassPermissions"]);
       }).pipe(
         Effect.provide(
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
@@ -4882,11 +4926,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               options: {
                 model: "claude-sonnet-4-6",
                 tools: { type: "preset", preset: "claude_code" },
-                permissionMode: "default",
+                permissionMode: "bypassPermissions",
+                allowDangerouslySkipPermissions: true,
                 settings: {
                   env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
-                  disableAutoMode: "disable",
-                  permissions: { disableBypassPermissionsMode: "disable" },
                   showThinkingSummaries: true,
                 },
                 sessionId: WAKE_NATIVE_SESSION,

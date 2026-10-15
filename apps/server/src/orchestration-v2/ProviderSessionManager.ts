@@ -357,7 +357,7 @@ function providerThreadLoadKey(input: {
   return JSON.stringify({
     providerThread: providerThreadRuntimeKey(input.providerThread),
     modelSelection: input.modelSelection ?? null,
-    runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) ?? null,
+    runtimePolicy: input.runtimePolicy ?? null,
   });
 }
 
@@ -1775,7 +1775,10 @@ export const layerWithOptions = (
               Effect.andThen(
                 runtime.ensureThread({
                   ...input,
-                  runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy),
+                  runtimePolicy:
+                    runtime.driver === "claudeAgent"
+                      ? input.runtimePolicy
+                      : supervisedRuntimePolicy(input.runtimePolicy),
                 }),
               ),
               Effect.tap((providerThread) =>
@@ -1785,7 +1788,10 @@ export const layerWithOptions = (
                   providerThreadKey: providerThreadLoadKey({
                     providerThread,
                     modelSelection: input.modelSelection,
-                    runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy),
+                    runtimePolicy:
+                      runtime.driver === "claudeAgent"
+                        ? input.runtimePolicy
+                        : supervisedRuntimePolicy(input.runtimePolicy),
                   }),
                 }),
               ),
@@ -1797,7 +1803,12 @@ export const layerWithOptions = (
                 ...input,
                 ...(input.runtimePolicy === undefined
                   ? {}
-                  : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
+                  : {
+                      runtimePolicy:
+                        runtime.driver === "claudeAgent"
+                          ? input.runtimePolicy
+                          : supervisedRuntimePolicy(input.runtimePolicy),
+                    }),
               });
             }
             const providerThreadKey = providerThreadLoadKey({
@@ -1807,7 +1818,12 @@ export const layerWithOptions = (
                 : { modelSelection: input.modelSelection }),
               ...(input.runtimePolicy === undefined
                 ? {}
-                : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
+                : {
+                    runtimePolicy:
+                      runtime.driver === "claudeAgent"
+                        ? input.runtimePolicy
+                        : supervisedRuntimePolicy(input.runtimePolicy),
+                  }),
             });
             return observeActivity(
               providerSessionId,
@@ -1834,7 +1850,12 @@ export const layerWithOptions = (
                       ...input,
                       ...(input.runtimePolicy === undefined
                         ? {}
-                        : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
+                        : {
+                            runtimePolicy:
+                              runtime.driver === "claudeAgent"
+                                ? input.runtimePolicy
+                                : supervisedRuntimePolicy(input.runtimePolicy),
+                          }),
                     }),
               ),
               Effect.tap((providerThread) =>
@@ -1848,7 +1869,12 @@ export const layerWithOptions = (
                       : { modelSelection: input.modelSelection }),
                     ...(input.runtimePolicy === undefined
                       ? {}
-                      : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
+                      : {
+                          runtimePolicy:
+                            runtime.driver === "claudeAgent"
+                              ? input.runtimePolicy
+                              : supervisedRuntimePolicy(input.runtimePolicy),
+                        }),
                   }),
                 }),
               ),
@@ -1868,7 +1894,12 @@ export const layerWithOptions = (
                   ...input,
                   ...(input.runtimePolicy === undefined
                     ? {}
-                    : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
+                    : {
+                        runtimePolicy:
+                          runtime.driver === "claudeAgent"
+                            ? input.runtimePolicy
+                            : supervisedRuntimePolicy(input.runtimePolicy),
+                      }),
                 }),
               ),
               Effect.tap((providerThread) =>
@@ -1882,7 +1913,12 @@ export const layerWithOptions = (
                       : { modelSelection: input.modelSelection }),
                     ...(input.runtimePolicy === undefined
                       ? {}
-                      : { runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy) }),
+                      : {
+                          runtimePolicy:
+                            runtime.driver === "claudeAgent"
+                              ? input.runtimePolicy
+                              : supervisedRuntimePolicy(input.runtimePolicy),
+                        }),
                   }),
                 }),
               ),
@@ -1960,7 +1996,10 @@ export const layerWithOptions = (
                     runtime
                       .startTurn({
                         ...input,
-                        runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy),
+                        runtimePolicy:
+                          runtime.driver === "claudeAgent"
+                            ? input.runtimePolicy
+                            : supervisedRuntimePolicy(input.runtimePolicy),
                       })
                       .pipe(turnMetrics("send", input.modelSelection.model)),
                   (_, exit) =>
@@ -2240,7 +2279,10 @@ export const layerWithOptions = (
                   threadId: input.threadId,
                   providerSessionId: input.providerSessionId,
                   modelSelection: input.modelSelection,
-                  runtimePolicy: supervisedRuntimePolicy(input.runtimePolicy),
+                  runtimePolicy:
+                    adapter.driver === "claudeAgent"
+                      ? input.runtimePolicy
+                      : supervisedRuntimePolicy(input.runtimePolicy),
                   ...(input.resumeFromSession === undefined
                     ? {}
                     : { resumeFromSession: input.resumeFromSession }),

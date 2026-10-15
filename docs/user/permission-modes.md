@@ -18,6 +18,17 @@ and modes you choose in a draft keep their permissions.
 Approve or reject requests in the conversation to let the agent continue. Permission modes do
 not prevent the agent from asking questions about the task.
 
+## Claude modes
+
+Claude's composer uses the same mode names as its terminal: **Manual**, **Accept edits**,
+**Auto**, **Plan**, and **Bypass permissions**. Choose **Plan** to explore before making
+changes; select a working mode to leave planning. Manual remains the initial default, and
+mode changes apply to the next turn. Auto uses Claude's own action review and can still ask
+you for approval. Your organization's Claude settings can restrict which modes are available.
+
+In native shell mode, use Claude's own mode controls, including **Shift+Tab**. Explicit
+permission modes in the provider's launch arguments are honored.
+
 ## Remember an approval
 
 When an approval supports a saved rule, review the exact tool or command prefix and

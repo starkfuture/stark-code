@@ -12,14 +12,18 @@ import {
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
+import {
+  composerModeOptions,
+  resolveComposerModeSelection,
+  type RuntimeModeOption,
+  type ComposerMode,
+} from "./runtimeModeConfig";
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
-  runtimeModeOptions: ReadonlyArray<{
-    readonly mode: RuntimeMode;
-    readonly label: string;
-  }>;
+  runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
+  combinePlanMode: boolean;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
   size?: "sm" | "xs";
@@ -35,6 +39,15 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   const composerFloatingLayerProps = useComposerMenuProps();
   const size = props.size ?? "sm";
   const [open, setOpen] = useComposerMenuState(props.hidden);
+
+  const options = composerModeOptions(
+    props.runtimeModeOptions,
+    props.combinePlanMode && props.showInteractionModeToggle,
+  );
+  const selectedMode =
+    props.combinePlanMode && props.showInteractionModeToggle && props.interactionMode === "plan"
+      ? "plan"
+      : props.runtimeMode;
 
   return (
     <Menu open={open} onOpenChange={setOpen}>
@@ -59,7 +72,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuDivider />
           </>
         ) : null}
-        {props.showInteractionModeToggle ? (
+        {props.showInteractionModeToggle && !props.combinePlanMode ? (
           <>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
             <MenuRadioGroup
@@ -75,15 +88,20 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuDivider />
           </>
         ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
+        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+          {props.combinePlanMode ? "Mode" : "Access"}
+        </div>
         <MenuRadioGroup
-          value={props.runtimeMode}
+          value={selectedMode}
           onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onRuntimeModeChange(value as RuntimeMode);
+            if (!value || value === selectedMode) return;
+            const next = resolveComposerModeSelection(value as ComposerMode, props.runtimeMode);
+            if (props.combinePlanMode && next.interactionMode !== props.interactionMode)
+              props.onToggleInteractionMode();
+            if (next.runtimeMode !== props.runtimeMode) props.onRuntimeModeChange(next.runtimeMode);
           }}
         >
-          {props.runtimeModeOptions.map((option) => (
+          {options.map((option) => (
             <MenuRadioItem key={option.mode} value={option.mode}>
               {option.label}
             </MenuRadioItem>

@@ -16,7 +16,7 @@ export function nativeAgentLaunch(input: {
   readonly driver: string;
   readonly config: unknown;
   readonly home: string;
-}) {
+}): { shell: string; args: string[] } {
   const settings =
     input.driver === "codex"
       ? decodeCodexSettings(input.config)
@@ -33,28 +33,6 @@ export function nativeAgentLaunch(input: {
   if (BRAND.requireApprovalsByDefault && input.driver === "codex") {
     args = supervisedNativeCodexArgs(userArgs);
   }
-  if (BRAND.requireApprovalsByDefault && input.driver === "claudeAgent") {
-    const unsafe = args.some((arg, index) => {
-      if (
-        /^(?:--yolo|--dangerously-bypass-approvals-and-sandbox|--dangerously-skip-permissions|--full-auto)$/.test(
-          arg,
-        )
-      )
-        return true;
-      if (arg === "-a" || arg === "--ask-for-approval")
-        return !["untrusted", "on-request"].includes(args[index + 1] ?? "");
-      if (arg.startsWith("--ask-for-approval="))
-        return !["untrusted", "on-request"].includes(arg.slice(arg.indexOf("=") + 1));
-      if (arg === "--permission-mode") return !["default", "plan"].includes(args[index + 1] ?? "");
-      if (arg.startsWith("--permission-mode="))
-        return !["default", "plan"].includes(arg.slice(arg.indexOf("=") + 1));
-      return false;
-    });
-    if (unsafe)
-      throw new Error(
-        "This Stark build requires supervised native agents. Remove bypass or automatic permission launch arguments.",
-      );
-  }
   const hasPermissionPolicy = args.some((arg) =>
     input.driver === "codex"
       ? /^(?:-a$|--ask-for-approval(?:=|$)|--yolo$|--dangerously-bypass-approvals-and-sandbox$)/.test(
@@ -70,13 +48,11 @@ export function nativeAgentLaunch(input: {
         : ["--permission-mode", "default"]),
     );
   }
-  if (BRAND.requireApprovalsByDefault && input.driver === "claudeAgent") {
+  if (input.driver === "claudeAgent") {
     args.push(
       "--settings",
       JSON.stringify({
         env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
-        disableAutoMode: "disable",
-        permissions: { disableBypassPermissionsMode: "disable" },
       }),
     );
   }

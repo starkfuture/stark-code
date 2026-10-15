@@ -307,6 +307,10 @@ function unimplemented(detail: string) {
 const makeProviderAdapter = Effect.fnUntraced(function* (
   state: Ref.Ref<TestProviderRuntimeState>,
   options: {
+    readonly driver?: ProviderDriverKind;
+    readonly observedPolicies?: Ref.Ref<
+      ReadonlyArray<ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined>
+    >;
     readonly failEventStream?: boolean;
     readonly capabilities?: OrchestrationV2ProviderCapabilities;
     readonly mcpConfigs?: Ref.Ref<
@@ -345,11 +349,16 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
   );
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: ProviderInstanceId.make("codex"),
-    driver: CODEX_DRIVER,
+    driver: options.driver ?? CODEX_DRIVER,
     getCapabilities: () => Effect.succeed(options.capabilities ?? CodexCapabilities),
     planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
     openSession: (input) =>
       Effect.gen(function* () {
+        if (options.observedPolicies)
+          yield* Ref.update(options.observedPolicies, (policies) => [
+            ...policies,
+            input.runtimePolicy,
+          ]);
         if (options.spawnBeforeOpen === true) {
           yield* countClose;
           if (options.hangSessionScopeClose === true) yield* hangClose;
@@ -388,13 +397,13 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
 
         return {
           instanceId: ProviderInstanceId.make("codex"),
-          driver: CODEX_DRIVER,
+          driver: options.driver ?? CODEX_DRIVER,
           providerSessionId: input.providerSessionId,
-          providerSession: session,
+          providerSession: { ...session, driver: options.driver ?? CODEX_DRIVER },
           events: options.failEventStream
             ? Stream.fail(
                 new ProviderAdapter.ProviderAdapterEventStreamError({
-                  driver: CODEX_DRIVER,
+                  driver: options.driver ?? CODEX_DRIVER,
                   providerSessionId: input.providerSessionId,
                   cause: "process exited",
                 }),
@@ -409,11 +418,18 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
                 hasPendingBackgroundWorkForThread: () => options.hasPendingBackgroundWorkForThread!,
               }),
           ensureThread: () => unimplemented("ensureThread unused in test"),
-          resumeThread: (threadInput) =>
-            Ref.update(state, (current) => ({
+          resumeThread: (threadInput) => {
+            const resume = Ref.update(state, (current) => ({
               ...current,
               resumeCount: current.resumeCount + 1,
-            })).pipe(Effect.as(threadInput.providerThread)),
+            })).pipe(Effect.as(threadInput.providerThread));
+            return options.observedPolicies
+              ? Ref.update(options.observedPolicies, (policies) => [
+                  ...policies,
+                  threadInput.runtimePolicy,
+                ]).pipe(Effect.andThen(resume))
+              : resume;
+          },
           startTurn: () => options.startTurn ?? Effect.void,
           steerTurn: () => Effect.void,
           interruptTurn: () =>
@@ -446,6 +462,10 @@ function layerTest(input: {
   readonly state: Ref.Ref<TestProviderRuntimeState>;
   readonly idleTimeoutMs: number;
   readonly maxIdlePinMs?: number;
+  readonly driver?: ProviderDriverKind;
+  readonly observedPolicies?: Ref.Ref<
+    ReadonlyArray<ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined>
+  >;
   readonly failEventStream?: boolean;
   readonly capabilities?: OrchestrationV2ProviderCapabilities;
   readonly mcpConfigs?: Ref.Ref<
@@ -484,6 +504,8 @@ function layerTest(input: {
   const layerRegistry = Layer.unwrap(
     makeProviderAdapter(input.state, {
       failEventStream: input.failEventStream ?? false,
+      ...(input.driver === undefined ? {} : { driver: input.driver }),
+      ...(input.observedPolicies === undefined ? {} : { observedPolicies: input.observedPolicies }),
       ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
       ...(input.mcpConfigs === undefined ? {} : { mcpConfigs: input.mcpConfigs }),
       ...(input.beforeOpen === undefined ? {} : { beforeOpen: input.beforeOpen }),
@@ -795,6 +817,75 @@ function makePendingRuntimeRequestEvents(input: {
     return { events, providerEvents, requestId, nodeId };
   });
 }
+
+it.effect.each(["claudeAgent", "codex"])(
+  "preserves selected Claude modes through session open and resume (%s)",
+  (driverName) =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const observedPolicies = yield* Ref.make<
+        ReadonlyArray<ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined>
+      >([]);
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("mode-preservation");
+        const event = yield* makeThreadCreatedEvent({ idAllocator, threadId, now });
+        yield* eventSink.write({ events: [event] });
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        const selected = { ...runtimePolicy, runtimeMode: "auto" as const };
+        const runtime = yield* manager.open({
+          threadId,
+          providerSessionId,
+          modelSelection,
+          runtimePolicy: selected,
+        });
+        const providerThread: OrchestrationV2ProviderThread = {
+          ...makeProviderThread({
+            idAllocator,
+            threadId,
+            providerSessionId,
+            now,
+            nativeThreadId: "mode-test",
+          }),
+          driver: ProviderDriverKind.make(driverName),
+          nativeThreadRef: {
+            driver: ProviderDriverKind.make(driverName),
+            nativeId: "mode-test",
+            strength: "strong",
+          },
+        };
+        yield* runtime.resumeThread({ providerThread, runtimePolicy: selected });
+        yield* runtime.resumeThread({
+          providerThread,
+          runtimePolicy: { ...selected, runtimeMode: "approval-required", interactionMode: "plan" },
+        });
+        const policies = yield* Ref.get(observedPolicies);
+        assert.deepEqual(
+          policies.map((policy) => [policy?.runtimeMode, policy?.interactionMode]),
+          [
+            [driverName === "claudeAgent" ? "auto" : "approval-required", "default"],
+            [driverName === "claudeAgent" ? "auto" : "approval-required", "default"],
+            ["approval-required", "plan"],
+          ],
+        );
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 60_000,
+            driver: ProviderDriverKind.make(driverName),
+            observedPolicies,
+          }),
+        ),
+      );
+    }),
+);
 
 it.effect("ProviderSessionManagerV2 opens independent sessions concurrently", () =>
   Effect.gen(function* () {
@@ -2949,6 +3040,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
+      // This race concerns session activity, not asynchronous workspace path resolution.
+      const testRuntimePolicy = { ...runtimePolicy, cwd: null };
       const firstCheck = yield* Ref.make(true);
       const checkEntered = yield* Deferred.make<void>();
       const checkGate = yield* Deferred.make<void>();
@@ -2990,7 +3083,7 @@ it.effect(
           threadId,
           providerSessionId,
           modelSelection,
-          runtimePolicy,
+          runtimePolicy: testRuntimePolicy,
         });
         yield* runtime.events.pipe(Stream.runDrain, Effect.forkScoped);
         const appThread = (yield* projectionStore.getThreadProjection(threadId)).thread;
@@ -3019,12 +3112,10 @@ it.effect(
               attachments: [],
             },
             modelSelection,
-            runtimePolicy,
+            runtimePolicy: testRuntimePolicy,
           })
-          .pipe(Effect.forkDetach);
-        for (let i = 0; i < 10; i += 1) {
-          yield* Effect.yieldNow;
-        }
+          // Run through markBusy until it waits for the parked idle fiber.
+          .pipe(Effect.forkDetach({ startImmediately: true }));
         yield* Deferred.succeed(checkGate, undefined);
         yield* Fiber.join(turnFiber);
         yield* Effect.yieldNow;

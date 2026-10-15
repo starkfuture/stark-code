@@ -6,7 +6,14 @@ import {
   readProjectShellHistory,
 } from "./userShellComposer";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
-import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
+import {
+  runtimeModeConfig,
+  runtimeModeOptionsForProvider,
+  composerModeOptions,
+  resolveComposerModeSelection,
+  type RuntimeModeOption,
+  type ComposerMode,
+} from "./runtimeModeConfig";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -1249,14 +1256,13 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null, useContro
   };
 }
 
-type RuntimeModeOption = { mode: RuntimeMode } & (typeof runtimeModeConfig)[RuntimeMode];
-const runtimeModeOptions = runtimeModes.map((mode) => ({ mode, ...runtimeModeConfig[mode] }));
-const supervisedRuntimeModeOption = {
+const manualRuntimeModeOption = {
   mode: "approval-required" as const,
   ...runtimeModeConfig["approval-required"],
 };
 const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
   showInteractionModeToggle: boolean;
+  combinePlanMode: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
@@ -1268,52 +1274,60 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const size = props.size ?? "sm";
   const composerFloatingLayerProps = useComposerMenuProps();
   const [open, setOpen] = useComposerMenuState(props.hidden);
+  const options = composerModeOptions(
+    props.runtimeModeOptions,
+    props.combinePlanMode && props.showInteractionModeToggle,
+  );
+  const selectedMode =
+    props.combinePlanMode && props.showInteractionModeToggle && props.interactionMode === "plan"
+      ? "plan"
+      : props.runtimeMode;
   const runtimeModeOption =
-    props.runtimeModeOptions.find((option) => option.mode === props.runtimeMode) ??
-    supervisedRuntimeModeOption;
+    options.find((option) => option.mode === selectedMode) ?? manualRuntimeModeOption;
   const RuntimeModeIcon = runtimeModeOption.icon;
   const interactionModeTooltip =
     props.interactionMode === "plan"
       ? "Plan mode — click to return to normal build mode"
       : "Default mode — click to enter plan mode";
 
-  const interactionModeToggle = props.showInteractionModeToggle ? (
-    <>
-      <ComposerControlSeparator size={size} />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <ComposerControl
-              size={size}
-              className="shrink-0 whitespace-nowrap"
-              aria-pressed={props.interactionMode === "plan"}
-              type="button"
-              onClick={props.onToggleInteractionMode}
-              aria-label={interactionModeTooltip}
-            />
-          }
-        >
-          {props.interactionMode === "plan" ? (
-            <ComposerControlIcon
-              icon={PencilRulerIcon}
-              size={size}
-              className="text-current opacity-100"
-            />
-          ) : (
-            <ComposerControlIcon
-              icon={BotIcon}
-              size={size}
-              opticalSize={size === "xs" ? "default" : "large"}
-            />
-          )}
-          <span data-composer-control-label className="sr-only sm:not-sr-only">
-            {props.interactionMode === "plan" ? "Plan" : "Build"}
-          </span>
-        </TooltipTrigger>
-        <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
-      </Tooltip>
-    </>
-  ) : null;
+  const interactionModeToggle =
+    props.showInteractionModeToggle && !props.combinePlanMode ? (
+      <>
+        <ComposerControlSeparator size={size} />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <ComposerControl
+                size={size}
+                className="shrink-0 whitespace-nowrap"
+                aria-pressed={props.interactionMode === "plan"}
+                type="button"
+                onClick={props.onToggleInteractionMode}
+                aria-label={interactionModeTooltip}
+              />
+            }
+          >
+            {props.interactionMode === "plan" ? (
+              <ComposerControlIcon
+                icon={PencilRulerIcon}
+                size={size}
+                className="text-current opacity-100"
+              />
+            ) : (
+              <ComposerControlIcon
+                icon={BotIcon}
+                size={size}
+                opticalSize={size === "xs" ? "default" : "large"}
+              />
+            )}
+            <span data-composer-control-label className="sr-only sm:not-sr-only">
+              {props.interactionMode === "plan" ? "Plan" : "Build"}
+            </span>
+          </TooltipTrigger>
+          <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
+        </Tooltip>
+      </>
+    ) : null;
 
   return (
     <>
@@ -1323,8 +1337,14 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         <Select
           open={open}
           onOpenChange={setOpen}
-          value={props.runtimeMode}
-          onValueChange={(value) => props.onRuntimeModeChange(value!)}
+          value={selectedMode}
+          onValueChange={(value) => {
+            if (!value) return;
+            const next = resolveComposerModeSelection(value as ComposerMode, props.runtimeMode);
+            if (props.combinePlanMode && next.interactionMode !== props.interactionMode)
+              props.onToggleInteractionMode();
+            if (next.runtimeMode !== props.runtimeMode) props.onRuntimeModeChange(next.runtimeMode);
+          }}
         >
           <TooltipTrigger
             render={
@@ -1339,7 +1359,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             <SelectValue data-composer-control-label>{runtimeModeOption.label}</SelectValue>
           </TooltipTrigger>
           <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
-            {props.runtimeModeOptions.map((option) => {
+            {options.map((option) => {
               const OptionIcon = option.icon;
               return (
                 <SelectItem
@@ -2234,6 +2254,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedProvider: ProviderDriverKind =
     selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const supportedRuntimeModes = selectedProviderEntry?.snapshot.supportedRuntimeModes;
+  const runtimeModeOptions = runtimeModeOptionsForProvider(selectedProvider);
   const compatibleRuntimeModeOptions =
     supportedRuntimeModes && supportedRuntimeModes.length > 0
       ? runtimeModeOptions.filter((option) => supportedRuntimeModes.includes(option.mode))
@@ -5631,6 +5652,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       content: (
         <ComposerFooterModeControls
           showInteractionModeToggle={planModeUiEnabled}
+          combinePlanMode={selectedProvider === "claudeAgent"}
           interactionMode={interactionMode}
           runtimeMode={compatibleRuntimeMode}
           runtimeModeOptions={compatibleRuntimeModeOptions}
@@ -5794,12 +5816,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           )}
         >
           <CompactComposerControlsMenu
+            combinePlanMode={selectedProvider === "claudeAgent"}
             interactionMode={interactionMode}
             runtimeMode={compatibleRuntimeMode}
             runtimeModeOptions={compatibleRuntimeModeOptions}
             size={composerControlsCollapsed ? "xs" : "sm"}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
-            showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.includes("mode")}
+            showInteractionModeToggle={
+              planModeUiEnabled &&
+              (selectedProvider === "claudeAgent" || hiddenRestingBlockIds.includes("mode"))
+            }
             traitsMenuContent={
               hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
             }

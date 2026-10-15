@@ -24,7 +24,6 @@ import {
   runMcpCli,
 } from "../../provider/Drivers/McpServerControls.ts";
 import { makeIdleStatusResources } from "../../provider/Drivers/IdleStatusResources.ts";
-import { BRAND } from "@starkfuture/shared/branding";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import {
   dynamicToolTitle,
@@ -1166,33 +1165,28 @@ export function makeClaudeQueryOptions(input: {
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
-  if (BRAND.requireApprovalsByDefault) {
-    const current =
-      typeof effectiveQuerySettings === "object" && effectiveQuerySettings !== null
-        ? effectiveQuerySettings
-        : {};
-    const permissions =
-      typeof current.permissions === "object" && current.permissions !== null
-        ? current.permissions
-        : {};
-    effectiveQuerySettings = {
-      ...current,
-      env: { ...current.env, ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
-      disableAutoMode: "disable",
-      permissions: { ...permissions, disableBypassPermissionsMode: "disable" },
-    } as ClaudeSdkSettings;
-  }
+  const current =
+    typeof effectiveQuerySettings === "object" && effectiveQuerySettings !== null
+      ? effectiveQuerySettings
+      : {};
+  effectiveQuerySettings = {
+    ...current,
+    env: { ...current.env, ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
+  } as ClaudeSdkSettings;
+  // The thread's selected mode wins over account launch arguments. Without a
+  // thread policy, honor the account's native CLI configuration.
+  const permissionMode =
+    input.permissionMode ??
+    (launchArgPermissionMode === "manual"
+      ? "default"
+      : (launchArgPermissionMode as PermissionMode | null | undefined)) ??
+    (launchArgSkipPermissions === null || launchArgSkipPermissions === "true"
+      ? "bypassPermissions"
+      : "default");
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
-    permissionMode: BRAND.requireApprovalsByDefault
-      ? input.permissionMode === "plan" || launchArgPermissionMode === "plan"
-        ? "plan"
-        : "default"
-      : ((launchArgPermissionMode as PermissionMode | null | undefined) ??
-        (launchArgSkipPermissions === null || launchArgSkipPermissions === "true"
-          ? "bypassPermissions"
-          : (input.permissionMode ?? "default"))),
+    permissionMode,
     includePartialMessages: true,
     includeHookEvents: true,
     enableFileCheckpointing: true,
@@ -1206,7 +1200,7 @@ export function makeClaudeQueryOptions(input: {
     ...(input.allowedTools === undefined ? {} : { allowedTools: [...input.allowedTools] }),
     ...(input.disallowedTools === undefined ? {} : { disallowedTools: [...input.disallowedTools] }),
     ...(input.canUseTool === undefined ? {} : { canUseTool: input.canUseTool }),
-    ...(input.allowDangerouslySkipPermissions === true && !BRAND.requireApprovalsByDefault
+    ...(input.allowDangerouslySkipPermissions === true || permissionMode === "bypassPermissions"
       ? { allowDangerouslySkipPermissions: true }
       : {}),
     ...(requestThinkingSummaries
@@ -1913,12 +1907,11 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
     readOnlyTools !== undefined && readOnlyPolicyAllowsGlobalReads(runtimePolicy)
       ? readOnlyTools
       : undefined;
-  // acceptEdits approves edits before the callback runs; everything else it
-  // leaves to the callback, which must ask rather than allow.
+  // Claude approves routine actions before invoking the callback. Keep prompts
+  // available for Manual, Plan, and Auto classifier fallbacks.
   const installPermissionCallback =
     runtimePolicy.approvalPolicy === undefined
-      ? runtimePolicy.runtimeMode === "approval-required" ||
-        runtimePolicy.runtimeMode === "auto-accept-edits"
+      ? permissionMode !== "bypassPermissions" && permissionMode !== "dontAsk"
       : runtimePolicy.approvalPolicy !== "never";
 
   if (permissionMode === "plan") {

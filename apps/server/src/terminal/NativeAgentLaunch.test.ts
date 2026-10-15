@@ -42,12 +42,24 @@ describe("native agent shell launch", () => {
         "--settings",
         JSON.stringify({
           env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
-          disableAutoMode: "disable",
-          permissions: { disableBypassPermissionsMode: "disable" },
         }),
       ],
     });
   });
+  it.each(["manual", "auto", "acceptEdits", "plan", "dontAsk", "bypassPermissions"])(
+    "preserves Claude's explicit %s mode without disabling native mode switching",
+    (mode) => {
+      const { args } = nativeAgentLaunch({
+        driver: "claudeAgent",
+        home: "/tmp",
+        config: { launchArgs: `--permission-mode ${mode}` },
+      });
+      expect(args.slice(0, 2)).toEqual(["--permission-mode", mode]);
+      expect(JSON.parse(args[args.indexOf("--settings") + 1]!)).toEqual({
+        env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
+      });
+    },
+  );
   it("does not interpret shell substitutions in configuration", () => {
     const result = nativeAgentLaunch({
       driver: "codex",
@@ -110,7 +122,7 @@ describe("native agent shell launch", () => {
       "otel.log_user_prompt=false",
     ]);
   });
-  it("rejects permission bypass and auto mode in native launch settings", () => {
+  it("retains the Codex launch restrictions", () => {
     for (const [driver, launchArgs] of [
       ["codex", "--yolo"],
       ["codex", "-a never"],
@@ -134,8 +146,6 @@ describe("native agent shell launch", () => {
       ["codex", "-c 'sandbox_mode=\"danger-full-access\"' -s workspace-write"],
       ["codex", "-c 'approvals_reviewer=\"auto_review\"'"],
       ["codex", "-c 'approval_policy={ sandbox_approval=false }'"],
-      ["claudeAgent", "--dangerously-skip-permissions"],
-      ["claudeAgent", "--permission-mode auto"],
     ] as const) {
       expect(() => nativeAgentLaunch({ driver, config: { launchArgs }, home: "/tmp" })).toThrow(
         "requires supervised",

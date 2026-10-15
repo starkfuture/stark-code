@@ -1679,6 +1679,19 @@ describe("resolveComposerInteractionMode", () => {
     ).toEqual({ enabled: false, interactionMode: "default" });
   });
 
+  it("offers Claude's native Plan mode without the generic beta setting", () => {
+    expect(
+      resolveComposerInteractionMode({
+        planModeEnabled: false,
+        provider: {
+          driver: ProviderDriverKind.make("claudeAgent"),
+          showInteractionModeToggle: true,
+        },
+        interactionMode: "plan",
+      }),
+    ).toEqual({ enabled: true, interactionMode: "plan" });
+  });
+
   it("disables plan mode until the selected provider is available", () => {
     expect(
       resolveComposerInteractionMode({

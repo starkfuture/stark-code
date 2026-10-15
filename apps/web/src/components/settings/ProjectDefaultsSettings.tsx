@@ -20,7 +20,7 @@ import { useEnvironments } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
+import { runtimeModeConfig, runtimeModeOptionsForProvider } from "../chat/runtimeModeConfig";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -126,6 +126,11 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     }
     return null;
   }
+
+  const permissionOptions = runtimeModeOptionsForProvider(activeEntry?.driverKind ?? "codex");
+  const currentPermissionOption = permissionOptions.find(
+    (option) => option.mode === settings.defaultRuntimeMode,
+  );
 
   const setModel = (value: ModelSelection | null) => {
     const reason = value ? modelDisabledReason(value.instanceId, value.model) : null;
@@ -316,12 +321,13 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                   <SelectValue>
                     {mixedPermissions
                       ? "Mixed"
-                      : runtimeModeConfig[settings.defaultRuntimeMode].label}
+                      : (currentPermissionOption?.label ??
+                        runtimeModeConfig[settings.defaultRuntimeMode].label)}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {runtimeModeOptions.map((mode) => {
-                    const option = runtimeModeConfig[mode];
+                  {permissionOptions.map((option) => {
+                    const mode = option.mode;
                     const Icon = option.icon;
                     return (
                       <SelectItem key={mode} value={mode} className="min-w-64">

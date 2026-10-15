@@ -11882,48 +11882,56 @@ export default function ChatView(props: ChatViewProps) {
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
+            actions={
+              <>
+                {pagesAvailable ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={pagesOpen}
+                    onClick={() => {
+                      if (!activeProjectKey) return;
+                      setPagesProjectKeys((current) => {
+                        const next = new Set(current);
+                        if (next.has(activeProjectKey)) next.delete(activeProjectKey);
+                        else next.add(activeProjectKey);
+                        return next;
+                      });
+                    }}
+                  >
+                    Pages
+                  </Button>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={nativeShellMode}
+                  title={
+                    serverConfig?.environment.capabilities.nativeAgentShell !== true
+                      ? "This environment needs a Stark Code server with native shell support"
+                      : "Open the full native Claude or Codex CLI"
+                  }
+                  disabled={
+                    !nativeShellMode &&
+                    (!activeProject ||
+                      !activeProviderInstanceId ||
+                      !canOperateTerminal ||
+                      nativeShellPreparing ||
+                      isWorking ||
+                      serverConfig?.environment.capabilities.nativeAgentShell !== true ||
+                      (selectedProvider !== "codex" && selectedProvider !== "claudeAgent"))
+                  }
+                  onClick={toggleNativeAgentShell}
+                >
+                  {nativeShellPreparing
+                    ? "Opening shell…"
+                    : nativeShellMode
+                      ? "Chat mode"
+                      : "Shell mode"}
+                </Button>
+              </>
+            }
           />
-          {pagesAvailable ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-pressed={pagesOpen}
-              onClick={() => {
-                if (!activeProjectKey) return;
-                setPagesProjectKeys((current) => {
-                  const next = new Set(current);
-                  if (next.has(activeProjectKey)) next.delete(activeProjectKey);
-                  else next.add(activeProjectKey);
-                  return next;
-                });
-              }}
-            >
-              Pages
-            </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-pressed={nativeShellMode}
-            title={
-              serverConfig?.environment.capabilities.nativeAgentShell !== true
-                ? "This environment needs a Stark Code server with native shell support"
-                : "Open the full native Claude or Codex CLI"
-            }
-            disabled={
-              !nativeShellMode &&
-              (!activeProject ||
-                !activeProviderInstanceId ||
-                !canOperateTerminal ||
-                nativeShellPreparing ||
-                isWorking ||
-                serverConfig?.environment.capabilities.nativeAgentShell !== true ||
-                (selectedProvider !== "codex" && selectedProvider !== "claudeAgent"))
-            }
-            onClick={toggleNativeAgentShell}
-          >
-            {nativeShellPreparing ? "Opening shell…" : nativeShellMode ? "Chat mode" : "Shell mode"}
-          </Button>
         </header>
 
         {serverProjection?.thread.lastFileRestore ? (

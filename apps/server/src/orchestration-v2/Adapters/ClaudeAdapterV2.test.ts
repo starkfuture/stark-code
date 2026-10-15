@@ -251,68 +251,105 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.equal(safetyOptions({ permissionMode: "auto" }).permissionMode, "auto");
   });
 
-  it.each(["allow", "deny", "missing", "aborted"] as const)(
-    "publishing in Bypass obeys the %s host decision",
-    async (decision) => {
+  it("loads the bundled local plugin alongside all user plugins without weakening approvals", () => {
+    const options = safetyOptions({
+      settings: {
+        ...OPTED_IN_CLAUDE_SETTINGS,
+        allowBypassPermissions: false,
+        launchArgs: '--plugin-dir "/custom one" --plugin-dir /custom-two --permission-mode plan',
+      },
+      environment: { STARK_WORKBENCH_ROOT: "/app/kit", STARK_WORKBENCH_NODE: "/app/Stark Code" },
+      canUseTool: async () => ({ behavior: "deny", message: "test" }),
+    });
+    assert.deepEqual(options.plugins, [
+      { type: "local", path: "/custom one" },
+      { type: "local", path: "/custom-two" },
+      { type: "local", path: "/app/kit" },
+    ]);
+    assert.notProperty(options.extraArgs, "plugin-dir");
+    assert.equal(options.permissionMode, "plan");
+    assert.deepInclude(options.settings, {
+      disableAllHooks: false,
+      permissions: { disableBypassPermissionsMode: "disable" },
+    });
+    assert.equal(options.env?.STARK_WORKBENCH_NODE, "/app/Stark Code");
+    assert.equal(options.env?.STARK_WORKBENCH_MANAGED_MIRROR, "1");
+    assert.isFunction(options.hooks?.PreToolUse?.[0]?.hooks[0]);
+  });
+
+  it.each(["default", "auto", "bypassPermissions"] as const)(
+    "keeps Pages writes disabled in SDK %s mode even if the approval callback would allow them",
+    async (permissionMode) => {
       let calls = 0;
-      const controller = new AbortController();
       const options = safetyOptions({
-        permissionMode: "bypassPermissions",
-        settings: { ...OPTED_IN_CLAUDE_SETTINGS, allowBypassPermissions: true },
-        ...(decision === "missing"
-          ? {}
-          : {
-              canUseTool: async () => {
-                calls++;
-                if (decision === "aborted") controller.abort();
-                return decision === "deny"
-                  ? { behavior: "deny" as const, message: "Declined" }
-                  : {
-                      behavior: "allow" as const,
-                      updatedInput: { command: "spage publish reviewed-page" },
-                    };
-              },
-            }),
+        permissionMode,
+        settings: OPTED_IN_CLAUDE_SETTINGS,
+        canUseTool: async () => {
+          calls++;
+          return { behavior: "allow" as const, updatedInput: {} };
+        },
       });
       const hook = options.hooks!.PreToolUse![0]!.hooks[0]!;
-      const result = await hook(
+      const signal = new AbortController().signal;
+      for (const [tool_name, tool_input] of [
+        ["mcp__stark__pages_upload_begin", { path: "page/index.html" }],
+        ["mcp__stark__pages_upload_commit", { upload_id: "upload-1" }],
+        ["mcp__stark__pages_delete", { page: "page" }],
+        ["proxy", { name: "pages_upload_files", arguments: {} }],
+        ["Bash", { command: 'node "/kit/spage.js" publish prepare pages/page' }],
+        ["Bash", { command: "curl -X PUT https://s3.amazonaws.com/bucket/page" }],
+      ] as const) {
+        const result = await hook(
+          {
+            hook_event_name: "PreToolUse",
+            session_id: "guard",
+            transcript_path: "/tmp/guard",
+            cwd: "/workspace",
+            tool_name,
+            tool_input,
+            tool_use_id: "publish-1",
+            permission_mode: permissionMode,
+          },
+          "publish-1",
+          { signal },
+        );
+        assert.deepInclude(result, {
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason:
+              "Stark Pages publishing is available only in native Claude shell mode until its SDK approval hooks have been verified.",
+          },
+        });
+        const permission = await options.canUseTool!(tool_name, tool_input, {
+          signal,
+          toolUseID: "publish-1",
+          requestId: "publish-request-1",
+        });
+        assert.equal(permission?.behavior, "deny");
+      }
+      assert.equal(calls, 0);
+      const read = await hook(
         {
           hook_event_name: "PreToolUse",
           session_id: "guard",
           transcript_path: "/tmp/guard",
           cwd: "/workspace",
-          tool_name: "Bash",
-          tool_input: { command: "spage publish page" },
-          tool_use_id: "publish-1",
-          permission_mode: "bypassPermissions",
+          tool_name: "mcp__stark__pages_get",
+          tool_input: { slug: "page" },
+          tool_use_id: "read-1",
+          permission_mode: permissionMode,
         },
-        "publish-1",
-        { signal: controller.signal },
+        "read-1",
+        { signal },
       );
-      assert.equal(calls, decision === "missing" ? 0 : 1);
-      assert.deepInclude(result, {
-        hookSpecificOutput:
-          decision === "allow"
-            ? {
-                hookEventName: "PreToolUse",
-                permissionDecision: "allow",
-                updatedInput: { command: "spage publish reviewed-page" },
-              }
-            : decision === "aborted"
-              ? {
-                  hookEventName: "PreToolUse",
-                  permissionDecision: "deny",
-                  updatedInput: { command: "spage publish reviewed-page" },
-                }
-              : {
-                  hookEventName: "PreToolUse",
-                  permissionDecision: "deny",
-                  permissionDecisionReason:
-                    decision === "deny"
-                      ? "Declined"
-                      : "Publishing requires an interactive approval.",
-                },
-      });
+      assert.deepEqual(read, {});
+      await options.canUseTool!(
+        "mcp__stark__pages_get",
+        { slug: "page" },
+        { signal, toolUseID: "read-1", requestId: "read-request-1" },
+      );
+      assert.equal(calls, 1);
     },
   );
 

@@ -27,6 +27,7 @@ export function StarkPagesSidebar(props: {
     projectRoot: string;
     retry: number;
     mirror: StarkPagesMirror | null;
+    startFailed: boolean;
   } | null>(null);
   const [notice, setNotice] = useState<{ key: string; message: string } | null>(null);
   const mirror =
@@ -36,24 +37,44 @@ export function StarkPagesSidebar(props: {
   const panelKey = `${projectRoot}:${origin ?? ""}:${retry}`;
   const mirrorRoot = mirror?.root;
   const mirrorPort = mirror?.port;
-  const activeNotice = notice?.key === panelKey ? notice.message : null;
+  const activeNotice =
+    notice?.key === panelKey
+      ? notice.message
+      : discovery?.projectRoot === projectRoot && discovery.retry === retry && discovery.startFailed
+        ? "Pages could not start. Retry, or reopen Stark Code if the problem continues."
+        : null;
 
   useEffect(() => {
     let cancelled = false;
     let pending = false;
-    const check = async () => {
+    const check = async (start = false) => {
       if (pending) return;
       pending = true;
       try {
-        const result = (await window.desktopBridge?.getStarkPagesMirror?.(projectRoot)) ?? null;
-        if (!cancelled) setDiscovery({ projectRoot, retry, mirror: result });
+        const ensure = window.desktopBridge?.ensureStarkPagesMirror;
+        const result =
+          (await (start && ensure
+            ? ensure(projectRoot)
+            : window.desktopBridge?.getStarkPagesMirror?.(projectRoot))) ?? null;
+        if (!cancelled)
+          setDiscovery((previous) => ({
+            projectRoot,
+            retry,
+            mirror: result,
+            startFailed:
+              result !== null
+                ? false
+                : start && ensure !== undefined
+                  ? true
+                  : (previous?.startFailed ?? false),
+          }));
       } catch {
-        if (!cancelled) setDiscovery({ projectRoot, retry, mirror: null });
+        if (!cancelled) setDiscovery({ projectRoot, retry, mirror: null, startFailed: true });
       } finally {
         pending = false;
       }
     };
-    void check();
+    void check(true);
     const timer = window.setInterval(() => {
       void check();
     }, 3000);
@@ -72,8 +93,7 @@ export function StarkPagesSidebar(props: {
       if (trusted.current?.key === panelKey && trusted.current.ready) return;
       setNotice({
         key: panelKey,
-        message:
-          "The Pages panel did not connect. Check that the page mirror is running, then retry.",
+        message: "The Pages panel did not connect. Retry Pages to reconnect.",
       });
     }, 8000);
     return () => {
@@ -200,12 +220,12 @@ export function StarkPagesSidebar(props: {
         />
       ) : (
         <div className="space-y-3 p-4 text-sm text-muted-foreground">
-          <p>{EMPTY}</p>
-          {agent === "codex" ? (
-            <p>
-              Pages from Codex appear once the mirror runs. Run spage serve in the project folder.
-            </p>
-          ) : null}
+          <p>
+            {window.desktopBridge?.ensureStarkPagesMirror &&
+            (discovery?.projectRoot !== projectRoot || discovery.retry !== retry)
+              ? "Starting Pages…"
+              : EMPTY}
+          </p>
           {!window.desktopBridge?.getStarkPagesMirror ? (
             <p>Open this project in the Stark Code desktop app to view its pages.</p>
           ) : null}

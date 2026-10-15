@@ -1,6 +1,10 @@
 import { PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/providerPrivacy";
 import { STARK_PAGES_ENV } from "@starkfuture/shared/starkPages";
 import {
+  resolveStarkWorkbenchRoot,
+  STARK_WORKBENCH_NODE_ENV,
+} from "@starkfuture/shared/starkWorkbench";
+import {
   createTerminalSpawnEnv,
   defaultShellResolver,
   formatShellCandidate,
@@ -1291,9 +1295,20 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
           return yield* new TerminalProviderInstanceNotFoundError({ providerInstanceId });
         const home = yield* HostProcess.HomeDirectory;
         const nativePlatform = yield* HostProcess.Platform;
-        const nodeExecutable = (yield* HostProcess.IsExecutable)
-          ? "node"
-          : yield* HostProcess.ExecutablePath;
+        const hostEnvironment = yield* HostProcess.Environment;
+        const workbenchRoot =
+          instance.driver === "claudeAgent"
+            ? yield* resolveStarkWorkbenchRoot(hostEnvironment).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Path.Path, path),
+                Effect.mapError(
+                  (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
+                ),
+              )
+            : undefined;
+        const nodeExecutable =
+          hostEnvironment[STARK_WORKBENCH_NODE_ENV] ??
+          ((yield* HostProcess.IsExecutable) ? "node" : yield* HostProcess.ExecutablePath);
         const launch = yield* Effect.try({
           try: () =>
             nativeAgentLaunch({
@@ -1302,6 +1317,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
               home,
               platform: nativePlatform,
               nodeExecutable,
+              ...(workbenchRoot === undefined ? {} : { workbenchRoot }),
             }),
           catch: (cause) =>
             cause instanceof NativeAgentLaunchRefused

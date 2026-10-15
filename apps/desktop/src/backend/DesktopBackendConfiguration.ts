@@ -10,6 +10,7 @@ import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
@@ -18,6 +19,7 @@ import serverPackageJson from "../../../server/package.json" with { type: "json"
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopCliShim from "../app/DesktopCliShim.ts";
+import * as DesktopWorkbench from "../starkPages/DesktopWorkbench.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopServerExposure from "./DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
@@ -553,11 +555,15 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
   ): Effect.fn.Return<
     DesktopBackendManager.DesktopBackendStartConfig,
     never,
-    DesktopEnvironment.DesktopEnvironment | DesktopServerExposure.DesktopServerExposure
+    | DesktopEnvironment.DesktopEnvironment
+    | DesktopServerExposure.DesktopServerExposure
+    | FileSystem.FileSystem
+    | Path.Path
   > {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
     const backendExposure = yield* serverExposure.backendConfig;
+    const workbenchEnvironment = yield* DesktopWorkbench.backendEnvironment;
 
     const bootstrap = {
       mode: "desktop" as const,
@@ -601,6 +607,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       env: {
         ...backendChildEnvPatch(),
         ELECTRON_RUN_AS_NODE: "1",
+        ...workbenchEnvironment,
         // The server names this launcher in commands it asks a person to run.
         STARK_CODE_CLI_PATH: Option.getOrUndefined(input.cliPath),
       },
@@ -927,6 +934,8 @@ export const make = Effect.gen(function* () {
     return yield* resolvePrimaryStartConfig({ ...shared, resourceMonitorPath, cliPath }).pipe(
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
       Effect.provideService(DesktopServerExposure.DesktopServerExposure, serverExposure),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, environment.path),
     );
   });
 

@@ -87,7 +87,9 @@ const scenario = (
           writeDescriptor,
         });
       }).pipe(
-        Effect.provide(StarkPages.layer),
+        Effect.provide(
+          StarkPages.layer({ kitRoot: "/missing/stark-workbench", nodePath: process.execPath }),
+        ),
         Effect.provideService(ElectronShell.ElectronShell, shell),
       );
     }),

@@ -1,7 +1,10 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodePath from "node:path";
+import { prepareStarkWorkbench } from "../../../scripts/prepare-stark-workbench.mjs";
 
 import { desktopDir, resolveElectronLaunchCommand } from "./electron-launcher.mjs";
+
+prepareStarkWorkbench();
 
 NodeChildProcess.execFileSync(
   process.execPath,

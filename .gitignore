@@ -49,3 +49,5 @@ node_modules/
 # Fork development state and tooling
 .tools/
 .stark-code/
+/apps/desktop/resources/stark-workbench/
+/apps/desktop/resources/stark-workbench.extract-*/

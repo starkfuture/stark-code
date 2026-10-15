@@ -20,6 +20,38 @@ const defaultCodexPolicy = [
 ];
 
 describe("native agent shell launch", () => {
+  it("adds the bundled kit before the prompt while preserving user plugins, hooks and permission policy", () => {
+    const launch = nativeAgentLaunch({
+      driver: "claudeAgent",
+      config: { launchArgs: '--plugin-dir "/custom kit" --permission-mode plan -- literal prompt' },
+      home: "/home/test",
+      workbenchRoot: "/Applications/Stark Code/Resources/stark-workbench",
+      nodeExecutable: "/Applications/Stark Code/MacOS/Stark Code",
+    });
+    expect(launch.args.slice(0, 6)).toEqual([
+      "--plugin-dir",
+      "/custom kit",
+      "--permission-mode",
+      "plan",
+      "--plugin-dir",
+      "/Applications/Stark Code/Resources/stark-workbench",
+    ]);
+    expect(launch.args.slice(-3)).toEqual(["--", "literal", "prompt"]);
+    const settings = JSON.parse(launch.args[launch.args.indexOf("--settings") + 1]!);
+    expect(settings.env).toMatchObject({
+      STARK_WORKBENCH_NODE: "/Applications/Stark Code/MacOS/Stark Code",
+      STARK_WORKBENCH_MANAGED_MIRROR: "1",
+    });
+    expect(settings.hooks.PreToolUse[0].matcher).toBe("*");
+    expect(settings.permissions.disableBypassPermissionsMode).toBe("disable");
+    const again = nativeAgentLaunch({
+      driver: "claudeAgent",
+      config: { launchArgs: "--plugin-dir /kit" },
+      home: "/home/test",
+      workbenchRoot: "/kit",
+    });
+    expect(again.args.filter((arg) => arg === "/kit")).toHaveLength(1);
+  });
   it("runs Codex interactively rather than starting its app server", () => {
     expect(nativeAgentLaunch({ driver: "codex", config: {}, home: "/Users/test" })).toEqual({
       shell: "codex",

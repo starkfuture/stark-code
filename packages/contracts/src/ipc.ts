@@ -14,6 +14,7 @@ import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from "./settings.ts";
 import type { EditorId } from "./editor.ts";
 import type { PreviewForwardedShortcut } from "./keybindings.ts";
+import type { StarkPublishedPagesBridge } from "./starkPublishedPages.ts";
 
 import type {
   DesktopAppActivationRequest,
@@ -1123,6 +1124,7 @@ export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
 export interface DesktopBridge {
+  readonly publishedPages?: StarkPublishedPagesBridge;
   getAppBranding: () => DesktopAppBranding | null;
   /** Absolute path of a dropped or picked file; absent on desktop builds predating it. */
   getPathForFile?: (file: File) => string;
@@ -1217,7 +1219,11 @@ export interface DesktopBridge {
   receiveProviderAuthCallback?: (authorizationUrl: string) => Promise<string>;
   cancelProviderAuthCallback?: (authorizationUrl: string) => Promise<void>;
   openExternal: (url: string) => Promise<boolean>;
+  getStarkWorkbenchAvailable?: () => Promise<boolean>;
   getStarkPagesMirror?: (
+    projectRoot: string,
+  ) => Promise<{ readonly root: string; readonly port: number } | null>;
+  ensureStarkPagesMirror?: (
     projectRoot: string,
   ) => Promise<{ readonly root: string; readonly port: number } | null>;
   openStarkPagesExternal?: (input: {

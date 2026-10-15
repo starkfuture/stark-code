@@ -595,6 +595,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }
 
     assert.deepStrictEqual(DESKTOP_FILE_EXCLUSIONS, [
+      "!apps/desktop/resources/stark-workbench",
+      "!apps/desktop/resources/stark-workbench/**/*",
+      "!apps/desktop/prod-resources/stark-workbench",
+      "!apps/desktop/prod-resources/stark-workbench/**/*",
       "!**/node_modules/@cursor/sdk-*/**/*",
       "!apps/desktop/prod-resources/cursor-sdk",
       "!apps/desktop/prod-resources/cursor-sdk/**/*",
@@ -2191,6 +2195,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("stages the resource monitor as an external executable resource", () => {
     assert.deepStrictEqual(DESKTOP_EXTRA_RESOURCES, [
+      {
+        from: "apps/desktop/prod-resources/stark-workbench",
+        to: "stark-workbench",
+        filter: ["**/*", "**/.*", "**/.*/**/*"],
+      },
       {
         from: "apps/desktop/prod-resources/cursor-sdk",
         to: "node_modules/@cursor",

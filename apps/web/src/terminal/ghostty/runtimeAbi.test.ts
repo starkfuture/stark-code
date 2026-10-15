@@ -1,9 +1,17 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import wasmDataUrl from "./vendor/ghostty-vt.wasm?inline";
 import writePtyWasmDataUrl from "./vendor/ghostty-write-pty.wasm?inline";
 import pinnedVersion from "../../../../../native/libghostty-vt/VERSION?raw";
 import { ghosttyKeyForCode } from "./keyCodes";
+import { GhosttyRuntime } from "./runtime";
+
+vi.mock("./vendor/ghostty-vt.wasm?url", async () => ({
+  default: (await import("./vendor/ghostty-vt.wasm?inline")).default,
+}));
+vi.mock("./vendor/ghostty-write-pty.wasm?url&no-inline", async () => ({
+  default: (await import("./vendor/ghostty-write-pty.wasm?inline")).default,
+}));
 
 type WasmFunction = (...args: number[]) => number;
 
@@ -14,6 +22,38 @@ function decodeWasmDataUrl(dataUrl: string): Uint8Array {
 }
 
 describe("vendored libghostty-vt WebAssembly", () => {
+  it("matches the shipped PTY import ABI to the real Stark runtime host", async () => {
+    const module = await WebAssembly.compile(
+      decodeWasmDataUrl(writePtyWasmDataUrl).buffer as ArrayBuffer,
+    );
+    expect(WebAssembly.Module.imports(module)).toEqual([
+      { module: "env", name: "stark_write_pty", kind: "function" },
+    ]);
+    // Load both shipped assets through production host bindings, rather than a
+    // test-only import table that could drift with a rename of the host API.
+    const runtime = await GhosttyRuntime.load();
+    const options = runtime.alloc(8);
+    runtime.view(options, 8).setUint16(0, 80, true);
+    runtime.view(options, 8).setUint16(2, 24, true);
+    const slot = runtime.allocOpaque();
+    expect(runtime.call("ghostty_terminal_new", 0, slot, options)).toBe(0);
+    const terminal = runtime.readPointer(slot);
+    const replies: string[] = [];
+    const writer = runtime.attachPtyWriter(terminal, (reply) => replies.push(reply));
+    const query = new TextEncoder().encode("\u001b[5n");
+    const input = runtime.alloc(query.length);
+    try {
+      runtime.bytes(input, query.length).set(query);
+      runtime.call("ghostty_terminal_vt_write", terminal, input, query.length);
+      expect(replies).toEqual(["\u001b[0n"]);
+    } finally {
+      runtime.detachPtyWriter(terminal, writer);
+      runtime.call("ghostty_terminal_free", terminal);
+      runtime.freeOpaque(slot);
+      runtime.free(input, query.length);
+      runtime.free(options, 8);
+    }
+  });
   it("stays pinned to the canonical revision and size budget", async () => {
     const wasm = decodeWasmDataUrl(wasmDataUrl);
     expect(wasm.byteLength).toBeLessThan(750_000);

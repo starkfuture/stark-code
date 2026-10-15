@@ -19,6 +19,7 @@ import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
+import * as StarkPages from "../starkPages/StarkPages.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLegacyLocalStorage from "./DesktopLegacyLocalStorage.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
@@ -350,6 +351,7 @@ const scopedProgram = Effect.scoped(
 
     const shutdown = yield* DesktopShutdown.DesktopShutdown;
     const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
+    const pages = yield* StarkPages.StarkPages;
 
     yield* Effect.addFinalizer(() =>
       // Stop every backend in the pool, not just the primary. The
@@ -358,6 +360,7 @@ const scopedProgram = Effect.scoped(
       // finalizer means it gets hard-killed by the OS instead of
       // receiving SIGTERM + grace.
       stopAllPoolInstances().pipe(
+        Effect.ensuring(pages.shutdown),
         Effect.ensuring(rendererHistory.shutdown),
         Effect.ensuring(shutdown.markComplete),
       ),

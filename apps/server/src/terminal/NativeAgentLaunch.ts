@@ -1,6 +1,10 @@
 import { CODEX_PRIVACY_ARGS, PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/providerPrivacy";
 import { BRAND } from "@starkfuture/shared/branding";
 import { STARK_PAGES_ENV } from "@starkfuture/shared/starkPages";
+import {
+  claudePluginArguments,
+  starkWorkbenchEnvironment,
+} from "@starkfuture/shared/starkWorkbench";
 import { ClaudeSettings, CodexSettings } from "@starkfuture/contracts";
 import { tokenizeCliArgs } from "@starkfuture/shared/cliArgs";
 import { expandHomePath } from "@starkfuture/provider-core/server/pathExpansion";
@@ -30,6 +34,7 @@ export function nativeAgentLaunch(input: {
   readonly home: string;
   readonly platform?: NodeJS.Platform;
   readonly nodeExecutable?: string;
+  readonly workbenchRoot?: string;
 }): { shell: string; args: string[] } {
   const settings =
     input.driver === "codex"
@@ -77,6 +82,12 @@ export function nativeAgentLaunch(input: {
     );
   }
   if (input.driver === "claudeAgent") {
+    if (
+      input.workbenchRoot &&
+      !claudePluginArguments(settings.launchArgs).paths.includes(input.workbenchRoot)
+    ) {
+      args.push("--plugin-dir", input.workbenchRoot);
+    }
     args.push(
       "--settings",
       JSON.stringify({
@@ -102,7 +113,13 @@ export function nativeAgentLaunch(input: {
         ...(decodeClaudeSettings(input.config).allowBypassPermissions === true
           ? {}
           : { permissions: { disableBypassPermissionsMode: "disable" } }),
-        env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
+        env: {
+          ...PROVIDER_PRIVACY_ENV,
+          ...STARK_PAGES_ENV,
+          ...(input.workbenchRoot
+            ? starkWorkbenchEnvironment(input.workbenchRoot, input.nodeExecutable ?? "node")
+            : {}),
+        },
       }),
     );
   }

@@ -12,6 +12,7 @@ GHOSTTY_REVISION="$(tr -d '[:space:]' < "${CANONICAL_VENDOR_DIR}/VERSION")"
 GHOSTTY_SOURCE_DIR="${GHOSTTY_SOURCE_DIR:-${HOME}/.cache/starkcode/ghostty-${GHOSTTY_REVISION:0:8}}"
 GHOSTTY_ZIG_VERSION="${GHOSTTY_ZIG_VERSION:-0.15.2}"
 GHOSTTY_ZIG="${GHOSTTY_ZIG:-}"
+TRAMPOLINE_ONLY=false
 
 log() {
   printf '[libghostty-vt-wasm] %s\n' "$*"
@@ -26,9 +27,16 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
 
+case "${1:-}" in
+  --trampoline-only) TRAMPOLINE_ONLY=true ;;
+  "") ;;
+  *) die "usage: $0 [--trampoline-only]" ;;
+esac
+
 ensure_zig() {
   if [[ -n "${GHOSTTY_ZIG}" ]]; then
     [[ -x "${GHOSTTY_ZIG}" ]] || die "GHOSTTY_ZIG is not executable: ${GHOSTTY_ZIG}"
+    [[ "$("${GHOSTTY_ZIG}" version)" == "${GHOSTTY_ZIG_VERSION}" ]] || die "expected Zig ${GHOSTTY_ZIG_VERSION}"
     return
   fi
   if command -v zig >/dev/null 2>&1 && [[ "$(zig version)" == "${GHOSTTY_ZIG_VERSION}" ]]; then
@@ -90,34 +98,40 @@ ensure_ghostty_source() {
 }
 
 ensure_zig
-ensure_ghostty_source
 
 build_root="$(mktemp -d)"
 trap 'rm -rf "${build_root}"' EXIT
 
-log "building ${GHOSTTY_REVISION} for wasm32-freestanding"
-(
-  cd "${GHOSTTY_SOURCE_DIR}"
-  # The pinned revision rides along as semver build metadata so the artifact
-  # identifies its own provenance through ghostty_build_info(); mobile's
-  # VERSION file stays the single source of truth for the pin.
-  "${GHOSTTY_ZIG}" build \
-    -Demit-lib-vt \
-    -Dtarget=wasm32-freestanding \
-    -Doptimize=ReleaseSmall \
-    -Dstrip=true \
-    -Dlib-version-string="0.1.0-dev+${GHOSTTY_REVISION}" \
-    -p "${build_root}"
-)
-
 mkdir -p "${VENDOR_DIR}"
-cp "${build_root}/bin/ghostty-vt.wasm" "${VENDOR_DIR}/ghostty-vt.wasm"
+if [[ "${TRAMPOLINE_ONLY}" != true ]]; then
+  ensure_ghostty_source
+  log "building ${GHOSTTY_REVISION} for wasm32-freestanding"
+  (
+    cd "${GHOSTTY_SOURCE_DIR}"
+    # The pinned revision rides along as semver build metadata so the artifact
+    # identifies its own provenance through ghostty_build_info(); mobile's
+    # VERSION file stays the single source of truth for the pin.
+    "${GHOSTTY_ZIG}" build \
+      -Demit-lib-vt \
+      -Dtarget=wasm32-freestanding \
+      -Doptimize=ReleaseSmall \
+      -Dstrip=true \
+      -Dlib-version-string="0.1.0-dev+${GHOSTTY_REVISION}" \
+      -p "${build_root}"
+  )
+
+  cp "${build_root}/bin/ghostty-vt.wasm" "${VENDOR_DIR}/ghostty-vt.wasm"
+  log "wrote ${VENDOR_DIR}/ghostty-vt.wasm"
+fi
+
+log "building the Stark PTY callback trampoline with Zig ${GHOSTTY_ZIG_VERSION}"
 "${GHOSTTY_ZIG}" build-exe \
   "${SCRIPT_DIR}/ghostty-write-pty.zig" \
   -target wasm32-freestanding \
   -O ReleaseSmall \
   -fno-entry \
   -rdynamic \
+  --cache-dir "${build_root}/zig-cache" \
   -femit-bin="${VENDOR_DIR}/ghostty-write-pty.wasm"
 chmod 0644 "${VENDOR_DIR}/ghostty-write-pty.wasm"
-log "wrote ${VENDOR_DIR}/ghostty-vt.wasm"
+log "wrote ${VENDOR_DIR}/ghostty-write-pty.wasm"

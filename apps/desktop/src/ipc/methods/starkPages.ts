@@ -5,6 +5,22 @@ import * as IpcChannels from "../channels.ts";
 import * as StarkPages from "../../starkPages/StarkPages.ts";
 
 const Root = Schema.String.check(Schema.isMaxLength(4096));
+export const workbenchAvailable = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.STARK_WORKBENCH_AVAILABLE_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.starkPages.workbenchAvailable")(function* () {
+    return yield* (yield* StarkPages.StarkPages).workbenchAvailable;
+  }),
+});
+export const ensureMirror = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.STARK_PAGES_ENSURE_MIRROR_CHANNEL,
+  payload: Root,
+  result: Schema.NullOr(Schema.Struct({ root: Schema.String, port: Schema.Int })),
+  handler: Effect.fn("desktop.ipc.starkPages.ensureMirror")(function* (root) {
+    return yield* (yield* StarkPages.StarkPages).ensureMirror(root);
+  }),
+});
 export const findMirror = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.STARK_PAGES_MIRROR_CHANNEL,
   payload: Root,

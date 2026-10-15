@@ -4,7 +4,7 @@ This directory is the browser adapter for the same official `libghostty-vt` C AB
 It is intentionally not an xterm compatibility layer.
 
 - `runtime.ts` owns the singleton WebAssembly instance and runtime ABI layouts.
-- `ghostty-write-pty.wasm` is a 112-byte callback trampoline for terminal-generated PTY replies.
+- `ghostty-write-pty.wasm` is a small callback trampoline for terminal-generated PTY replies.
 - `core.ts` owns per-terminal Ghostty handles and translates the C ABI into render snapshots.
 - `renderer.ts` batches backgrounds and style runs into a Canvas 2D frame.
 - `surface.ts` owns browser input, IME, selection, scrolling, sizing, links, and cursor blinking.
@@ -14,6 +14,11 @@ It is intentionally not an xterm compatibility layer.
   `apps/web/scripts/build-libghostty-wasm.sh`. The upstream pin and license live once, at
   `native/libghostty-vt/` at the repository root; the wasm embeds the pinned revision
   in its build info and the ABI test verifies it against mobile's `VERSION`.
+
+To rebuild only the app-owned callback trampoline after changing its import ABI, run
+`apps/web/scripts/build-libghostty-wasm.sh --trampoline-only`. This uses pinned Zig 0.15.2
+without fetching or rebuilding Ghostty. The ABI test checks `env.stark_write_pty` against
+the shipped module and exercises terminal replies through the production runtime host.
 
 Keep browser behavior here and terminal transport in the existing client runtime. Do not add React
 state to the render loop. Both WASM artifacts are ordinary read-only assets, not executables.

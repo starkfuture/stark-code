@@ -2,6 +2,13 @@ import { PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/providerPrivacy";
 import { redactProviderAuthValue } from "./ProviderAuthRedaction.ts";
 import { STARK_PAGES_ENV } from "@starkfuture/shared/starkPages";
 import {
+  claudePluginArguments,
+  resolveStarkWorkbenchRoot,
+  starkWorkbenchEnvironment,
+  STARK_WORKBENCH_ROOT_ENV,
+  STARK_WORKBENCH_NODE_ENV,
+} from "@starkfuture/shared/starkWorkbench";
+import {
   claudeApprovalOptions,
   isStarkPublishRequest,
   toPermissionUpdates,
@@ -1132,12 +1139,23 @@ export function makeClaudeQueryOptions(input: {
   readonly allowDangerouslySkipPermissions?: boolean;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
+  const pluginArguments = claudePluginArguments(input.settings?.launchArgs);
+  const workbenchRoot = input.environment?.[STARK_WORKBENCH_ROOT_ENV];
+  const pluginPaths = [
+    ...new Set([...pluginArguments.paths, ...(workbenchRoot ? [workbenchRoot] : [])]),
+  ];
+  const workbenchEnv = workbenchRoot
+    ? starkWorkbenchEnvironment(
+        workbenchRoot,
+        input.environment?.[STARK_WORKBENCH_NODE_ENV] ?? "node",
+      )
+    : {};
   const {
     "permission-mode": launchArgPermissionMode,
     "dangerously-skip-permissions": launchArgSkipPermissions,
     "allow-dangerously-skip-permissions": launchArgAllowSkipPermissions,
     ...extraArgs
-  } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
+  } = parseCliArgs(pluginArguments.args).flags;
   const requestThinkingSummaries =
     compiledSelection.settings.alwaysThinkingEnabled !== false &&
     extraArgs["thinking-display"] !== "omitted";
@@ -1176,7 +1194,7 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.allowBypassPermissions === true
       ? {}
       : { permissions: { ...current.permissions, disableBypassPermissionsMode: "disable" } }),
-    env: { ...current.env, ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
+    env: { ...current.env, ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV, ...workbenchEnv },
   } as ClaudeSdkSettings;
   // The thread's selected mode wins over account launch arguments. Without a
   // thread policy, honor the account's native CLI configuration.
@@ -1200,6 +1218,9 @@ export function makeClaudeQueryOptions(input: {
     );
   }
   const options: ClaudeAgentSdkQueryOptions = {
+    ...(pluginPaths.length > 0
+      ? { plugins: pluginPaths.map((path) => ({ type: "local" as const, path })) }
+      : {}),
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
     permissionMode,
@@ -1207,7 +1228,7 @@ export function makeClaudeQueryOptions(input: {
       PreToolUse: [
         {
           hooks: [
-            async (hook, toolUseId, options) => {
+            async (hook) => {
               if (hook.hook_event_name !== "PreToolUse") return {};
               if (
                 (hook.permission_mode ?? permissionMode) === "bypassPermissions" &&
@@ -1223,38 +1244,12 @@ export function makeClaudeQueryOptions(input: {
                 };
               }
               if (!isStarkPublishRequest(hook.tool_name, hook.tool_input)) return {};
-              const result =
-                input.canUseTool === undefined
-                  ? {
-                      behavior: "deny" as const,
-                      message: "Publishing requires an interactive approval.",
-                    }
-                  : await input.canUseTool(
-                      hook.tool_name,
-                      typeof hook.tool_input === "object" && hook.tool_input !== null
-                        ? (hook.tool_input as Record<string, unknown>)
-                        : {},
-                      {
-                        signal: options.signal,
-                        toolUseID: toolUseId ?? hook.tool_use_id,
-                        requestId: `stark-publish-${toolUseId ?? hook.tool_use_id}`,
-                        decisionReason:
-                          "Publishing always requires approval, including in Bypass mode.",
-                      },
-                    );
               return {
                 hookSpecificOutput: {
                   hookEventName: "PreToolUse",
-                  permissionDecision:
-                    result?.behavior === "allow" && !options.signal.aborted ? "allow" : "deny",
-                  ...(result?.behavior === "allow"
-                    ? result.updatedInput === undefined
-                      ? {}
-                      : { updatedInput: result.updatedInput }
-                    : {
-                        permissionDecisionReason:
-                          result?.message ?? "Publishing requires an interactive approval.",
-                      }),
+                  permissionDecision: "deny",
+                  permissionDecisionReason:
+                    "Stark Pages publishing is available only in native Claude shell mode until its SDK approval hooks have been verified.",
                 },
               };
             },
@@ -1274,7 +1269,18 @@ export function makeClaudeQueryOptions(input: {
     ...(input.resumeSessionAt === undefined ? {} : { resumeSessionAt: input.resumeSessionAt }),
     ...(input.allowedTools === undefined ? {} : { allowedTools: [...input.allowedTools] }),
     ...(input.disallowedTools === undefined ? {} : { disallowedTools: [...input.disallowedTools] }),
-    ...(input.canUseTool === undefined ? {} : { canUseTool: input.canUseTool }),
+    ...(input.canUseTool === undefined
+      ? {}
+      : {
+          canUseTool: async (toolName, toolInput, options) =>
+            isStarkPublishRequest(toolName, toolInput)
+              ? {
+                  behavior: "deny",
+                  message:
+                    "Stark Pages publishing is available only in native Claude shell mode until its SDK approval hooks have been verified.",
+                }
+              : input.canUseTool!(toolName, toolInput, options),
+        }),
     ...(input.allowDangerouslySkipPermissions === true || permissionMode === "bypassPermissions"
       ? { allowDangerouslySkipPermissions: true }
       : {}),
@@ -1299,7 +1305,7 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.binaryPath
       ? { pathToClaudeCodeExecutable: input.settings.binaryPath }
       : {}),
-    ...(input.environment === undefined ? {} : { env: input.environment }),
+    ...(input.environment === undefined ? {} : { env: { ...input.environment, ...workbenchEnv } }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
     systemPrompt: {
       type: "preset" as const,
@@ -10574,6 +10580,15 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
     const baseEnvironment = yield* mergeProviderInstanceEnvironment(environment, hostEnvironment);
     const claudeEnvironment = yield* makeClaudeEnvironment(config, baseEnvironment);
+    const workbenchRoot = yield* resolveStarkWorkbenchRoot(hostEnvironment);
+    if (workbenchRoot)
+      Object.assign(
+        claudeEnvironment,
+        starkWorkbenchEnvironment(
+          workbenchRoot,
+          hostEnvironment[STARK_WORKBENCH_NODE_ENV] ?? (yield* HostProcess.ExecutablePath),
+        ),
+      );
     const path = yield* Path.Path;
     const crypto = yield* Crypto.Crypto;
     const binaryPath = yield* resolveClaudeSdkExecutablePath(

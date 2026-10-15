@@ -93,6 +93,63 @@ const mount = async () => {
   });
 };
 
+it("starts Pages on open, waits for readiness, then polls without relaunching", async () => {
+  let complete!: (mirror: { root: string; port: number }) => void;
+  const ensure = vi.fn(
+    () =>
+      new Promise<{ root: string; port: number }>((resolve) => {
+        complete = resolve;
+      }),
+  );
+  window.desktopBridge!.ensureStarkPagesMirror = ensure;
+  await mount();
+  expect(renderer!.root.findAllByType("iframe")).toHaveLength(0);
+  expect(
+    renderer!.root
+      .findAllByType("p")
+      .flatMap((node) => node.children)
+      .join(" "),
+  ).toContain("Starting Pages");
+  await act(async () => {
+    for (const check of intervals) check();
+  });
+  expect(ensure).toHaveBeenCalledExactlyOnceWith("/project");
+  expect(findMirror).not.toHaveBeenCalled();
+  await act(async () => {
+    complete({ root: "/project", port: 4317 });
+  });
+  expect(renderer!.root.findByType("iframe").props.src).toBe("http://127.0.0.1:4317/panel");
+  await act(async () => {
+    for (const check of intervals) check();
+  });
+  expect(findMirror).toHaveBeenCalledExactlyOnceWith("/project");
+  expect(ensure).toHaveBeenCalledTimes(1);
+});
+
+it("shows a recoverable startup failure and retries only when requested", async () => {
+  const ensure = vi
+    .fn()
+    .mockResolvedValueOnce(null)
+    .mockResolvedValue({ root: "/project", port: 4317 });
+  window.desktopBridge!.ensureStarkPagesMirror = ensure;
+  findMirror.mockResolvedValue(null);
+  await mount();
+  expect(renderer!.root.findByProps({ role: "status" }).children.join(" ")).toContain(
+    "Pages could not start",
+  );
+  await act(async () => {
+    for (const check of intervals) check();
+  });
+  expect(ensure).toHaveBeenCalledTimes(1);
+  const retryButton = renderer!.root
+    .findAllByType("button")
+    .find((button) => button.children.includes("Retry Pages"))!;
+  await act(async () => retryButton.props.onClick());
+  expect(ensure).toHaveBeenCalledTimes(2);
+  expect(renderer!.root.findAllByProps({ role: "status" })).toHaveLength(0);
+  expect(renderer!.root.findAllByType("iframe")).toHaveLength(1);
+});
+
 it("accepts requests only from its own ready frame, then updates capabilities when the active thread changes", async () => {
   await mount();
   await message(request);

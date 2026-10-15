@@ -2,6 +2,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import { prepareStarkWorkbench } from "../../../scripts/prepare-stark-workbench.mjs";
 
 import {
   desktopDir,
@@ -9,6 +10,8 @@ import {
   resolveElectronLaunchCommand,
 } from "./electron-launcher.mjs";
 import { waitForResources } from "./wait-for-resources.mjs";
+
+prepareStarkWorkbench();
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
 if (!devServerUrl) {

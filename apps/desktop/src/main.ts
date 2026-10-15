@@ -43,6 +43,8 @@ import * as DesktopCliCommand from "./app/DesktopCliCommand.ts";
 import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
 import * as DesktopAssets from "./app/DesktopAssets.ts";
 import * as StarkPages from "./starkPages/StarkPages.ts";
+import * as PublishedPages from "./starkPages/PublishedPages.ts";
+import * as DesktopWorkbench from "./starkPages/DesktopWorkbench.ts";
 import * as DesktopBackendConfiguration from "./backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "./backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "./backend/DesktopLocalEnvironmentAuth.ts";
@@ -144,7 +146,16 @@ const layerElectron = Layer.mergeAll(
 );
 
 const layerDesktopFoundation = Layer.mergeAll(
-  StarkPages.layer,
+  PublishedPages.layer,
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const environment = yield* DesktopEnvironment.DesktopEnvironment;
+      return StarkPages.layer({
+        kitRoot: DesktopWorkbench.bundledRoot(environment),
+        nodePath: process.execPath,
+      });
+    }),
+  ),
   MacPermissions.layer,
   DesktopState.layer,
   DesktopShutdown.layer,

@@ -26,6 +26,7 @@ import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" wit
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
+import { prepareStarkWorkbench } from "./prepare-stark-workbench.mjs";
 import {
   BRAND_ASSET_PATHS,
   resolveWebAssetBrandForChannel,
@@ -59,6 +60,15 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 const DESKTOP_APP_ID = BRAND.bundleId;
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
+
+class StarkWorkbenchBundlePreparationError extends Schema.TaggedError<StarkWorkbenchBundlePreparationError>()(
+  "StarkWorkbenchBundlePreparationError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not prepare the bundled Stark Workbench kit.";
+  }
+}
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
 const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
@@ -967,6 +977,10 @@ interface StagePackageJson {
 export const STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
 export const DESKTOP_ELECTRON_LANGUAGES = ["en-US"] as const;
 export const DESKTOP_FILE_EXCLUSIONS = [
+  "!apps/desktop/resources/stark-workbench",
+  "!apps/desktop/resources/stark-workbench/**/*",
+  "!apps/desktop/prod-resources/stark-workbench",
+  "!apps/desktop/prod-resources/stark-workbench/**/*",
   // Cursor finds platform assets by walking up from argv[1]. Keep them outside
   // asar so spawning helpers and loading native addons both use real paths.
   "!**/node_modules/@cursor/sdk-*/**/*",
@@ -1106,6 +1120,11 @@ export const WSL_RUNTIME_EXTRA_RESOURCES = [
   WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE,
 ] as const;
 export const DESKTOP_EXTRA_RESOURCES = [
+  {
+    from: "apps/desktop/prod-resources/stark-workbench",
+    to: "stark-workbench",
+    filter: ["**/*", "**/.*", "**/.*/**/*"],
+  },
   {
     from: "apps/desktop/prod-resources/cursor-sdk",
     to: "node_modules/@cursor",
@@ -3622,6 +3641,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const stageAppDir = path.join(stageRoot, "app");
   const stageResourcesDir = path.join(stageAppDir, "apps/desktop/resources");
+  yield* Effect.try({
+    try: () => prepareStarkWorkbench({ force: true }),
+    catch: (cause) => new StarkWorkbenchBundlePreparationError({ cause }),
+  });
   const distDirs = {
     desktopDist: path.join(repoRoot, "apps/desktop/dist-electron"),
     desktopResources: path.join(repoRoot, "apps/desktop/resources"),

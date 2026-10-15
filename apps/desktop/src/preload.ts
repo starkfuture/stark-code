@@ -11,6 +11,7 @@ import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
+import { PUBLISHED_PAGES_CHANNELS } from "./ipc/publishedPagesChannels.ts";
 import { mergeLegacyLocalStorage } from "./legacyLocalStorageMerge.ts";
 
 const SNAP_SHOT_EVENT_TYPES = new Set([
@@ -203,10 +204,21 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
   getStarkPagesMirror: (projectRoot: string) =>
     ipcRenderer.invoke(IpcChannels.STARK_PAGES_MIRROR_CHANNEL, projectRoot),
+  getStarkWorkbenchAvailable: () =>
+    ipcRenderer.invoke(IpcChannels.STARK_WORKBENCH_AVAILABLE_CHANNEL, undefined),
+  ensureStarkPagesMirror: (projectRoot: string) =>
+    ipcRenderer.invoke(IpcChannels.STARK_PAGES_ENSURE_MIRROR_CHANNEL, projectRoot),
   openStarkPagesExternal: (input: { readonly projectRoot: string; readonly url: string }) =>
     ipcRenderer.invoke(IpcChannels.STARK_PAGES_OPEN_EXTERNAL_CHANNEL, input),
   openStarkPagesLink: (url: string) =>
     ipcRenderer.invoke(IpcChannels.STARK_PAGES_OPEN_LINK_CHANNEL, url),
+  publishedPages: {
+    status: () => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.status),
+    connect: () => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.connect),
+    disconnect: () => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.disconnect),
+    listTools: () => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.listTools),
+    read: (input) => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.read, input),
+  },
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),
   openSystemSettings: (pane: string) =>

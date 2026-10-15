@@ -2,6 +2,7 @@ import { NATIVE_AGENT_SHELL_TOGGLE_EVENT, toggleNativeAgentShell } from "../nati
 import { requestConfirmDialog } from "../confirmDialog";
 import { NativeAgentShell, nativeAgentTerminalId } from "./NativeAgentShell";
 import { StarkPagesPanel } from "./StarkPagesPanel";
+import { useStarkPagesPublishCapability } from "../hooks/useStarkPagesPublishCapability";
 import { SideWorkButton, SideWorkPanel } from "./chat/SideWorkPanel";
 import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
 import { CheckpointRestoreChoices } from "./chat/CheckpointRestoreChoices";
@@ -3084,6 +3085,13 @@ export default function ChatView(props: ChatViewProps) {
         command.name.replace(/^\//, "") === "stark-workbench:publish" &&
         command.source === "plugin",
     ) === true;
+  const pagesCanPublish = useStarkPagesPublishCapability({
+    localPagesAvailable: pagesAvailable,
+    pagesOpen,
+    nativeShellMode,
+    driver: nativeShellSelection?.driver,
+    commandAvailable: pagesPluginKnown,
+  });
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
     activeThread?.modelSelection.instanceId ??
@@ -12682,15 +12690,11 @@ export default function ChatView(props: ChatViewProps) {
               }
               // Chat publishing is enabled only after the SDK's plugin loading and publish guard
               // have been verified live. The native CLI keeps its own plugin and approval flow.
-              canPublish={
-                nativeShellMode &&
-                nativeShellSelection?.driver === "claudeAgent" &&
-                pagesPluginKnown &&
-                canOperateTerminal
-              }
+              canPublish={pagesCanPublish && canOperateTerminal}
               onPublishRequest={(slug) => {
                 const command = `/stark-workbench:publish ${slug}`;
                 if (
+                  pagesCanPublish &&
                   nativeShellMode &&
                   nativeShellSelection?.driver === "claudeAgent" &&
                   activeThreadRef &&

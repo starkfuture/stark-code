@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./starkWorkbench": {
+      "types": "./src/starkWorkbench.ts",
+      "import": "./src/starkWorkbench.ts"
+    },
     "./starkPages": {
       "types": "./src/starkPages.ts",
       "import": "./src/starkPages.ts"

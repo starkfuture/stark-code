@@ -72,6 +72,7 @@ import * as PreviewIpc from "./methods/preview.ts";
 import * as AppActivationIpc from "./methods/appActivation.ts";
 import * as WebLinksIpc from "./methods/webLinks.ts";
 import * as StarkPagesIpc from "./methods/starkPages.ts";
+import * as PublishedPagesIpc from "./methods/publishedPages.ts";
 import {
   completeLegacyLocalStorage,
   takeLegacyLocalStorage,
@@ -147,6 +148,13 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
   yield* ipc.handle(StarkPagesIpc.findMirror);
+  yield* ipc.handle(StarkPagesIpc.workbenchAvailable);
+  yield* ipc.handle(PublishedPagesIpc.status);
+  yield* ipc.handle(PublishedPagesIpc.connect);
+  yield* ipc.handle(PublishedPagesIpc.disconnect);
+  yield* ipc.handle(PublishedPagesIpc.listTools);
+  yield* ipc.handle(PublishedPagesIpc.read);
+  yield* ipc.handle(StarkPagesIpc.ensureMirror);
   yield* ipc.handle(StarkPagesIpc.openFollow);
   yield* ipc.handle(StarkPagesIpc.openLink);
   yield* ipc.handle(receiveProviderAuthCallback);

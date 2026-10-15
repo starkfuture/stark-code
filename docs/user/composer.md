@@ -260,12 +260,21 @@ server settings.
 ## View Stark Pages
 
 In the local Mac app, open **Pages** from a thread to view the project's Stark
-Pages mirror beside the conversation. Start the mirror through your Stark
-Workbench setup first. The panel reports when no mirror is running.
+Pages beside the conversation. Stark Workbench is built in, and opening the panel
+starts the local preview automatically. No separate setup is needed. If Pages
+cannot start, use **Retry Pages**.
 
-With the Stark Workbench plugin available in Claude native shell mode, Publish
-prepares its command in the terminal for you to review and submit. It does not
-submit the command automatically. Other modes keep publishing unavailable.
+In Claude native shell mode, **Publish** prepares its command in the terminal for
+you to review and submit. It does not submit the command automatically. Other
+modes keep publishing unavailable.
+
+Choose **Published** to connect to your company's Pages. Sign-in opens in your
+main browser and returns to Stark Code. The app keeps its own connection; it
+does not copy another browser's login. Browse projects, search, or read a page
+using the fields offered by Pages. Links open in your main browser. This view
+is read-only. Published HTML can show its inline styles; external stylesheets,
+images and scripts are not loaded. Use the page link for its full website view.
+Choose **Disconnect** to remove the app's saved Pages connection.
 
 ## Goals
 

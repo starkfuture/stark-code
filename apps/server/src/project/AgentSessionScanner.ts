@@ -82,6 +82,7 @@ const MAX_METADATA_BYTES_PER_SOURCE = 64 * 1024 * 1024;
 const MAX_METADATA_OPERATIONS_PER_SOURCE = MAX_TRANSCRIPTS_PER_SOURCE * 4;
 const MAX_METADATA_RECORDS_PER_SOURCE = 100_000;
 const MAX_METADATA_RECORDS_PER_TRANSCRIPT = 1_000;
+const MAX_WORKTREE_ANCESTORS = 128;
 const RECENT_THREAD_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 /**
  * Large tool results (especially screenshots) can make an otherwise ordinary
@@ -627,6 +628,9 @@ export const make = Effect.gen(function* () {
   const projectStore = yield* ProjectStore.ProjectStoreV2;
   const baseDir = path.resolve(serverConfig.baseDir);
   const worktreesDir = path.resolve(serverConfig.worktreesDir);
+  const realWorktreesDir = yield* fileSystem
+    .realPath(worktreesDir)
+    .pipe(Effect.orElseSucceed(() => worktreesDir));
   // Windows filesystems are case-insensitive, so path prefix checks there
   // must case fold.
   const foldWorktreeCase = (yield* HostProcess.Platform) === "win32";
@@ -656,7 +660,8 @@ export const make = Effect.gen(function* () {
     normalizeForWorktreeMatch(candidatePath, foldWorktreeCase).startsWith(
       normalizeForWorktreeMatch(baseDir, foldWorktreeCase),
     ) ||
-    isStarkManagedWorktree(candidatePath, worktreesDir, foldWorktreeCase);
+    isStarkManagedWorktree(candidatePath, worktreesDir, foldWorktreeCase) ||
+    isStarkManagedWorktree(candidatePath, realWorktreesDir, foldWorktreeCase);
 
   const listDirectory = (directory: string) =>
     fileSystem.readDirectory(directory).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
@@ -725,6 +730,43 @@ export const make = Effect.gen(function* () {
         repository: parseGitHubRepositoryNameWithOwnerFromRemoteUrl(originUrl),
       },
     } as const;
+  });
+
+  /** Only the nearest Git boundary can identify an enclosing linked worktree. */
+  const isInsideLinkedWorktree = Effect.fn("AgentSessionScanner.isInsideLinkedWorktree")(function* (
+    directory: string,
+    cache: Map<string, boolean>,
+  ) {
+    const visited: Array<string> = [];
+    let current = directory;
+    for (let depth = 0; depth < MAX_WORKTREE_ANCESTORS; depth += 1) {
+      const cached = cache.get(current);
+      if (cached !== undefined) {
+        for (const ancestor of visited) cache.set(ancestor, cached);
+        return cached;
+      }
+      visited.push(current);
+      const marker = yield* fileSystem.stat(path.join(current, ".git")).pipe(
+        Effect.match({
+          onFailure: (cause) =>
+            cause.reason._tag === "NotFound" ? ("missing" as const) : ("unreadable" as const),
+          onSuccess: () => "present" as const,
+        }),
+      );
+      const parent = path.dirname(current);
+      if (marker !== "missing" || parent === current) {
+        // An unreadable or malformed nested marker is still a boundary: do
+        // not let an outer worktree hide an independent repository.
+        const inside =
+          marker === "present" && (yield* readGitIdentity(current))._tag === "Worktree";
+        for (const ancestor of visited) cache.set(ancestor, inside);
+        return inside;
+      }
+      current = parent;
+    }
+    // Leave unresolved ancestors uncached so a later, shallower candidate
+    // can still reach its Git boundary within the traversal budget.
+    return false;
   });
 
   // A large history snapshot can precede session metadata. Read bounded
@@ -1215,6 +1257,7 @@ export const make = Effect.gen(function* () {
     >();
     const directoryKeys = new Map<string, string>();
     const gitIdentities = new Map<string, AgentSessionProjectGit | null>();
+    const enclosingWorktrees = new Map<string, boolean>();
 
     for (const candidate of raw) {
       const expanded = expandHomePath(candidate.cwd.trim(), homeDir);
@@ -1238,7 +1281,11 @@ export const make = Effect.gen(function* () {
           key = "";
         } else {
           const gitIdentity = yield* readGitIdentity(resolved);
-          if (gitIdentity._tag === "Worktree") {
+          if (
+            gitIdentity._tag === "Worktree" ||
+            (gitIdentity._tag === "NotGit" &&
+              (yield* isInsideLinkedWorktree(realPath, enclosingWorktrees)))
+          ) {
             key = "";
           } else {
             key = yield* directoryIdentity(resolved, stats.value);

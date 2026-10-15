@@ -24,7 +24,7 @@ You can add more computers before continuing:
 Saved computers and computers discovered through Stark Connect are selected by
 default. Uncheck any you do not want to set up; this does not disconnect them.
 Continue when your selected computers are connected. Setup checks
-agents across the selected computers, then offers project import grouped by computer.
+agents across the selected computers, then asks for your main working folder.
 
 If Stark Code cannot confirm the workspace during startup, the setup flow shows
 **Still connecting** instead of opening the app. Select **Reload** to try again.
@@ -45,38 +45,18 @@ The setup terminal uses the home directory and environment configured for the
 selected provider instance. Sensitive values remain redacted in Settings and
 terminal metadata while the terminal process can use them.
 
-## Import your projects
+## Open your main folder
 
-Stark Code finds directories that Claude Code or Codex has used. Git repositories
-are listed first, newest activity on top. When the remote is on GitHub, the
-group shows the repository as `owner/name`. Clones with the same remote share
-one group. Directories that are not git repositories sit under "Other folders".
+Choose your main working folder to open it as one workspace. You can open a Git
+repository or a parent folder containing several repositories. On the local Mac
+app, use the folder picker. On a remote connection or in a browser, enter the
+folder's full path on that computer.
 
-The default selection includes git repositories active within the last 30 days
-with at least three conversations. Use the checkboxes, or "Select all" and
-"Select none", to change the selection. Linked git worktrees, Codex scratch
-directories under `Documents/Codex`, and anything under `Downloads` are not
-offered.
+Setup opens only the folder you chose. It does not create separate projects from
+old conversation folders or import their history. Existing projects and
+conversations remain available. Opening a folder already in Stark Code reuses it.
 
-A large or malformed history can reach the scan limit. Stark Code keeps the
-projects it found and warns when projects or conversations may be missing.
-
-Imported projects include Codex and Claude conversations active within the last
-30 days. You can continue those conversations in Stark Code.
-
-Conversation import is best effort. Stark Code keeps the first user prompt and the
-newest remaining visible user and assistant messages, with 200 messages total.
-It omits tool activity and attachments. For Codex, it omits generated setup
-context only when a canonical user event and a valid shared turn ID identify the
-same user turn. Ambiguous legacy or response-only context stays in the imported
-conversation so Stark Code does not remove user text. It reads one conversation at
-a time and skips files larger than 16 MiB. It ignores malformed records and skips
-unreadable or unparseable conversations.
-
-Each import attempt reads up to 100 conversation files and 64 MiB per project,
-with up to 100,000 input records. Run import again to continue a large batch.
-Completed conversations are not imported again. You can continue without the
-remaining history.
-
-You can continue without configuring agents or importing projects, or return to an earlier step
-using the setup progress bar. Navigation pauses while an import is running.
+For the integrated Git worktree controls, open the repository's main checkout.
+Choose **Choose later** to finish setup without opening a folder. You can return
+to an earlier step using the setup progress bar; navigation pauses while a folder
+is opening.

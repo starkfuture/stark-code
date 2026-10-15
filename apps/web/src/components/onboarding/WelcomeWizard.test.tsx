@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { EnvironmentId, ProjectId } from "@starkfuture/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
@@ -53,29 +52,6 @@ vi.mock("../../state/server", () => ({
   },
 }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: (value: unknown) => value }));
-vi.mock("../../onboarding/useProjectScans", () => ({
-  useProjectScans: () => [
-    {
-      environmentId: "test-env",
-      isPending: false,
-      error: null,
-      refresh: mocks.refresh,
-      data: {
-        truncated: false,
-        candidates: [
-          {
-            path: "/project",
-            title: "project",
-            projectId: "test-project",
-            threadCount: 29,
-            lastActiveAt: new Date().toISOString(),
-            sources: ["codex"],
-          },
-        ],
-      },
-    },
-  ],
-}));
 vi.mock("../../connection/onboarding", () => ({ connectPairing: vi.fn() }));
 vi.mock("../../state/terminal", () => ({ terminalEnvironment: {} }));
 vi.mock("../clerk/useStarkConnectAuthPrompt", () => ({ useStarkConnectAuthPrompt: vi.fn() }));
@@ -137,85 +113,31 @@ async function click(label: string) {
   await act(async () => button!.click());
 }
 
-it("enters the workspace after a partial import and warns after navigation finishes", async () => {
-  let finishNavigation = () => {};
-  const navigation = new Promise<void>((resolve) => {
-    finishNavigation = resolve;
-  });
-  const onDone = vi.fn(() => navigation);
+it("allows setup to finish without choosing a folder or importing provider history", async () => {
+  const onDone = vi.fn();
   await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
   await click("Continue");
   await click("Continue");
-  await click("Import 1 project");
-  expect(onDone).toHaveBeenCalledWith({
-    environmentId: EnvironmentId.make("test-env"),
-    projectId: ProjectId.make("test-project"),
-  });
-  expect(mocks.toast).not.toHaveBeenCalled();
-  await act(async () => finishNavigation());
-  expect(mocks.toast).toHaveBeenCalledWith(
-    expect.objectContaining({
-      type: "warning",
-      description: "Imported 28 threads. 1 thread could not be imported.",
-    }),
-  );
-  expect(mocks.toast.mock.invocationCallOrder[0]).toBeGreaterThan(
-    onDone.mock.invocationCallOrder[0]!,
-  );
+  expect(document.body.textContent).toContain("Choose your main folder");
+  await click("Choose later");
+  expect(onDone).toHaveBeenCalledExactlyOnceWith(undefined);
+  expect(mocks.createProject).not.toHaveBeenCalled();
+  expect(mocks.importThreads).not.toHaveBeenCalled();
 });
 
-it.each([
-  [0, 0, null],
-  [29, 0, null],
-  [1, 0, null],
-  [0, 1, "1 thread could not be imported."],
-  [0, 2, "2 threads could not be imported."],
-] as const)(
-  "finishes setup with %i imported and %i skipped threads",
-  async (importedCount, skippedCount, warning) => {
-    mocks.importThreads.mockResolvedValue({
-      _tag: "Success",
-      value: { importedCount, skippedCount },
-    });
-    const onDone = vi.fn();
-    await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
-    await click("Continue");
-    await click("Continue");
-    await click("Import 1 project");
-    expect(onDone).toHaveBeenCalledOnce();
-    if (warning === null && importedCount > 0) {
-      expect(mocks.toast).toHaveBeenCalledWith({
-        type: "success",
-        title: `Imported ${importedCount} ${importedCount === 1 ? "thread" : "threads"}`,
-      });
-    } else if (warning === null) {
-      expect(mocks.toast).not.toHaveBeenCalled();
-    } else {
-      expect(mocks.toast).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "warning", description: warning }),
-      );
-    }
-  },
-);
-
-it("keeps setup open when saving completion fails and preserves the import warning on retry", async () => {
+it("keeps setup open when saving completion fails and retries without duplicate writes", async () => {
   mocks.complete.mockRejectedValueOnce(new Error("settings unavailable"));
   const onDone = vi.fn();
   await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
   await click("Continue");
   await click("Continue");
-  await click("Import 1 project");
+  await click("Choose later");
   expect(onDone).not.toHaveBeenCalled();
   expect(mocks.toast).toHaveBeenCalledWith(
     expect.objectContaining({ type: "error", title: "Could not finish setup" }),
   );
-  await click("Do not import projects");
+  await click("Choose later");
   expect(onDone).toHaveBeenCalledOnce();
-  expect(mocks.importThreads).toHaveBeenCalledOnce();
-  expect(mocks.toast).toHaveBeenLastCalledWith(
-    expect.objectContaining({
-      type: "warning",
-      description: "Imported 28 threads. 1 thread could not be imported.",
-    }),
-  );
+  expect(mocks.createProject).not.toHaveBeenCalled();
+  expect(mocks.importThreads).not.toHaveBeenCalled();
 });

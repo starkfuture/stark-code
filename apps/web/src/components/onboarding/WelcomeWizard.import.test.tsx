@@ -4,7 +4,6 @@ import {
   AuthOrchestrationReadScope,
   EnvironmentId,
   ProjectId,
-  type AgentSessionProjectCandidate,
   type AuthEnvironmentScope,
   type AuthSessionState,
 } from "@starkfuture/contracts";
@@ -20,20 +19,20 @@ type CreateProjectInput = {
 };
 const state = vi.hoisted(() => ({
   selectedEnvironment: "primary",
+  availableEnvironments: null as string[] | null,
   registry: null as AtomRegistry.AtomRegistry | null,
   sessions: new Map<EnvironmentId, Atom.Writable<SessionResult>>(),
   projects: null as Atom.Writable<ReadonlyArray<Project>> | null,
   providers: null as Atom.Atom<ReadonlyArray<never>> | null,
   config: null as Atom.Atom<null> | null,
-  candidates: [] as AgentSessionProjectCandidate[],
   createProject: vi.fn(),
   importThreads: vi.fn(),
   refreshProviders: vi.fn(),
   connectPairing: vi.fn(),
   completeOnboarding: vi.fn(),
   onDone: vi.fn(),
+  pickFolder: vi.fn(),
   scan: vi.fn(),
-  refreshScan: vi.fn(),
 }));
 
 vi.mock("../../connection/runtime", () => ({ connectionAtomRuntime: undefined }));
@@ -59,17 +58,27 @@ vi.mock("../../onboarding/firstRun", () => ({
   useCompleteOnboarding: () => state.completeOnboarding,
 }));
 vi.mock("../../env", () => ({ isElectron: false }));
+vi.mock("../../localApi", () => ({
+  readLocalApi: () => ({ dialogs: { pickFolder: state.pickFolder } }),
+}));
 vi.mock("../../state/environments", () => {
   const environment = (environmentId: string) => ({
     environmentId,
     label: environmentId,
     connection: { phase: "connected" },
-    entry: { enabled: true, target: { _tag: "DirectConnectionTarget" } },
+    entry: {
+      enabled: true,
+      target: {
+        _tag: environmentId === "primary" ? "PrimaryConnectionTarget" : "DirectConnectionTarget",
+      },
+    },
   });
   const primary = environment("primary");
   return {
     usePrimaryEnvironment: () => primary,
-    useEnvironments: () => ({ environments: [environment(state.selectedEnvironment)] }),
+    useEnvironments: () => ({
+      environments: (state.availableEnvironments ?? [state.selectedEnvironment]).map(environment),
+    }),
   };
 });
 vi.mock("../../state/server", () => ({
@@ -88,21 +97,8 @@ vi.mock("../../state/entities", async () => {
 });
 vi.mock("../../state/projects", () => ({ projectEnvironment: { create: "createProject" } }));
 vi.mock("../../state/agentSessions", () => ({
-  agentSessionScan: (query: { environmentId: EnvironmentId }) => query,
+  agentSessionScan: state.scan,
   agentSessionImport: "importThreads",
-}));
-vi.mock("../../onboarding/useProjectScans", () => ({
-  useProjectScans: (ids: EnvironmentId[]) =>
-    ids.map((environmentId) => {
-      state.scan({ environmentId });
-      return {
-        environmentId,
-        data: { candidates: state.candidates, truncated: false },
-        isPending: false,
-        error: null,
-        refresh: state.refreshScan,
-      };
-    }),
 }));
 vi.mock("../ui/dialog", () => ({
   Dialog: "div",
@@ -152,7 +148,7 @@ import { WelcomeWizard } from "./WelcomeWizard";
 
 const primaryId = EnvironmentId.make("primary");
 const remoteId = EnvironmentId.make("remote");
-const permissionMessage = "This connection cannot import projects or thread history.";
+const permissionMessage = "This connection cannot open folders.";
 let renderer: ReactTestRenderer | undefined;
 
 function session(scopes: ReadonlyArray<AuthEnvironmentScope>): AuthSessionState {
@@ -173,17 +169,6 @@ function setGrant(environmentId: EnvironmentId, allowed: boolean) {
     state.sessions.get(environmentId)!,
     AsyncResult.success(session(allowed ? [AuthOrchestrationOperateScope] : [])),
   );
-}
-
-function candidate(path: string): AgentSessionProjectCandidate {
-  return {
-    path,
-    title: path.split("/").at(-1)!,
-    sources: ["codex"],
-    threadCount: 10,
-    lastActiveAt: new Date(Date.now() - 60_000).toISOString(),
-    alreadyImported: false,
-  };
 }
 
 function recordProject({ environmentId, input }: CreateProjectInput) {
@@ -229,12 +214,15 @@ async function mountImport(remote = false) {
   });
   await click("Continue");
   await click("Continue");
-  expect(text(renderer!.root)).toContain("Import your projects");
+  expect(text(renderer!.root)).toContain("Choose your main folder");
 }
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("navigator", { platform: "MacIntel" });
   vi.stubGlobal("document", { activeElement: null, body: {}, getElementById: () => null });
+  state.availableEnvironments = null;
   state.registry = AtomRegistry.make();
   for (const id of [primaryId, remoteId]) {
     state.sessions.set(
@@ -247,7 +235,6 @@ beforeEach(() => {
   state.projects = Atom.make<ReadonlyArray<Project>>([]).pipe(Atom.keepAlive);
   state.providers = Atom.make<ReadonlyArray<never>>([]).pipe(Atom.keepAlive);
   state.config = Atom.make(null).pipe(Atom.keepAlive);
-  state.candidates = [candidate("/projects/first"), candidate("/projects/second")];
   state.createProject
     .mockReset()
     .mockImplementation(async (input: CreateProjectInput) => recordProject(input));
@@ -258,8 +245,8 @@ beforeEach(() => {
   state.connectPairing.mockReset().mockResolvedValue(AsyncResult.success(remoteId));
   state.completeOnboarding.mockReset().mockResolvedValue(undefined);
   state.onDone.mockReset();
+  state.pickFolder.mockReset().mockResolvedValue(null);
   state.scan.mockReset();
-  state.refreshScan.mockReset();
 });
 
 afterEach(async () => {
@@ -270,136 +257,273 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("keeps scanning, choosing and skipping available to a paired read-only environment", async () => {
+function folderInput() {
+  return renderer!.root.findByProps({ id: "onboarding-main-folder" });
+}
+
+async function enterPath(value: string) {
+  await act(async () => folderInput().props.onChange({ target: { value } }));
+}
+
+async function openFolder() {
+  expect(button("Open folder").props.disabled).not.toBe(true);
+  await act(async () => renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+}
+
+it("chooses one main folder without scanning or importing any history", async () => {
+  await mountImport();
+  expect(text(renderer!.root)).not.toContain("/projects/first");
+  expect(button("Open folder").props.disabled).toBe(true);
+  await enterPath("/Users/test/Desktop/work");
+  await openFolder();
+  expect(state.createProject).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      environmentId: primaryId,
+      input: expect.objectContaining({
+        workspaceRoot: "/Users/test/Desktop/work",
+        title: "work",
+        createWorkspaceRootIfMissing: false,
+      }),
+    }),
+  );
+  expect(state.scan).not.toHaveBeenCalled();
+  expect(state.importThreads).not.toHaveBeenCalled();
+  expect(state.onDone).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ environmentId: primaryId }),
+  );
+});
+
+it("skips folder setup without creating or importing anything", async () => {
+  await mountImport();
+  await click("Choose later");
+  expect(state.createProject).not.toHaveBeenCalled();
+  expect(state.scan).not.toHaveBeenCalled();
+  expect(state.importThreads).not.toHaveBeenCalled();
+  expect(state.onDone).toHaveBeenCalledExactlyOnceWith(undefined);
+});
+
+it("keeps manual path and skipping available to a paired read-only environment", async () => {
   setGrant(remoteId, false);
   await mountImport(true);
-  expect(state.scan).toHaveBeenCalledWith(expect.objectContaining({ environmentId: remoteId }));
-  expect(text(renderer!.root)).toContain("/projects/first");
-  expect(button("Import 2 projects").props.disabled).toBe(true);
+  await enterPath("/projects/main");
+  expect(button("Open folder").props.disabled).toBe(true);
   expect(text(renderer!.root)).toContain(permissionMessage);
-  await click("Do not import projects");
+  expect(text(renderer!.root)).not.toContain("Choose folder…");
+  await click("Choose later");
   expect(state.createProject).not.toHaveBeenCalled();
-  expect(state.importThreads).not.toHaveBeenCalled();
-  expect(state.completeOnboarding).toHaveBeenCalledOnce();
   expect(state.onDone).toHaveBeenCalledOnce();
 });
 
-it("waits for the selected grant and enables import when it arrives", async () => {
-  state.registry!.set(state.sessions.get(primaryId)!, AsyncResult.initial());
+it("reuses an existing project at the selected root, including a trailing slash", async () => {
+  const projectId = ProjectId.make("existing-main");
+  state.registry!.set(state.projects!, [
+    { id: projectId, environmentId: primaryId, workspaceRoot: "/projects/main" },
+  ]);
   await mountImport();
-  expect(button("Import 2 projects").props.disabled).toBe(true);
-  await act(async () => setGrant(primaryId, true));
-  await click("Import 2 projects");
-  expect(state.createProject).toHaveBeenCalledTimes(2);
-  expect(state.importThreads).toHaveBeenCalledTimes(2);
-  expect(state.onDone).toHaveBeenCalledWith(expect.objectContaining({ environmentId: primaryId }));
+  await enterPath("/projects/main/");
+  await openFolder();
+  expect(state.createProject).not.toHaveBeenCalled();
+  expect(state.onDone).toHaveBeenCalledExactlyOnceWith({ environmentId: primaryId, projectId });
 });
 
-it("preserves selections and denies a retained action using the paired environment's fresh grant", async () => {
+it("rechecks a retained submit callback after the selected grant is revoked", async () => {
   await mountImport(true);
-  await act(async () => {
-    renderer!.root.findAllByType("input")[1]!.props.onCheckedChange(false);
-  });
-  const retainedImport = button("Import 1 project").props.onClick;
+  await enterPath("/projects/main");
+  const retainedSubmit = renderer!.root.findByType("form").props.onSubmit;
   await act(async () => {
     setGrant(remoteId, false);
-    retainedImport();
+    retainedSubmit({ preventDefault() {} });
   });
-  expect(button("Import 1 project").props.disabled).toBe(true);
-  expect(renderer!.root.findAllByType("input")[1]!.props.checked).toBe(false);
-  expect(text(renderer!.root)).toContain(permissionMessage);
   expect(state.createProject).not.toHaveBeenCalled();
-  expect(state.importThreads).not.toHaveBeenCalled();
   expect(state.onDone).not.toHaveBeenCalled();
-
+  expect(text(renderer!.root)).toContain(permissionMessage);
   await act(async () => setGrant(remoteId, true));
-  expect(text(renderer!.root)).not.toContain(permissionMessage);
-  await click("Import 1 project");
+  await openFolder();
   expect(state.createProject).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ environmentId: remoteId }),
   );
-  expect(state.importThreads).toHaveBeenCalledExactlyOnceWith(
+});
+
+it("retries an uncertain create failure with the same project and command identities", async () => {
+  state.createProject.mockRejectedValueOnce(new Error("connection dropped"));
+  await mountImport();
+  await enterPath("/projects/main");
+  await openFolder();
+  expect(text(renderer!.root)).toContain("Could not open that folder");
+  expect(state.onDone).not.toHaveBeenCalled();
+  await openFolder();
+  expect(state.createProject).toHaveBeenCalledTimes(2);
+  expect(state.createProject.mock.calls[1]![0]).toEqual(state.createProject.mock.calls[0]![0]);
+  expect(state.onDone).toHaveBeenCalledOnce();
+});
+
+it("waits for the accepted project to reach the projection before navigation", async () => {
+  let acceptedInput: CreateProjectInput | undefined;
+  state.createProject.mockImplementationOnce(async (input: CreateProjectInput) => {
+    acceptedInput = input;
+    return AsyncResult.success(undefined);
+  });
+  await mountImport();
+  await enterPath("/projects/main");
+  await openFolder();
+  expect(state.createProject).toHaveBeenCalledOnce();
+  expect(state.onDone).not.toHaveBeenCalled();
+  expect(button("Opening…").props.disabled).toBe(true);
+  await act(async () => {
+    recordProject(acceptedInput!);
+  });
+  expect(state.onDone).toHaveBeenCalledOnce();
+});
+
+it("retries onboarding completion without creating the already opened folder twice", async () => {
+  state.completeOnboarding.mockRejectedValueOnce(new Error("settings unavailable"));
+  await mountImport();
+  await enterPath("/projects/main");
+  await openFolder();
+  expect(state.onDone).not.toHaveBeenCalled();
+  expect(button("Open folder").props.disabled).not.toBe(true);
+  await openFolder();
+  expect(state.createProject).toHaveBeenCalledOnce();
+  expect(state.completeOnboarding).toHaveBeenCalledTimes(2);
+  expect(state.onDone).toHaveBeenCalledOnce();
+});
+
+it("opens the exact native folder selection without a second import confirmation", async () => {
+  vi.stubGlobal("window", { desktopBridge: {} });
+  state.pickFolder.mockResolvedValue("/Users/test/Desktop/work");
+  await mountImport();
+  await click("Choose folder…");
+  expect(state.pickFolder).toHaveBeenCalledOnce();
+  expect(state.createProject).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      input: expect.objectContaining({ workspaceRoot: "/Users/test/Desktop/work" }),
+    }),
+  );
+  expect(state.scan).not.toHaveBeenCalled();
+  expect(state.importThreads).not.toHaveBeenCalled();
+  expect(state.onDone).toHaveBeenCalledOnce();
+});
+
+it("does nothing when the native picker is cancelled and can retry", async () => {
+  vi.stubGlobal("window", { desktopBridge: {} });
+  await mountImport();
+  await click("Choose folder…");
+  expect(state.createProject).not.toHaveBeenCalled();
+  expect(state.onDone).not.toHaveBeenCalled();
+  expect(button("Choose folder…").props.disabled).not.toBe(true);
+  state.pickFolder.mockResolvedValue("/projects/main");
+  await click("Choose folder…");
+  expect(state.createProject).toHaveBeenCalledOnce();
+});
+
+it("shows picker failures and leaves manual path entry available", async () => {
+  vi.stubGlobal("window", { desktopBridge: {} });
+  state.pickFolder.mockRejectedValue(new Error("picker unavailable"));
+  await mountImport();
+  await click("Choose folder…");
+  expect(text(renderer!.root)).toContain("Could not choose a folder");
+  await enterPath("/projects/main");
+  await openFolder();
+  expect(state.createProject).toHaveBeenCalledOnce();
+});
+
+it("rechecks access after the native picker returns", async () => {
+  vi.stubGlobal("window", { desktopBridge: {} });
+  const picked = deferred<string>();
+  state.pickFolder.mockReturnValue(picked.promise);
+  await mountImport();
+  await click("Choose folder…");
+  expect(button("Opening…").props.disabled).toBe(true);
+  await act(async () => {
+    setGrant(primaryId, false);
+    picked.resolve("/projects/main");
+  });
+  expect(state.createProject).not.toHaveBeenCalled();
+  expect(state.onDone).not.toHaveBeenCalled();
+  expect(text(renderer!.root)).toContain(permissionMessage);
+});
+
+it("ignores native picker callbacks after leaving setup", async () => {
+  vi.stubGlobal("window", { desktopBridge: {} });
+  const picked = deferred<string>();
+  state.pickFolder.mockReturnValue(picked.promise);
+  await mountImport();
+  await click("Choose folder…");
+  await act(async () => {
+    renderer!.unmount();
+  });
+  renderer = undefined;
+  await act(async () => {
+    picked.resolve("/projects/main");
+  });
+  expect(state.createProject).not.toHaveBeenCalled();
+  expect(state.onDone).not.toHaveBeenCalled();
+});
+
+it("defaults a multi-computer setup to the primary computer and opens only the chosen target", async () => {
+  state.availableEnvironments = ["remote", "primary"];
+  await mountImport();
+  const chooser = renderer!.root.findByType("select");
+  expect(chooser.props.value).toBe(primaryId);
+  await act(async () => chooser.props.onChange({ target: { value: remoteId } }));
+  await enterPath("/remote/work");
+  await openFolder();
+  expect(state.createProject).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      environmentId: remoteId,
+      input: expect.objectContaining({ workspaceRoot: "/remote/work" }),
+    }),
+  );
+  expect(state.onDone).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ environmentId: remoteId }),
   );
 });
 
-it("rechecks after project creation and can retry its history without recreating the project", async () => {
-  const creation = deferred<void>();
-  state.createProject.mockImplementationOnce(async (input: CreateProjectInput) => {
-    await creation.promise;
-    return recordProject(input);
-  });
+it("rejects relative paths without creating directories", async () => {
   await mountImport();
-  await click("Import 2 projects");
-  expect(state.createProject).toHaveBeenCalledOnce();
-  await act(async () => {
-    setGrant(primaryId, false);
-    creation.resolve();
-    await creation.promise;
-  });
-  expect(state.importThreads).not.toHaveBeenCalled();
-  expect(state.createProject).toHaveBeenCalledOnce();
+  await enterPath("work/my-project");
+  await openFolder();
+  expect(text(renderer!.root)).toContain("Enter the full path");
+  expect(state.createProject).not.toHaveBeenCalled();
   expect(state.onDone).not.toHaveBeenCalled();
-  expect(text(renderer!.root)).toContain(permissionMessage);
-
-  await act(async () => setGrant(primaryId, true));
-  await click("Import 2 projects");
-  expect(state.createProject).toHaveBeenCalledTimes(2);
-  expect(state.importThreads).toHaveBeenCalledTimes(2);
-  expect(state.onDone).toHaveBeenCalledOnce();
 });
 
-it.each([false, true])(
-  "rechecks after history import before the next project write (existing: %s)",
-  async (existing) => {
-    if (existing) {
-      const projectId = ProjectId.make("second-existing");
-      state.candidates[1] = { ...state.candidates[1]!, projectId };
-      state.registry!.set(state.projects!, [
-        { id: projectId, environmentId: primaryId, workspaceRoot: "/projects/second" },
-      ]);
-    }
-    const imported = deferred<{ importedCount: number; skippedCount: number }>();
-    state.importThreads.mockImplementationOnce(async () =>
-      AsyncResult.success(await imported.promise),
-    );
-    await mountImport();
-    await click("Import 2 projects");
-    expect(state.createProject).toHaveBeenCalledOnce();
-    expect(state.importThreads).toHaveBeenCalledOnce();
-    await act(async () => {
-      setGrant(primaryId, false);
-      imported.resolve({ importedCount: 1, skippedCount: 0 });
-      await imported.promise;
-    });
-    expect(state.createProject).toHaveBeenCalledOnce();
-    expect(state.importThreads).toHaveBeenCalledOnce();
-    expect(state.onDone).not.toHaveBeenCalled();
-    expect(text(renderer!.root)).toContain(permissionMessage);
-
-    await act(async () => setGrant(primaryId, true));
-    await click("Import 2 projects");
-    expect(state.createProject).toHaveBeenCalledTimes(existing ? 1 : 2);
-    expect(state.importThreads).toHaveBeenCalledTimes(2);
-    expect(state.onDone).toHaveBeenCalledOnce();
-  },
-);
-
-it("completes accepted imports when permission is revoked after the final server write", async () => {
-  state.candidates = state.candidates.slice(0, 1);
-  const imported = deferred<{ importedCount: number; skippedCount: number }>();
-  state.importThreads.mockImplementationOnce(async () =>
-    AsyncResult.success(await imported.promise),
-  );
+it("keeps setup busy and prevents duplicate actions while the native picker is open", async () => {
+  vi.stubGlobal("window", { desktopBridge: {} });
+  const picked = deferred<string | null>();
+  state.pickFolder.mockReturnValue(picked.promise);
   await mountImport();
-  await click("Import 1 project");
+  const retainedChoose = button("Choose folder…").props.onClick;
+  const retainedSkip = button("Choose later").props.onClick;
   await act(async () => {
-    setGrant(primaryId, false);
-    imported.resolve({ importedCount: 1, skippedCount: 0 });
-    await imported.promise;
+    retainedChoose();
+    retainedChoose();
+    retainedSkip();
   });
-  expect(state.createProject).toHaveBeenCalledOnce();
-  expect(state.importThreads).toHaveBeenCalledOnce();
-  expect(state.completeOnboarding).toHaveBeenCalledOnce();
-  expect(state.onDone).toHaveBeenCalledOnce();
+  expect(button("Choose later").props.disabled).toBe(true);
+  expect(state.pickFolder).toHaveBeenCalledOnce();
+  expect(state.onDone).not.toHaveBeenCalled();
+  await act(async () => {
+    picked.resolve(null);
+  });
+  expect(button("Choose later").props.disabled).not.toBe(true);
+});
+
+it("ignores project-create completions after setup is unmounted", async () => {
+  const creation = deferred<void>();
+  state.createProject.mockImplementationOnce(async () => {
+    await creation.promise;
+    return AsyncResult.success(undefined);
+  });
+  await mountImport();
+  await enterPath("/projects/main");
+  await openFolder();
+  await act(async () => {
+    renderer!.unmount();
+  });
+  renderer = undefined;
+  await act(async () => {
+    creation.resolve();
+  });
+  expect(state.onDone).not.toHaveBeenCalled();
 });

@@ -961,6 +961,157 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }),
     );
 
+    it.effect("excludes nested linked worktree cwds without merging ordinary checkouts", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const claudeHomePath = yield* makeTempDir("starkcode-claude-home-");
+        const codexHomePath = yield* makeTempDir("starkcode-codex-home-");
+        const main = yield* makeTempDir("starkcode-workspace-main-");
+        const clone = yield* makeTempDir("starkcode-workspace-clone-");
+        const worktree = yield* makeTempDir("starkcode-workspace-linked-");
+        const config = '[remote "origin"]\n\turl = git@github.com:example/shared.git\n';
+        for (const checkout of [main, clone]) {
+          yield* fileSystem.makeDirectory(path.join(checkout, ".git"));
+          yield* fileSystem.writeFileString(path.join(checkout, ".git", "config"), config);
+        }
+        yield* fileSystem.writeFileString(
+          path.join(worktree, ".git"),
+          `gitdir: ${path.relative(worktree, path.join(main, ".git", "worktrees", "linked"))}\n`,
+        );
+        const ordinarySubfolder = path.join(main, "apps", "web");
+        const nested = path.join(worktree, "apps", "web");
+        const sibling = path.join(worktree, "apps", "server", "src");
+        for (const directory of [ordinarySubfolder, nested, sibling]) {
+          yield* fileSystem.makeDirectory(directory, { recursive: true });
+        }
+        const cwds = [main, clone, ordinarySubfolder, nested, sibling];
+        for (const [index, cwd] of cwds.entries()) {
+          yield* writeTranscript({
+            filePath: path.join(
+              codexHomePath,
+              "sessions",
+              "2026",
+              "01",
+              "01",
+              `rollout-${index}.jsonl`,
+            ),
+            contents: codexRolloutLine(cwd),
+            mtimeMs: Date.parse(`2026-01-0${index + 1}T00:00:00.000Z`),
+          });
+        }
+
+        const result = yield* runScan({ claudeHomePath, codexHomePath });
+
+        expect(result.candidates.map(({ path: root, git }) => ({ path: root, git }))).toEqual([
+          { path: ordinarySubfolder, git: null },
+          {
+            path: clone,
+            git: { remoteKey: "github.com/example/shared", repository: "example/shared" },
+          },
+          {
+            path: main,
+            git: { remoteKey: "github.com/example/shared", repository: "example/shared" },
+          },
+        ]);
+      }),
+    );
+
+    it.effect("keeps nested repository and submodule boundaries inside a linked worktree", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const claudeHomePath = yield* makeTempDir("starkcode-claude-home-");
+        const codexHomePath = yield* makeTempDir("starkcode-codex-home-");
+        const worktree = yield* makeTempDir("starkcode-workspace-linked-");
+        const metadata = yield* makeTempDir("starkcode-workspace-git-");
+        yield* fileSystem.writeFileString(
+          path.join(worktree, ".git"),
+          `gitdir: ${path.join(metadata, "worktrees", "linked")}\n`,
+        );
+        const repository = path.join(worktree, "independent");
+        const submodule = path.join(worktree, "vendor");
+        const malformed = path.join(worktree, "malformed-metadata");
+        const linkedChild = path.join(worktree, "apps", "web");
+        const cwds = [
+          repository,
+          path.join(repository, "src"),
+          submodule,
+          path.join(submodule, "src"),
+          path.join(malformed, "src"),
+          linkedChild,
+        ];
+        for (const directory of cwds) {
+          yield* fileSystem.makeDirectory(directory, { recursive: true });
+        }
+        yield* fileSystem.makeDirectory(path.join(repository, ".git"));
+        yield* fileSystem.writeFileString(path.join(repository, ".git", "config"), "[core]\n");
+        const submoduleGitDir = path.join(metadata, "modules", "vendor");
+        yield* fileSystem.makeDirectory(submoduleGitDir, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(submoduleGitDir, "config"), "[core]\n");
+        yield* fileSystem.writeFileString(
+          path.join(submodule, ".git"),
+          `gitdir: ${submoduleGitDir}\n`,
+        );
+        yield* fileSystem.writeFileString(path.join(malformed, ".git"), "invalid gitdir marker\n");
+        for (const [index, cwd] of cwds.entries()) {
+          yield* writeTranscript({
+            filePath: path.join(claudeHomePath, "projects", `-slug-${index}`, "a.jsonl"),
+            contents: claudeSessionLine(cwd),
+            mtimeMs: Date.parse(`2026-01-0${index + 1}T00:00:00.000Z`),
+          });
+        }
+
+        const result = yield* runScan({ claudeHomePath, codexHomePath });
+
+        expect(result.candidates.map((candidate) => candidate.path)).toEqual(
+          cwds.slice(0, -1).toReversed(),
+        );
+        expect(
+          result.candidates
+            .filter((candidate) => candidate.git !== null)
+            .map((candidate) => candidate.path),
+        ).toEqual([submodule, repository]);
+      }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "excludes symlink aliases of nested linked worktree cwds",
+      () =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const claudeHomePath = yield* makeTempDir("starkcode-claude-home-");
+          const codexHomePath = yield* makeTempDir("starkcode-codex-home-");
+          const worktree = yield* makeTempDir("starkcode-workspace-linked-");
+          const aliases = yield* makeTempDir("starkcode-workspace-alias-");
+          const nested = path.join(worktree, "apps", "web");
+          yield* fileSystem.makeDirectory(nested, { recursive: true });
+          yield* fileSystem.writeFileString(
+            path.join(worktree, ".git"),
+            `gitdir: ${path.join(worktree, "metadata", "worktrees", "linked")}\n`,
+          );
+          const alias = path.join(aliases, "project");
+          yield* fileSystem.symlink(nested, alias);
+          yield* writeTranscript({
+            filePath: path.join(
+              codexHomePath,
+              "sessions",
+              "2026",
+              "01",
+              "01",
+              "rollout-alias.jsonl",
+            ),
+            contents: codexRolloutLine(alias),
+            mtimeMs: Date.parse("2026-01-01T00:00:00.000Z"),
+          });
+
+          const result = yield* runScan({ claudeHomePath, codexHomePath });
+
+          expect(result.candidates).toEqual([]);
+        }),
+    );
+
     it.effect(
       "excludes sandboxes under the configured worktrees dir without .stark-code in the path",
       () =>

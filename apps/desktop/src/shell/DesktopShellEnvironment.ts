@@ -19,6 +19,7 @@ type EnvironmentPatch = Record<string, string>;
 interface ShellEnvironmentConfig {
   readonly env: NodeJS.ProcessEnv;
   readonly platform: NodeJS.Platform;
+  readonly homeDirectory: string | undefined;
   readonly extraLoginShellEnvNames?: ReadonlyArray<string>;
 }
 
@@ -455,9 +456,23 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       config.platform === "darwin" && !shellEnvironment.PATH
         ? yield* readLaunchctlPath
         : Option.none<string>();
+    // Native CLI installers use ~/.local/bin, which a Dock launch can miss when
+    // the user's shell profile fails or times out. Keep explicit PATH choices first.
+    const homeDirectory = config.homeDirectory ?? config.env.HOME;
+    const localBin =
+      homeDirectory?.startsWith("/") && !homeDirectory.includes(":")
+        ? `${homeDirectory.replace(/\/+$/u, "")}/.local/bin`
+        : undefined;
+    const localBinExists = localBin
+      ? yield* fileSystem.stat(localBin).pipe(
+          Effect.map((info) => info.type === "Directory"),
+          Effect.orElseSucceed(() => false),
+        )
+      : false;
     const mergedPath = mergePaths(config.platform, [
       trimNonEmpty(shellEnvironment.PATH).pipe(Option.orElse(() => launchctlPath)),
       readEnvPath(config.env),
+      trimNonEmpty(localBinExists ? localBin : undefined),
     ]);
 
     if (Option.isSome(mergedPath)) {
@@ -580,6 +595,7 @@ export const make = Effect.gen(function* () {
       yield* installShellEnvironment({
         env: process.env,
         platform: environment.platform,
+        homeDirectory: environment.homeDirectory,
         extraLoginShellEnvNames: safeExtraLoginShellEnvNames(
           document?.settings?.extraLoginShellEnvNames ??
             document?.extraLoginShellEnvNames ?? ["AGENT_WORKSPACE"],

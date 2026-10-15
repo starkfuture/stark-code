@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
+import { resolveCommandPath } from "@starkfuture/shared/shell";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -97,6 +98,7 @@ function runShellEnvironment(input: {
     DesktopEnvironment.DesktopEnvironment,
     DesktopEnvironment.DesktopEnvironment.of({
       platform: input.platform,
+      homeDirectory: input.env.HOME,
     } as DesktopEnvironment.DesktopEnvironment["Service"]),
   );
   const layerSpawner = Layer.succeed(
@@ -139,6 +141,63 @@ function runShellEnvironment(input: {
 }
 
 describe("DesktopShellEnvironment", () => {
+  it.effect.each(["darwin", "linux"] as const)(
+    "finds a native CLI in the user install directory after shell startup times out on %s",
+    (platform) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const home = yield* fileSystem.makeTempDirectoryScoped();
+        const localBin = `${home}/.local/bin`;
+        yield* fileSystem.makeDirectory(localBin, { recursive: true });
+        yield* fileSystem.writeFileString(`${localBin}/claude`, "#!/bin/sh\nexit 0\n");
+        yield* fileSystem.chmod(`${localBin}/claude`, 0o700);
+        const env: NodeJS.ProcessEnv = { HOME: home, SHELL: "/bin/slow", PATH: "/usr/bin:/bin" };
+        assert.equal(yield* resolveCommandPath("claude", { env, extendEnv: false }), null);
+        const importer = yield* runShellEnvironment({
+          env,
+          platform,
+          handler: (command) =>
+            command._tag === "StandardCommand" && command.command === "/bin/launchctl"
+              ? ""
+              : { output: "", exitCode: 0, startupDelayMs: 60_000 },
+        }).pipe(Effect.forkChild);
+        yield* TestClock.adjust("20 seconds");
+        yield* Fiber.join(importer);
+        assert.equal(env.PATH, `/usr/bin:/bin:${localBin}`);
+        assert.equal(
+          yield* resolveCommandPath("claude", { env, extendEnv: false }),
+          `${localBin}/claude`,
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "preserves an explicitly selected CLI and deduplicates the user install directory",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const home = yield* fileSystem.makeTempDirectoryScoped();
+        const localBin = `${home}/.local/bin`;
+        const customBin = `${home}/custom/bin`;
+        for (const directory of [localBin, customBin]) {
+          yield* fileSystem.makeDirectory(directory, { recursive: true });
+          yield* fileSystem.writeFileString(`${directory}/claude`, "#!/bin/sh\nexit 0\n");
+          yield* fileSystem.chmod(`${directory}/claude`, 0o700);
+        }
+        const env: NodeJS.ProcessEnv = { HOME: home, PATH: `/usr/bin:${localBin}` };
+        yield* runShellEnvironment({
+          env,
+          platform: "darwin",
+          handler: () => envOutput({ PATH: `${customBin}:/usr/bin` }),
+        });
+        assert.equal(env.PATH, `${customBin}:/usr/bin:${localBin}`);
+        assert.equal(
+          yield* resolveCommandPath("claude", { env, extendEnv: false }),
+          `${customBin}/claude`,
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.live.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "imports the environment after a real shell writes beyond both pipe buffers",
     () =>

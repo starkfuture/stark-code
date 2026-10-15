@@ -304,6 +304,7 @@ import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
 import * as DateTime from "effect/DateTime";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
+import { TimelineTurnOutline } from "./TimelineTurnOutline";
 import {
   buildReviewCommentRenderablePatch,
   formatReviewCommentFence,
@@ -1609,6 +1610,18 @@ const ConversationTimeline = memo(function ConversationTimeline({
     [listRef],
   );
 
+  const selectMinimapItem = useCallback(
+    (item: TimelineMinimapItem) => {
+      onManualNavigation();
+      void listRef.current?.scrollToIndex({
+        index: item.rowIndex,
+        animated: true,
+        viewOffset: 24,
+      });
+    },
+    [listRef, onManualNavigation],
+  );
+
   if (
     rows.length === 0 &&
     !isWorking &&
@@ -1640,7 +1653,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         <TimelineRowActivityCtx value={activityState}>
           <TooltipScrollDismissArea
             ref={setTimelineViewportElement}
-            className="relative h-full min-h-0"
+            className="relative flex h-full min-h-0 flex-col"
             data-assistant-citation-viewport="true"
           >
             {onCiteAssistantText && citationThreadRef ? (
@@ -1649,6 +1662,21 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 threadRef={citationThreadRef}
                 onCite={onCiteAssistantText}
               />
+            ) : null}
+            {minimapItems.length >= TIMELINE_MINIMAP_MIN_ITEMS ? (
+              <div
+                className={cn(
+                  "flex shrink-0 px-3 py-1",
+                  minimapHasPersistentGutter && "[@media(pointer:fine)]:hidden",
+                )}
+              >
+                <TimelineTurnOutline
+                  items={minimapItems}
+                  currentId={minimapItems[minimapCurrentIndex ?? -1]?.id ?? null}
+                  history={historyControls}
+                  onSelect={selectMinimapItem}
+                />
+              </div>
             ) : null}
             <LegendList<MessagesTimelineRow>
               ref={setTimelineList}
@@ -1690,7 +1718,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               onScroll={handleScroll}
               onItemSizeChanged={handleItemSizeChanged}
               className={cn(
-                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                "messages-timeline-scroll scrollbar-gutter-both min-h-0 flex-1 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
                 topFadeEnabled && "topbar-scroll-fade",
               )}
               ListHeaderComponent={listHeader}
@@ -1703,14 +1731,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
               currentIndex={minimapCurrentIndex}
               stripMap={minimapStripMap}
               onWheel={forwardMinimapWheel}
-              onSelect={(item) => {
-                onManualNavigation();
-                void listRef.current?.scrollToIndex({
-                  index: item.rowIndex,
-                  animated: true,
-                  viewOffset: 24,
-                });
-              }}
+              history={historyControls}
+              onSelect={selectMinimapItem}
             />
           </TooltipScrollDismissArea>
         </TimelineRowActivityCtx>
@@ -1777,7 +1799,7 @@ function timelineMinimapEventTargetsPreview(target: EventTarget): boolean {
   return target instanceof Element && target.closest("[data-minimap-preview]") !== null;
 }
 
-function TimelineMinimap({
+export function TimelineMinimap({
   hasPersistentGutter,
   hitStripWidth,
   currentIndex,
@@ -1785,6 +1807,7 @@ function TimelineMinimap({
   stripMap,
   onWheel,
   onSelect,
+  history,
 }: {
   hasPersistentGutter: boolean;
   hitStripWidth: number;
@@ -1793,8 +1816,9 @@ function TimelineMinimap({
   stripMap: Map<string, HTMLSpanElement>;
   onWheel: (event: WheelEvent) => void;
   onSelect: (item: TimelineMinimapItem) => void;
+  history?: MessagesTimelineHistoryControls | undefined;
 }) {
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const wheelTargetRef = useCallback(
     (node: HTMLDivElement | null) => {
       if (!node) return;
@@ -1804,8 +1828,8 @@ function TimelineMinimap({
     [onWheel],
   );
 
-  const resolvedActiveIndex =
-    activeIndex !== null && activeIndex < items.length ? activeIndex : null;
+  const activeIndex = activeId === null ? -1 : items.findIndex((item) => item.id === activeId);
+  const resolvedActiveIndex = activeIndex < 0 ? null : activeIndex;
   const activeItem = useMemo(
     () =>
       resolveTimelineMinimapPreview(
@@ -1848,33 +1872,31 @@ function TimelineMinimap({
   const updateActiveIndexFromPointer = useCallback(
     (event: MouseEvent<HTMLElement>) => {
       const nextIndex = resolveActiveIndexFromPointer(event);
-      setActiveIndex(nextIndex);
+      setActiveId(nextIndex === null ? null : (items[nextIndex]?.id ?? null));
     },
-    [resolveActiveIndexFromPointer],
+    [items, resolveActiveIndexFromPointer],
   );
 
   const moveActiveIndex = useCallback(
     (delta: number) => {
-      setActiveIndex((current) => {
-        const base = current ?? 0;
-        return Math.max(0, Math.min(items.length - 1, base + delta));
+      setActiveId((current) => {
+        const base = Math.max(
+          0,
+          items.findIndex((item) => item.id === current),
+        );
+        return items[Math.max(0, Math.min(items.length - 1, base + delta))]?.id ?? null;
       });
     },
-    [items.length],
+    [items],
   );
 
-  if (items.length < TIMELINE_MINIMAP_MIN_ITEMS) {
+  if (items.length < TIMELINE_MINIMAP_MIN_ITEMS || !hasPersistentGutter) {
     return null;
   }
 
   return (
     <div
-      className={cn(
-        "group/minimap pointer-events-none absolute inset-y-0 left-0 z-40 hidden w-18 [@media(pointer:fine)]:block",
-        hasPersistentGutter
-          ? "opacity-100"
-          : "opacity-0 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100",
-      )}
+      className="group/minimap pointer-events-none absolute inset-y-0 left-0 z-40 hidden w-18 [@media(pointer:fine)]:block"
       data-testid="timeline-minimap"
       data-persistent-gutter={hasPersistentGutter ? "true" : "false"}
       ref={wheelTargetRef}
@@ -1892,6 +1914,17 @@ function TimelineMinimap({
             width: resolveTimelineMinimapInteractiveWidth(hitStripWidth, activeItem !== null),
           }}
         >
+          {history?.hasMoreHistory ? (
+            <div className="pointer-events-auto absolute bottom-[calc(100%+1.75rem)] left-0">
+              <TimelineTurnOutline
+                iconOnly
+                items={items}
+                currentId={items[resolvedCurrentIndex ?? -1]?.id ?? null}
+                history={history}
+                onSelect={onSelect}
+              />
+            </div>
+          ) : null}
           <TimelineMinimapNavigationButton
             direction="previous"
             disabled={previousItem === null}
@@ -1901,9 +1934,9 @@ function TimelineMinimap({
             }}
           />
           <button
-            aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
+            aria-label={`Jump to ${history?.hasMoreHistory ? "loaded " : ""}turn: ${activeItem?.userText ?? "User message"}`}
             className="absolute inset-y-0 left-0 w-full cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-            onBlur={() => setActiveIndex(null)}
+            onBlur={() => setActiveId(null)}
             onClick={(event) => {
               if (timelineMinimapEventTargetsPreview(event.target)) {
                 return;
@@ -1915,7 +1948,13 @@ function TimelineMinimap({
               }
               event.currentTarget.blur();
             }}
-            onFocus={() => setActiveIndex((current) => current ?? resolvedCurrentIndex ?? 0)}
+            onFocus={() =>
+              setActiveId((current) =>
+                items.some((item) => item.id === current)
+                  ? current
+                  : (items[resolvedCurrentIndex ?? 0]?.id ?? null),
+              )
+            }
             onKeyDown={(event) => {
               if (event.key === "ArrowDown") {
                 event.preventDefault();
@@ -1925,10 +1964,10 @@ function TimelineMinimap({
                 moveActiveIndex(-1);
               } else if (event.key === "Home") {
                 event.preventDefault();
-                setActiveIndex(0);
+                setActiveId(items[0]?.id ?? null);
               } else if (event.key === "End") {
                 event.preventDefault();
-                setActiveIndex(items.length - 1);
+                setActiveId(items.at(-1)?.id ?? null);
               } else if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 if (activeItem) {
@@ -1936,7 +1975,7 @@ function TimelineMinimap({
                 }
               }
             }}
-            onMouseLeave={() => setActiveIndex(null)}
+            onMouseLeave={() => setActiveId(null)}
             onMouseMove={updateActiveIndexFromPointer}
             onMouseDown={(event) => {
               if (timelineMinimapEventTargetsPreview(event.target)) {
@@ -1973,6 +2012,7 @@ function TimelineMinimap({
                           : "scale-x-[0.333]",
                   )}
                   data-in-view="false"
+                  data-current={index === resolvedCurrentIndex ? "true" : "false"}
                   data-minimap-strip
                   key={item.id}
                   ref={(node) => {
@@ -1984,7 +2024,7 @@ function TimelineMinimap({
                   }}
                   style={{ top }}
                 >
-                  <span className="absolute inset-0 rounded-full bg-foreground/90 opacity-0 transition-opacity duration-150 group-data-[in-view=true]/strip:opacity-100" />
+                  <span className="absolute inset-0 rounded-full bg-foreground/90 opacity-0 transition-opacity duration-150 group-data-[in-view=true]/strip:opacity-100 group-data-[current=true]/strip:opacity-100" />
                 </span>
               );
             })}

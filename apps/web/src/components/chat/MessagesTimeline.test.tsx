@@ -228,6 +228,7 @@ function matchMedia() {
 }
 
 let MessagesTimeline: typeof import("./MessagesTimeline").MessagesTimeline;
+let TimelineMinimap: typeof import("./MessagesTimeline").TimelineMinimap;
 let resolvePreviewAnnotationImage: typeof import("./MessagesTimeline").resolvePreviewAnnotationImage;
 
 const ElementStub = class ElementStub {};
@@ -272,11 +273,121 @@ beforeEach(stubDomGlobals);
 // Cold transformation of the full chat dependency graph needs extra time on slower CI workers.
 beforeAll(async () => {
   Object.defineProperty(window, "matchMedia", { value: matchMedia, configurable: true });
-  ({ MessagesTimeline, resolvePreviewAnnotationImage } = await import("./MessagesTimeline"));
+  ({ MessagesTimeline, TimelineMinimap, resolvePreviewAnnotationImage } =
+    await import("./MessagesTimeline"));
 }, 120_000);
 
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const MESSAGE_CREATED_AT = "2026-03-17T19:12:28.000Z";
+
+describe("conversation turn navigation", () => {
+  it("keeps a hovered turn and its updated jump target when earlier history is prepended", async () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const onSelect = vi.fn();
+    const stripMap = new Map<string, HTMLSpanElement>();
+    const items = [
+      { id: "a", rowIndex: 0, userText: "First prompt", assistantText: "First answer" },
+      { id: "b", rowIndex: 2, userText: "Second prompt", assistantText: "Second answer" },
+    ];
+    const render = (loaded: typeof items, currentIndex = 0) =>
+      root.render(
+        <TimelineMinimap
+          items={loaded}
+          currentIndex={currentIndex}
+          hasPersistentGutter
+          hitStripWidth={40}
+          stripMap={stripMap}
+          onSelect={onSelect}
+          onWheel={() => {}}
+        />,
+      );
+    try {
+      await act(() => render(items));
+      const rail = container.querySelector<HTMLButtonElement>('button[aria-label^="Jump to"]')!;
+      rail.getBoundingClientRect = () => ({ top: 0, height: 100 }) as DOMRect;
+      await act(() =>
+        rail.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientY: 100 })),
+      );
+      expect(container.querySelector("[data-minimap-preview]")?.textContent).toContain(
+        "Second answer",
+      );
+      const prepended = [
+        { id: "older", rowIndex: 0, userText: "Earlier prompt", assistantText: "Earlier answer" },
+        ...items.map((item) => ({ ...item, rowIndex: item.rowIndex + 2 })),
+      ];
+      await act(() => render(prepended, 1));
+      expect(container.querySelector("[data-minimap-preview]")?.textContent).toContain(
+        "Second answer",
+      );
+      await act(() =>
+        rail.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+      );
+      expect(onSelect).toHaveBeenCalledExactlyOnceWith(prepended[2]);
+    } finally {
+      await act(() => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("retains the current turn marker while its long answer fills the viewport", async () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const { resolveTimelineMinimapCurrentIndex } = await import("./MessagesTimeline.logic");
+    const currentIndex = resolveTimelineMinimapCurrentIndex({
+      scrollTop: 500,
+      scrollBottom: 900,
+      itemBounds: [
+        { top: 0, height: 40 },
+        { top: 1200, height: 40 },
+      ],
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const onSelect = vi.fn();
+    const stripMap = new Map<string, HTMLSpanElement>();
+    const items = [
+      { id: "long", rowIndex: 0, userText: "Explain", assistantText: "Long answer" },
+      { id: "next", rowIndex: 2, userText: "Next", assistantText: "Another answer" },
+    ];
+    try {
+      await act(() =>
+        root.render(
+          <TimelineMinimap
+            items={items}
+            currentIndex={currentIndex}
+            hasPersistentGutter
+            hitStripWidth={40}
+            stripMap={stripMap}
+            onWheel={() => {}}
+            onSelect={onSelect}
+          />,
+        ),
+      );
+      expect(currentIndex).toBe(0);
+      expect(stripMap.get("long")?.dataset.current).toBe("true");
+      expect(stripMap.get("long")?.dataset.inView).toBe("false");
+      const rail = container.querySelector<HTMLButtonElement>('button[aria-label^="Jump to"]')!;
+      await act(() => rail.focus());
+      expect(container.querySelector("[data-minimap-preview]")?.textContent).toContain(
+        "Long answer",
+      );
+      await act(() =>
+        rail.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+      );
+      expect(onSelect).toHaveBeenCalledExactlyOnceWith(items[0]);
+    } finally {
+      await act(() => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("timeline tooltip scroll dismissal", () => {
   it.each([
@@ -2587,7 +2698,7 @@ describe("MessagesTimeline", () => {
     );
 
     // The Stark wordmark replaces the generic tool icon for Stark MCP calls.
-    expect(markup).toContain('viewBox="15.5309 37 94.3941 56.96"');
+    expect(markup).toContain('viewBox="0 0 128 128"');
     expect(markup).toContain("Read a Stark thread");
     expect(markup).not.toContain("mcp__stark-code__stark_thread_read");
   });

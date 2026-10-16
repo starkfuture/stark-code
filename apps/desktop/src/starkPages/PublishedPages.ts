@@ -5,6 +5,8 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type {
   StarkPublishedPagesStatus,
+  StarkPublishedPagesOpenInput,
+  StarkPublishedPageDocument,
   StarkPublishedPagesTool,
   StarkPublishedPagesReadInput,
   StarkPublishedPagesReadResult,
@@ -45,6 +47,9 @@ export class PublishedPages extends Context.Service<
       readonly StarkPublishedPagesTool[],
       PublishedPagesRequestError
     >;
+    readonly openPage: (
+      input: StarkPublishedPagesOpenInput,
+    ) => Effect.Effect<StarkPublishedPageDocument, PublishedPagesRequestError>;
     readonly read: (
       input: StarkPublishedPagesReadInput,
     ) => Effect.Effect<StarkPublishedPagesReadResult, PublishedPagesRequestError>;
@@ -101,6 +106,7 @@ const make = Effect.gen(function* () {
     disconnect: () => request(() => connection.disconnect()),
     listTools: () => request(() => connection.listTools()),
     read: (input) => request(() => connection.read(input)),
+    openPage: (input) => request(() => connection.openPage(input)),
   });
 });
 

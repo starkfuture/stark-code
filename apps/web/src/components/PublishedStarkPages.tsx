@@ -1,56 +1,97 @@
-/* oxlint-disable react/no-array-index-key -- MCP content blocks have no item ID; the whole read result is replaced together. */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
-  StarkPublishedPagesReadResult,
+  StarkPublishedPageDocument,
   StarkPublishedPagesStatus,
   StarkPublishedPagesTool,
 } from "@starkfuture/contracts";
+import { ArrowLeftIcon, ChevronRightIcon, FileTextIcon, FolderIcon } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { PublishedPageContent } from "./PublishedPageContent";
-import { publishedPageArguments, publishedPageFields } from "./publishedPagesFields";
+import {
+  publishedPageTitle,
+  publishedProjectCatalog,
+  publishedSearchResults,
+  type PublishedPageEntry,
+  type PublishedProject,
+} from "./publishedPagesNavigation";
 
-const labels: Record<StarkPublishedPagesTool["name"], string> = {
-  pages_list_projects: "Projects",
-  pages_search: "Search pages",
-  pages_read_content: "Read page",
-  pages_read_file: "Read file",
-  pages_get_public_url: "Page link",
+type ReaderState = {
+  page: PublishedPageEntry;
+  document: StarkPublishedPageDocument | null;
+  loading: boolean;
+  error: string | null;
 };
+
+function readError(failure: unknown, fallback: string): string {
+  return failure instanceof Error && !failure.message.includes("IPC")
+    ? failure.message.slice(0, 500)
+    : fallback;
+}
 
 export function PublishedStarkPages() {
   const bridge = window.desktopBridge?.publishedPages;
   const [status, setStatus] = useState<StarkPublishedPagesStatus | null>(null);
   const [tools, setTools] = useState<readonly StarkPublishedPagesTool[]>([]);
-  const [selected, setSelected] = useState<StarkPublishedPagesTool["name"]>("pages_list_projects");
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<StarkPublishedPagesReadResult | null>(null);
+  const [projects, setProjects] = useState<readonly PublishedProject[]>([]);
+  const [projectFilter, setProjectFilter] = useState("");
+  const [project, setProject] = useState<PublishedProject | null>(null);
+  const [query, setQuery] = useState("");
+  const [searchedQuery, setSearchedQuery] = useState<string | null>(null);
+  const [pages, setPages] = useState<readonly PublishedPageEntry[]>([]);
+  const [reader, setReader] = useState<ReaderState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [connectionBusy, setConnectionBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const generation = useRef(0);
-  const tool = tools.find((item) => item.name === selected);
-  const fields = tool ? publishedPageFields(tool.inputSchema) : null;
+  const connectionGeneration = useRef(0);
+  const requestGeneration = useRef(0);
+  const changingConnection = useRef(false);
+  const wasConnected = useRef(false);
+  const section = useRef<HTMLElement>(null);
+  const pendingScroll = useRef<number | null>(null);
+  const projectScroll = useRef(0);
+  const pageListScroll = useRef(0);
+  const canSearch = tools.some((item) => item.name === "pages_search");
+
+  useLayoutEffect(() => {
+    if (pendingScroll.current !== null && section.current) {
+      section.current.scrollTop = pendingScroll.current;
+      pendingScroll.current = null;
+    }
+  });
+
+  const clearNavigation = useCallback(() => {
+    requestGeneration.current += 1;
+    pendingScroll.current = 0;
+    setTools([]);
+    setProjects([]);
+    setProject(null);
+    setProjectFilter("");
+    setReader(null);
+    setPages([]);
+    setQuery("");
+    setSearchedQuery(null);
+    setBusy(false);
+    setError(null);
+  }, []);
 
   useEffect(() => {
     if (!bridge) return;
     let cancelled = false;
     let pending = false;
     const check = async () => {
-      if (pending) return;
+      if (pending || changingConnection.current) return;
       pending = true;
-      const current = generation.current;
+      const current = connectionGeneration.current;
       try {
         const next = await bridge.status();
-        if (!cancelled && current === generation.current) {
+        if (!cancelled && current === connectionGeneration.current) {
           setStatus(next);
-          if (next.state !== "connected") {
-            setTools([]);
-            setResult(null);
-          }
+          if (next.state !== "connected" && wasConnected.current) clearNavigation();
+          wasConnected.current = next.state === "connected";
         }
       } catch {
-        if (!cancelled)
+        if (!cancelled && current === connectionGeneration.current)
           setError("Could not check the Pages connection. Reopen Pages to try again.");
       } finally {
         pending = false;
@@ -61,94 +102,167 @@ export function PublishedStarkPages() {
     return () => {
       cancelled = true;
       window.clearInterval(timer);
-      generation.current += 1;
+      connectionGeneration.current += 1;
+      requestGeneration.current += 1;
     };
+  }, [bridge, clearNavigation]);
+
+  const loadProjects = useCallback(async () => {
+    if (!bridge) return;
+    const request = ++requestGeneration.current;
+    setBusy(true);
+    setError(null);
+    try {
+      const catalog = await bridge.listTools();
+      if (request !== requestGeneration.current) return;
+      setTools(catalog);
+      if (!catalog.some((item) => item.name === "pages_list_projects"))
+        throw new Error("This Pages connection does not offer a project list.");
+      const result = await bridge.read({ tool: "pages_list_projects", arguments: {} });
+      if (request === requestGeneration.current) setProjects(publishedProjectCatalog(result));
+    } catch (failure) {
+      if (request === requestGeneration.current)
+        setError(readError(failure, "Could not load your Pages projects. Try again."));
+    } finally {
+      if (request === requestGeneration.current) setBusy(false);
+    }
   }, [bridge]);
 
   useEffect(() => {
-    if (!bridge || status?.state !== "connected") return;
-    let cancelled = false;
-    const current = generation.current;
-    const load = async () => {
-      try {
-        const catalog = await bridge.listTools();
-        if (cancelled || current !== generation.current) return;
-        setTools(catalog);
-        const first = catalog.find((item) => item.name === "pages_list_projects") ?? catalog[0];
-        if (first) setSelected(first.name);
-        // This observed read needs no project or path. Other tool arguments come from live schemas.
-        if (
-          first?.name === "pages_list_projects" &&
-          publishedPageFields(first.inputSchema)?.every((field) => !field.required)
-        ) {
-          const projects = await bridge.read({ tool: first.name, arguments: {} });
-          if (!cancelled && current === generation.current) setResult(projects);
-        }
-      } catch {
-        if (!cancelled && current === generation.current)
-          setError("Could not load your Pages projects. Retry the connection.");
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [bridge, status?.state]);
+    // oxlint-disable-next-line react/set-state-in-effect -- An authenticated connection starts an external project catalog read.
+    if (status?.state === "connected") void loadProjects();
+  }, [status?.state, loadProjects]);
 
   const connect = async () => {
-    if (!bridge) return;
+    if (!bridge || changingConnection.current) return;
+    const current = ++connectionGeneration.current;
+    changingConnection.current = true;
     setError(null);
-    setBusy(true);
+    setConnectionBusy(true);
     try {
-      setStatus(await bridge.connect());
+      const next = await bridge.connect();
+      if (current === connectionGeneration.current) {
+        wasConnected.current = next.state === "connected";
+        setStatus(next);
+      }
     } catch {
-      setError("Pages sign-in could not start. Try again.");
+      if (current === connectionGeneration.current)
+        setError("Pages sign-in could not start. Try again.");
     } finally {
-      setBusy(false);
+      changingConnection.current = false;
+      if (current === connectionGeneration.current) setConnectionBusy(false);
     }
   };
   const disconnect = async () => {
-    if (!bridge) return;
-    generation.current += 1;
-    setBusy(true);
-    setResult(null);
-    setTools([]);
-    setValues({});
-    setError(null);
+    if (!bridge || changingConnection.current) return;
+    const current = ++connectionGeneration.current;
+    changingConnection.current = true;
+    wasConnected.current = false;
+    clearNavigation();
+    setStatus({ state: "signed-out", message: null });
+    setConnectionBusy(true);
     try {
-      setStatus(await bridge.disconnect());
+      const next = await bridge.disconnect();
+      if (current === connectionGeneration.current) setStatus(next);
     } catch {
-      setError("Could not disconnect Pages. Try again.");
+      if (current === connectionGeneration.current)
+        setError("Could not disconnect Pages. Try again.");
     } finally {
-      setBusy(false);
-    }
-  };
-  const read = async () => {
-    if (!bridge || !tool || !fields) return;
-    const request = ++generation.current;
-    setError(null);
-    setBusy(true);
-    setResult(null);
-    try {
-      const answer = await bridge.read({
-        tool: tool.name,
-        arguments: publishedPageArguments(fields, values),
-      });
-      if (generation.current === request) setResult(answer);
-    } catch (failure) {
-      if (generation.current === request)
-        setError(
-          failure instanceof Error && !failure.message.includes("IPC")
-            ? failure.message.slice(0, 500)
-            : "Pages could not read this page. Check the fields and try again.",
-        );
-    } finally {
-      if (generation.current === request) setBusy(false);
+      changingConnection.current = false;
+      if (current === connectionGeneration.current) setConnectionBusy(false);
     }
   };
 
+  const selectProject = (next: PublishedProject) => {
+    requestGeneration.current += 1;
+    projectScroll.current = section.current?.scrollTop ?? 0;
+    pendingScroll.current = 0;
+    setProject(next);
+    setPages([]);
+    setReader(null);
+    setQuery("");
+    setSearchedQuery(null);
+    setError(null);
+    setBusy(false);
+  };
+  const backToProjects = () => {
+    requestGeneration.current += 1;
+    pendingScroll.current = projectScroll.current;
+    setProject(null);
+    setReader(null);
+    setError(null);
+    setBusy(false);
+  };
+  const backToPages = () => {
+    requestGeneration.current += 1;
+    pendingScroll.current = pageListScroll.current;
+    setReader(null);
+    setError(null);
+    setBusy(false);
+  };
+  const search = async () => {
+    if (
+      !bridge ||
+      !project ||
+      !canSearch ||
+      busy ||
+      query.trim().length < 2 ||
+      query.trim().length > 200
+    )
+      return;
+    const request = ++requestGeneration.current;
+    const term = query.trim();
+    setBusy(true);
+    setError(null);
+    setPages([]);
+    setSearchedQuery(term);
+    try {
+      const answer = await bridge.read({
+        tool: "pages_search",
+        arguments: { root: project.root, query: term, limit: 20 },
+      });
+      if (request === requestGeneration.current)
+        setPages(publishedSearchResults(answer, project.root));
+    } catch (failure) {
+      if (request === requestGeneration.current)
+        setError(readError(failure, "Pages could not finish this search. Try again."));
+    } finally {
+      if (request === requestGeneration.current) setBusy(false);
+    }
+  };
+  const openPage = async (page: PublishedPageEntry, refresh = false) => {
+    if (!bridge || !project) return;
+    const request = ++requestGeneration.current;
+    const previousDocument = refresh && reader?.page.path === page.path ? reader.document : null;
+    if (!reader) pageListScroll.current = section.current?.scrollTop ?? 0;
+    if (!previousDocument) pendingScroll.current = 0;
+    setBusy(false);
+    setError(null);
+    setReader({ page, document: previousDocument, loading: true, error: null });
+    try {
+      const document = await bridge.openPage({ root: project.root, path: page.path, refresh });
+      if (request === requestGeneration.current)
+        setReader({ page, document, loading: false, error: null });
+    } catch (failure) {
+      if (request === requestGeneration.current)
+        setReader({
+          page,
+          document: previousDocument,
+          loading: false,
+          error: readError(failure, "This page could not be opened. Try again."),
+        });
+    }
+  };
+  const visibleProjects = projects.filter((item) =>
+    `${item.title} ${item.root}`.toLocaleLowerCase().includes(projectFilter.toLocaleLowerCase()),
+  );
+
   return (
-    <section aria-label="Published Pages" className="min-h-0 flex-1 overflow-auto p-3 text-sm">
+    <section
+      ref={section}
+      aria-label="Published Pages"
+      className="min-h-0 min-w-0 flex-1 overflow-auto p-3 text-sm"
+    >
       {!bridge ? (
         <p>Open Stark Code on your Mac to connect to published Pages.</p>
       ) : status?.state !== "connected" ? (
@@ -159,142 +273,292 @@ export function PublishedStarkPages() {
           </p>
           {status?.message ? <p role="status">{status.message}</p> : null}
           {status?.state === "connecting" ? (
-            <Button size="sm" variant="outline" onClick={() => void disconnect()} disabled={busy}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void disconnect()}
+              disabled={connectionBusy}
+            >
               Cancel sign-in
             </Button>
           ) : (
-            <Button size="sm" onClick={() => void connect()} disabled={busy || status === null}>
+            <Button
+              size="sm"
+              onClick={() => void connect()}
+              disabled={connectionBusy || status === null}
+            >
               Connect Pages
             </Button>
           )}
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">Pages connected</span>
-            <Button size="sm" variant="ghost" onClick={() => void disconnect()} disabled={busy}>
+        <div className="min-w-0 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">Pages connected</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void disconnect()}
+              disabled={connectionBusy}
+            >
               Disconnect
             </Button>
           </div>
-          {tools.length ? (
+          {project ? (
             <>
-              <Select
-                value={selected}
-                onValueChange={(value) => {
-                  if (!value) return;
-                  generation.current += 1;
-                  setSelected(value);
-                  setValues({});
-                  setResult(null);
-                  setError(null);
-                  setBusy(false);
-                }}
+              <nav
+                aria-label="Pages breadcrumb"
+                className="flex min-w-0 flex-wrap items-center gap-1"
               >
-                <SelectTrigger aria-label="Published Pages action">
-                  <SelectValue>{tool ? labels[tool.name] : "Choose an action"}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {tools.map((item) => (
-                    <SelectItem key={item.name} value={item.name}>
-                      {labels[item.name]}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              {fields ? (
-                <form
-                  className="space-y-3"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void read();
-                  }}
-                >
-                  {fields.map((field) => (
-                    <label key={`${selected}:${field.name}`} className="block space-y-1">
-                      <span>
-                        {field.label}
-                        {field.required ? "" : " (optional)"}
-                      </span>
-                      {field.type === "boolean" || field.choices ? (
-                        <Select
-                          value={values[field.name] ?? ""}
-                          onValueChange={(value) =>
-                            setValues((current) => ({ ...current, [field.name]: value ?? "" }))
-                          }
-                        >
-                          <SelectTrigger aria-label={field.label}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectPopup>
-                            {!field.required ? <SelectItem value="">Default</SelectItem> : null}
-                            {(field.choices ?? ["true", "false"]).map((value) => (
-                              <SelectItem key={value} value={value}>
-                                {value === "true" ? "Yes" : value === "false" ? "No" : value}
-                              </SelectItem>
-                            ))}
-                          </SelectPopup>
-                        </Select>
-                      ) : (
-                        <Input
-                          value={values[field.name] ?? ""}
-                          onChange={(event) =>
-                            setValues((current) => ({
-                              ...current,
-                              [field.name]: event.target.value,
-                            }))
-                          }
-                          required={field.required}
-                          type={field.type === "string" ? "text" : "number"}
-                          step={field.type === "integer" ? "1" : "any"}
-                          maxLength={8192}
-                        />
-                      )}
-                      {field.description ? (
-                        <span className="block text-xs text-muted-foreground">
-                          {field.description}
-                        </span>
-                      ) : null}
-                    </label>
-                  ))}
-                  <Button size="sm" type="submit" disabled={busy}>
-                    {busy
-                      ? "Loading…"
-                      : selected === "pages_list_projects"
-                        ? "Refresh projects"
-                        : labels[selected]}
+                <Button size="sm" variant="ghost" onClick={backToProjects}>
+                  Projects
+                </Button>
+                <ChevronRightIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+                {reader ? (
+                  <Button size="sm" variant="ghost" onClick={backToPages}>
+                    <span className="max-w-[min(16rem,55vw)] truncate">{project.title}</span>
                   </Button>
-                </form>
+                ) : (
+                  <span className="min-w-0 break-words font-medium">{project.title}</span>
+                )}
+              </nav>
+              {reader ? (
+                <div aria-label="Published page reader" className="min-w-0 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Button size="sm" variant="ghost" onClick={backToPages}>
+                      <ArrowLeftIcon aria-hidden />
+                      Back to pages
+                    </Button>
+                    {reader.document ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={reader.loading}
+                        onClick={() => void openPage(reader.page, true)}
+                      >
+                        Refresh page
+                      </Button>
+                    ) : null}
+                    {reader.document?.publicUrl ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          void window.desktopBridge?.openStarkPagesLink?.(
+                            reader.document!.publicUrl!,
+                          )
+                        }
+                      >
+                        Open in browser
+                      </Button>
+                    ) : null}
+                  </div>
+                  <h3 className="break-words text-base font-medium">{reader.page.title}</h3>
+                  {reader.loading ? (
+                    <p role="status">{reader.document ? "Refreshing page…" : "Opening page…"}</p>
+                  ) : null}
+                  {reader.error ? (
+                    <div className="space-y-2">
+                      <p role="alert" className="break-words">
+                        {reader.error}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void openPage(reader.page, true)}
+                      >
+                        Retry page
+                      </Button>
+                    </div>
+                  ) : null}
+                  {reader.document ? (
+                    <PublishedPageContent
+                      document={reader.document}
+                      onNavigate={(path) =>
+                        void openPage({ path, title: publishedPageTitle(path), excerpt: null })
+                      }
+                    />
+                  ) : null}
+                </div>
               ) : (
-                <p>
-                  This page needs fields that this version cannot display. Open it in Pages through
-                  your browser.
-                </p>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-medium">Pages</h3>
+                    {project.url ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() =>
+                          void window.desktopBridge?.openStarkPagesLink?.(project.url!)
+                        }
+                      >
+                        Open project in browser
+                      </Button>
+                    ) : null}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      void openPage({ path: "index.html", title: "Project home", excerpt: null })
+                    }
+                  >
+                    <FileTextIcon aria-hidden />
+                    Open project home
+                  </Button>
+                  {canSearch ? (
+                    <form
+                      className="flex gap-2"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void search();
+                      }}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <Input
+                          aria-label="Search pages"
+                          placeholder="Search this project"
+                          value={query}
+                          minLength={2}
+                          maxLength={200}
+                          onChange={(event) => setQuery(event.target.value)}
+                        />
+                      </div>
+                      <Button size="sm" type="submit" disabled={busy || query.trim().length < 2}>
+                        Search
+                      </Button>
+                    </form>
+                  ) : null}
+                  {busy ? (
+                    <p role="status">Searching pages…</p>
+                  ) : error ? null : searchedQuery !== null ? (
+                    pages.length ? (
+                      <>
+                        <p className="break-words text-xs text-muted-foreground">
+                          {pages.length} results for “{searchedQuery}”
+                          {pages.length === 20 ? ". Refine your search to find more." : ""}
+                        </p>
+                        <ul className="space-y-2" aria-label="Pages in project">
+                          {pages.map((page) => (
+                            <li key={page.path}>
+                              <button
+                                type="button"
+                                onClick={() => void openPage(page)}
+                                className="flex w-full items-start gap-3 rounded-lg border border-border p-3 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                              >
+                                <FileTextIcon
+                                  aria-hidden
+                                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                                />
+                                <span className="min-w-0 space-y-1">
+                                  <span className="block break-words font-medium">
+                                    {page.title}
+                                  </span>
+                                  {page.excerpt ? (
+                                    <span className="line-clamp-3 block break-words text-xs text-muted-foreground">
+                                      {page.excerpt}
+                                    </span>
+                                  ) : null}
+                                  <span className="block break-words text-xs text-muted-foreground">
+                                    {page.path}
+                                  </span>
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : (
+                      <p className="break-words">
+                        No pages match “{searchedQuery}”. Try a different search.
+                      </p>
+                    )
+                  ) : (
+                    <p className="text-muted-foreground">
+                      {canSearch
+                        ? "Search by title or topic to find a page in this project."
+                        : "Page search is not available on this connection. Open the project in your browser."}
+                    </p>
+                  )}
+                </div>
               )}
             </>
           ) : (
-            <p>No supported page-reading tools are available on this connection.</p>
-          )}
-          {result ? (
-            <div
-              aria-label="Published page result"
-              className="space-y-3 border-t border-border pt-3"
-            >
-              {result.isError ? <p role="alert">Pages could not complete this read.</p> : null}
-              {result.structuredContent !== undefined ? (
-                <PublishedPageContent value={result.structuredContent} />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-base font-medium">Your projects</h3>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void loadProjects()}
+                  disabled={busy}
+                >
+                  Refresh
+                </Button>
+              </div>
+              {projects.length ? (
+                <Input
+                  aria-label="Find a project"
+                  placeholder="Find a project"
+                  value={projectFilter}
+                  onChange={(event) => setProjectFilter(event.target.value)}
+                />
+              ) : null}
+              {busy ? (
+                <p role="status">Loading projects…</p>
+              ) : error ? null : visibleProjects.length ? (
+                <ul className="space-y-2" aria-label="Published projects">
+                  {visibleProjects.map((item) => (
+                    <li key={item.root}>
+                      <button
+                        type="button"
+                        onClick={() => selectProject(item)}
+                        className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                      >
+                        <FolderIcon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block break-words font-medium">{item.title}</span>
+                          {item.fileCount !== null ? (
+                            <span className="text-xs text-muted-foreground">
+                              {item.fileCount} published files
+                            </span>
+                          ) : null}
+                        </span>
+                        <ChevronRightIcon
+                          aria-hidden
+                          className="size-4 shrink-0 text-muted-foreground"
+                        />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               ) : (
-                result.content.map((item, index) => (
-                  <PublishedPageContent key={index} value={item.text} />
-                ))
+                <p className="text-muted-foreground">
+                  {projectFilter
+                    ? "No projects match your search."
+                    : "No published projects are available for this account yet."}
+                </p>
               )}
             </div>
-          ) : null}
+          )}
         </div>
       )}
       {error ? (
-        <p role="alert" className="mt-3 text-destructive">
-          {error}
-        </p>
+        <div className="mt-3 space-y-2">
+          <p role="alert" className="break-words text-destructive">
+            {error}
+          </p>
+          {status?.state === "connected" && !reader ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void (project ? search() : loadProjects())}
+              disabled={busy}
+            >
+              {project ? "Retry search" : "Retry projects"}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

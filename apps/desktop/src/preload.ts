@@ -218,6 +218,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     disconnect: () => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.disconnect),
     listTools: () => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.listTools),
     read: (input) => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.read, input),
+    openPage: (input) => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.openPage, input),
   },
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),

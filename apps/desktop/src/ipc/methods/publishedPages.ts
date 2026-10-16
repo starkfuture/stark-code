@@ -1,5 +1,7 @@
 import {
   StarkPublishedPagesStatus,
+  StarkPublishedPagesOpenInput,
+  StarkPublishedPageDocument,
   StarkPublishedPagesTool,
   StarkPublishedPagesReadInput,
   StarkPublishedPagesReadResult,
@@ -92,5 +94,15 @@ export const read = DesktopIpc.makeIpcMethod({
   handler: (input, event) =>
     Effect.gen(function* () {
       return yield* (yield* authorized(event)).read(input);
+    }),
+});
+
+export const openPage = DesktopIpc.makeIpcMethod({
+  channel: PUBLISHED_PAGES_CHANNELS.openPage,
+  payload: StarkPublishedPagesOpenInput,
+  result: StarkPublishedPageDocument,
+  handler: (input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorized(event)).openPage(input);
     }),
 });

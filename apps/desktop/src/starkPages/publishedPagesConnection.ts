@@ -1,5 +1,6 @@
 // The official MCP SDK owns OAuth/PKCE and MCP framing. This adapter owns its app-local session.
 // @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics globalDate:off -- bounded in-memory cache inside the Promise-based MCP SDK adapter
 import * as NodeCrypto from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { auth, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
@@ -8,6 +9,7 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv
 import type { FetchLike, Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type {
   StarkPublishedPagesBridge,
+  StarkPublishedPageDocument,
   StarkPublishedPagesStatus,
   StarkPublishedPagesReadInput,
   StarkPublishedPagesReadResult,
@@ -24,6 +26,11 @@ import {
   sanitizeReadResult,
   sanitizeReadTool,
 } from "./publishedPagesPolicy.ts";
+import {
+  downloadPageAsset,
+  loadPublishedPage,
+  validatePublishedPage,
+} from "./publishedPagesAssets.ts";
 import { pagesOAuthCallback } from "./publishedPagesCallback.ts";
 import type { PublishedPagesCredentials, PublishedPagesStore } from "./publishedPagesStore.ts";
 
@@ -38,6 +45,7 @@ export function createPublishedPagesConnection(input: {
   store: PublishedPagesStore;
   openExternal(url: string): Promise<boolean>;
   fetch?: FetchLike;
+  assetFetch?: typeof fetch;
 }): PublishedPagesConnection {
   let status: StarkPublishedPagesStatus = disconnected;
   let credentials: PublishedPagesCredentials | undefined;
@@ -47,6 +55,10 @@ export function createPublishedPagesConnection(input: {
   let pending: Promise<void> = Promise.resolve();
   let requestQueue: Promise<void> = Promise.resolve();
   const controllers = new Set<AbortController>();
+  const pageCache = new Map<
+    string,
+    { document: StarkPublishedPageDocument; at: number; bytes: number }
+  >();
   const failure = (error: unknown) =>
     error instanceof PublishedPagesFailure ? error : new PublishedPagesFailure("network");
   const current = (expected: number) => {
@@ -181,7 +193,7 @@ export function createPublishedPagesConnection(input: {
   };
 
   const withClient = async <T>(
-    operation: (client: Client) => Promise<T>,
+    operation: (client: Client, signal: AbortSignal) => Promise<T>,
     expected: number,
     oauth?: OAuthClientProvider,
   ): Promise<T> => {
@@ -217,7 +229,7 @@ export function createPublishedPagesConnection(input: {
         setProtocolVersion: (version) => transport.setProtocolVersion(version),
       };
       await client.connect(wire, { timeout: 30_000 });
-      const result = await operation(client);
+      const result = await operation(client, controller.signal);
       current(expected);
       return result;
     } finally {
@@ -245,7 +257,31 @@ export function createPublishedPagesConnection(input: {
     }
     throw new PublishedPagesFailure("limit");
   };
-  const request = <T>(operation: (client: Client) => Promise<T>): Promise<T> => {
+  const readTool = async (
+    client: Client,
+    value: StarkPublishedPagesReadInput,
+    available?: readonly StarkPublishedPagesTool[],
+  ): Promise<StarkPublishedPagesReadResult> => {
+    const args = boundedJson(value.arguments, 32 * 1024);
+    const schema = (available ?? (await tools(client))).find(
+      (entry) => entry.name === value.tool,
+    )?.inputSchema;
+    if (!schema) throw new PublishedPagesFailure("invalid");
+    try {
+      if (!new AjvJsonSchemaValidator().getValidator(schema)(args).valid)
+        throw new PublishedPagesFailure("invalid");
+    } catch {
+      throw new PublishedPagesFailure("invalid");
+    }
+    return sanitizeReadResult(
+      await client.callTool({ name: value.tool, arguments: value.arguments }, undefined, {
+        timeout: 30_000,
+      }),
+    );
+  };
+  const request = <T>(
+    operation: (client: Client, signal: AbortSignal) => Promise<T>,
+  ): Promise<T> => {
     // Capture before queueing: sign-out cancels queued reads as well as active requests.
     const expected = generation;
     const result = requestQueue.then(async () => {
@@ -270,6 +306,7 @@ export function createPublishedPagesConnection(input: {
   };
   const cancel = () => {
     generation++;
+    pageCache.clear();
     for (const controller of controllers) controller.abort();
     controllers.clear();
   };
@@ -347,24 +384,47 @@ export function createPublishedPagesConnection(input: {
     listTools: () => request(tools),
     read: (value: StarkPublishedPagesReadInput): Promise<StarkPublishedPagesReadResult> => {
       if (!isReadTool(value.tool)) return Promise.reject(new PublishedPagesFailure("invalid"));
-      return request(async (client) => {
-        const args = boundedJson(value.arguments, 32 * 1024);
-        const schema = (await tools(client)).find(
-          (entry) => entry.name === value.tool,
-        )?.inputSchema;
-        if (!schema) throw new PublishedPagesFailure("invalid");
-        try {
-          if (!new AjvJsonSchemaValidator().getValidator(schema)(args).valid)
-            throw new PublishedPagesFailure("invalid");
-        } catch {
-          throw new PublishedPagesFailure("invalid");
+      return request((client) => readTool(client, value));
+    },
+    openPage: (value) => {
+      let path: string;
+      try {
+        path = validatePublishedPage(value.root, value.path);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      return request(async (client, signal) => {
+        const key = JSON.stringify([value.root, path]);
+        const cached = pageCache.get(key);
+        if (!value.refresh && cached && Date.now() - cached.at < 5 * 60_000)
+          return structuredClone(cached.document);
+        pageCache.delete(key);
+        const available = await tools(client);
+        const expected = generation;
+        const pageSignal = AbortSignal.any([signal, AbortSignal.timeout(120_000)]);
+        const document = await loadPublishedPage({
+          root: value.root,
+          path,
+          read: async (tool, args) => {
+            current(expected);
+            if (pageSignal.aborted) throw new PublishedPagesFailure("cancelled");
+            return readTool(client, { tool, arguments: args }, available);
+          },
+          download: (url) => downloadPageAsset(url, input.assetFetch, pageSignal),
+        });
+        current(expected);
+        if (pageSignal.aborted) throw new PublishedPagesFailure("cancelled");
+        const bytes = Buffer.byteLength(JSON.stringify(document));
+        pageCache.set(key, { document, at: Date.now(), bytes });
+        while (
+          pageCache.size > 8 ||
+          [...pageCache.values()].reduce((sum, entry) => sum + entry.bytes, 0) > 32 * 1024 * 1024
+        ) {
+          const oldest = pageCache.keys().next().value;
+          if (oldest === undefined) break;
+          pageCache.delete(oldest);
         }
-        const result = await client.callTool(
-          { name: value.tool, arguments: value.arguments },
-          undefined,
-          { timeout: 30_000 },
-        );
-        return sanitizeReadResult(result);
+        return structuredClone(document);
       });
     },
     dispose: async () => {

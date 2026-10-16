@@ -277,11 +277,16 @@ modes keep publishing unavailable.
 
 Choose **Published** to connect to your company's Pages. Sign-in opens in your
 main browser and returns to Stark Code. The app keeps its own connection; it
-does not copy another browser's login. Browse projects, search, or read a page
-using the fields offered by Pages. Links open in your main browser. This view
-is read-only. Published HTML can show its inline styles; external stylesheets,
-images and scripts are not loaded. Use the page link for its full website view.
-Choose **Disconnect** to remove the app's saved Pages connection.
+does not copy another browser's login. Find a project, open its home page or
+search for a page inside it. Related page links stay in the reader; other links
+open in your main browser. Drag the panel's edge to give a page more room.
+
+Published pages include styles, images and fonts stored with the page. Viewing
+uses no model tokens. Recent pages are cached temporarily; **Refresh page** gets
+the latest version. This view is read-only and does not run page scripts or load
+resources from other websites. Use **Open in browser** for interactive pages or
+content that cannot be shown here. **Disconnect** removes the saved connection
+and clears cached pages.
 
 ## Goals
 

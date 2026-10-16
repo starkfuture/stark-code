@@ -3,6 +3,7 @@ import { StarkPagesSidebar } from "./StarkPagesSidebar";
 import { PublishedStarkPages } from "./PublishedStarkPages";
 import { Button } from "./ui/button";
 import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
+import { PreviewPanelShell } from "./preview/PreviewPanelShell";
 
 /** Keep the mirror usable when a narrow workspace has no room for two columns. */
 export function StarkPagesPanel({
@@ -43,7 +44,15 @@ export function StarkPagesPanel({
     </div>
   );
   if (inline) {
-    return <div className="min-h-0 w-96 shrink-0">{content}</div>;
+    return (
+      <PreviewPanelShell
+        mode="inline"
+        widthStorageKey="starkcode:pages-panel-width"
+        defaultWidth={540}
+      >
+        {content}
+      </PreviewPanelShell>
+    );
   }
   return (
     <Sheet

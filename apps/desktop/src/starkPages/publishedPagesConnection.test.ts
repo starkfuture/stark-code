@@ -15,6 +15,7 @@ function fixture(
     registrationStatus?: number;
     autoCallback?: boolean;
     tokenEndpoint?: string;
+    pageFiles?: Record<string, Record<string, unknown>>;
   } = {},
 ) {
   let stored: PublishedPagesCredentials | undefined;
@@ -162,12 +163,29 @@ function fixture(
                 description: "Read a file",
                 inputSchema: {
                   type: "object",
-                  properties: { path: { type: "string", maxLength: 200 } },
+                  properties: {
+                    path: { type: "string", maxLength: 200 },
+                    root: { type: "string" },
+                    mode: { type: "string" },
+                  },
                   required: ["path"],
                   additionalProperties: false,
                 },
               },
               { name: "pages_upload_commit", inputSchema: { type: "object" } },
+              ...(options.pageFiles
+                ? [
+                    {
+                      name: "pages_get_public_url",
+                      inputSchema: {
+                        type: "object",
+                        properties: { root: { type: "string" }, path: { type: "string" } },
+                        required: ["root", "path"],
+                        additionalProperties: false,
+                      },
+                    },
+                  ]
+                : []),
             ],
           });
         if (message.method === "tools/call") {
@@ -178,6 +196,18 @@ function fixture(
             gate.started();
             await gate.wait;
           }
+          if (options.pageFiles && message.params.name === "pages_read_file")
+            return response({
+              content: [],
+              structuredContent: options.pageFiles[message.params.arguments.path],
+              isError: !options.pageFiles[message.params.arguments.path],
+            });
+          if (options.pageFiles && message.params.name === "pages_get_public_url")
+            return response({
+              content: [],
+              structuredContent: { url: "https://pages.starkfuture.com/project/index.html" },
+              isError: false,
+            });
           return response({
             content: [
               { type: "text", text: "A page" },
@@ -430,5 +460,63 @@ describe("Published Pages connection", () => {
     expect(test.stored).toBeUndefined();
     expect(test.calls).not.toContain("/token");
     await test.connection.dispose();
+  });
+});
+
+describe("Published Pages document cache", () => {
+  const pageFiles = {
+    "index.html": {
+      kind: "text",
+      text: '<link rel="stylesheet" href="_stark/theme.css"><p>Page</p>',
+      content_type: "text/html",
+      truncated: false,
+    },
+    "_stark/theme.css": {
+      kind: "text",
+      text: "p{color:green}",
+      content_type: "text/css",
+      truncated: false,
+    },
+  };
+  it("reuses a complete document, refreshes explicitly and clears cached content on sign-out", async () => {
+    const test = fixture({ pageFiles });
+    try {
+      await test.connection.connect();
+      await test.connection.settled();
+      const input = { root: "project", path: "index.html" };
+      const first = await test.connection.openPage(input);
+      expect(first.assets).toHaveLength(1);
+      expect(test.invoked.filter((name) => name === "pages_read_file")).toHaveLength(2);
+      expect(await test.connection.openPage(input)).toEqual(first);
+      expect(test.invoked.filter((name) => name === "pages_read_file")).toHaveLength(2);
+      await test.connection.openPage({ ...input, refresh: true });
+      expect(test.invoked.filter((name) => name === "pages_read_file")).toHaveLength(4);
+      await test.connection.disconnect();
+      await expect(test.connection.openPage(input)).rejects.toThrow("Connect to Stark Pages");
+      await test.connection.connect();
+      await test.connection.settled();
+      await test.connection.openPage(input);
+      expect(test.invoked.filter((name) => name === "pages_read_file")).toHaveLength(6);
+    } finally {
+      await test.connection.dispose();
+    }
+  });
+
+  it("discards an in-flight document on sign-out", async () => {
+    const test = fixture({ pageFiles });
+    try {
+      await test.connection.connect();
+      await test.connection.settled();
+      const gate = test.holdNextToolCall();
+      const opening = test.connection.openPage({ root: "project", path: "index.html" });
+      await gate.started;
+      const outcome = Promise.allSettled([opening]);
+      await test.connection.disconnect();
+      gate.release();
+      expect((await outcome)[0]?.status).toBe("rejected");
+      expect(test.invoked).toEqual(["pages_read_file"]);
+    } finally {
+      await test.connection.dispose();
+    }
   });
 });

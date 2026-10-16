@@ -88,6 +88,7 @@ import { WorktreeToolkit } from "../../mcp/toolkits/worktree/tools.ts";
 import { ThreadToolkit } from "../../mcp/toolkits/thread/tools.ts";
 import { OrchestratorToolkit } from "../../mcp/toolkits/orchestrator/tools.ts";
 import { ClaudeExecutableFileCheck } from "../../provider/Drivers/ClaudeExecutable.ts";
+import { makeClaudeUsagePublisher } from "../../provider/Drivers/ClaudeDriver.ts";
 import * as ProviderEventLoggers from "@starkfuture/provider-core/server/ProviderEventLoggers";
 import * as ProviderAdapter from "@starkfuture/provider-core/server/ProviderAdapter";
 import type * as ProviderContinuationRequests from "@starkfuture/provider-core/server/ProviderContinuationRequests";
@@ -2668,6 +2669,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     });
 
   const makeWakeHarnessWithOptions = (options?: {
+    readonly captureUsageLimits?: ClaudeAdapterV2.ClaudeAdapterV2Options["captureUsageLimits"];
+    readonly beforeOpen?: Effect.Effect<void>;
     readonly acknowledgeShellAppends?: boolean;
     readonly queryMethods?: Partial<
       Pick<
@@ -2749,6 +2752,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         path: yield* Path.Path,
         crypto: yield* Crypto.Crypto,
         idAllocator,
+        ...(options?.captureUsageLimits ? { captureUsageLimits: options.captureUsageLimits } : {}),
         continuationRequests: {
           offer: (request) =>
             Effect.sync(() => {
@@ -2759,6 +2763,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           allocateSessionId: Effect.succeed(options?.nativeSessionId ?? WAKE_NATIVE_SESSION),
           open: (input) =>
             Effect.gen(function* () {
+              if (options?.beforeOpen) yield* options.beforeOpen;
               openedOptions = input.options;
               if (options?.freshQueueOnReopen === true && processQueues.length > 0) {
                 const processMessages = yield* Queue.unbounded<SDKMessage>();
@@ -4196,6 +4201,127 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         ),
       ),
     ),
+  );
+
+  it.effect(
+    "keeps usage ownership with the Claude process across turns and captures it again on reopen",
+    () =>
+      Effect.gen(function* () {
+        const percentages: number[] = [];
+        const publisher = yield* makeClaudeUsagePublisher((update) =>
+          Effect.sync(() => {
+            percentages.push(update.windows[0]!.usedPercent!);
+          }),
+        );
+        const harness = yield* makeWakeHarnessWithOptions({
+          captureUsageLimits: publisher.capture,
+          freshQueueOnReopen: true,
+          close: Queue.shutdown,
+        });
+        const start = (ordinal: number, modelSelection = CLAUDE_TEST_MODEL_SELECTION) =>
+          harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: DateTime.makeUnsafe("2026-10-17T12:00:00.000Z"),
+              attemptId: RunAttemptId.make(`usage-owner-${ordinal}`),
+              providerTurnOrdinal: ordinal,
+              text: "Continue.",
+              attachments: [],
+              modelSelection,
+            }),
+          );
+        const usage = (utilization: number) =>
+          claudeSdkFrame({
+            type: "rate_limit_event",
+            rate_limit_info: { status: "allowed", rateLimitType: "seven_day", utilization },
+            uuid: `usage-owner-${utilization}`,
+            session_id: WAKE_NATIVE_SESSION,
+          });
+        yield* start(1);
+        yield* harness.offerAndWait(usage(0.67));
+        yield* harness.offerAndWait(
+          makeResultFrame({ uuid: "usage-owner-result-1", result: "Done" }),
+        );
+        yield* Queue.take(harness.terminalReceipts);
+        assert.deepEqual(percentages, [67]);
+
+        yield* publisher.invalidate;
+        yield* start(2);
+        yield* harness.offerAndWait(usage(0.9));
+        yield* harness.offerAndWait(
+          makeResultFrame({ uuid: "usage-owner-result-2", result: "Done" }),
+        );
+        yield* Queue.take(harness.terminalReceipts);
+        assert.lengthOf(
+          harness.processQueues,
+          1,
+          "the organization change must not restart the CLI",
+        );
+        assert.deepEqual(percentages, [67], "reusing the old process must not recapture the login");
+
+        yield* start(3, { ...CLAUDE_TEST_MODEL_SELECTION, model: "claude-sonnet-5-5" });
+        assert.lengthOf(harness.processQueues, 2);
+        yield* Queue.offerAll(harness.processQueues[1]!, [
+          usage(0.15),
+          makeResultFrame({ uuid: "usage-owner-result-3", result: "Done" }),
+        ]);
+        yield* Queue.take(harness.terminalReceipts);
+        assert.deepEqual(percentages, [67, 15]);
+        assert.lengthOf(harness.offeredMessages, 3, "no prompts are replayed after invalidation");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+
+  it.effect(
+    "captures usage ownership before an in-flight Claude process open can change logins",
+    () =>
+      Effect.gen(function* () {
+        const percentages: number[] = [];
+        const publisher = yield* makeClaudeUsagePublisher((update) =>
+          Effect.sync(() => {
+            percentages.push(update.windows[0]!.usedPercent!);
+          }),
+        );
+        const harness = yield* makeWakeHarnessWithOptions({
+          captureUsageLimits: publisher.capture,
+          // Simulates an organization switch while the SDK opens the old login's CLI.
+          beforeOpen: publisher.invalidate,
+        });
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("usage-owner-open-race"),
+            text: "Continue.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "rate_limit_event",
+            rate_limit_info: { status: "allowed", rateLimitType: "seven_day", utilization: 0.9 },
+            uuid: "usage-owner-open-race",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        yield* harness.offerAndWait(
+          makeResultFrame({ uuid: "usage-owner-race-result", result: "Done" }),
+        );
+        yield* Queue.take(harness.terminalReceipts);
+        assert.deepEqual(percentages, []);
+        assert.equal(harness.terminalEvents()[0]?.status, "completed");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
   );
 
   it.effect("announces usage-limit pauses once per window and again on a new turn", () =>

@@ -3283,6 +3283,7 @@ interface ClaudeLiveQueryContext {
   readonly queryPolicyKey: string;
   readonly selectionKey: string;
   readonly closed: Deferred.Deferred<void, never>;
+  readonly onUsageLimits: ManagedServerProvider["applyUsageLimits"] | undefined;
   // Retained for process-exit cleanup even when its last turn failed.
   lastTurn: ActiveClaudeTurnContext | null;
   // Whether this CLI process echoes a prompt's uuid on the first frame of
@@ -3625,6 +3626,8 @@ export interface ClaudeAdapterV2Options {
   readonly queryRunner: ClaudeAgentSdkQueryRunnerShape;
   readonly scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>;
   readonly onUsageLimits?: ManagedServerProvider["applyUsageLimits"];
+  /** Capture the process's account usage sink before the SDK starts the CLI. */
+  readonly captureUsageLimits?: Effect.Effect<ManagedServerProvider["applyUsageLimits"]>;
   /** Sink for wake-turn continuation requests; defaults to dropping them. */
   readonly continuationRequests?: {
     readonly offer: (
@@ -7302,8 +7305,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               : { overageIncluded: undefined };
             const update = claudeRateLimitEventToUpdate(rateLimitInfo, names);
             const now = yield* DateTime.now;
-            if (update && adapterOptions.onUsageLimits) {
-              yield* adapterOptions.onUsageLimits({
+            if (update && liveQuery.onUsageLimits) {
+              yield* liveQuery.onUsageLimits({
                 ...update,
                 checkedAt: DateTime.formatIso(now),
               });
@@ -9148,6 +9151,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
           });
+          const onUsageLimits = adapterOptions.captureUsageLimits
+            ? yield* adapterOptions.captureUsageLimits
+            : adapterOptions.onUsageLimits;
           const querySession = yield* queryRunner
             .open({
               threadId: turnInput.threadId,
@@ -9199,6 +9205,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             queryPolicyKey,
             selectionKey: compiledSelection.queryIdentity,
             closed,
+            onUsageLimits,
             lastTurn: null,
             promptEchoMode: "unknown",
             openedPermissionMode: queryOptions.permissionMode,
@@ -10654,7 +10661,10 @@ export type ClaudeAdapterV2DriverEnv =
 export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
   function* (
     input: ProviderAdapterDriverCreateInput<ClaudeSettings>,
-    hooks: Pick<ClaudeAdapterV2Options, "scopedLimitNames" | "onUsageLimits"> = {},
+    hooks: Pick<
+      ClaudeAdapterV2Options,
+      "scopedLimitNames" | "onUsageLimits" | "captureUsageLimits"
+    > = {},
   ) {
     const { instanceId, environment, enabled, config } = input;
     const fileSystem = yield* FileSystem.FileSystem;

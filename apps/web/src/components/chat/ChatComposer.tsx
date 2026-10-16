@@ -275,6 +275,7 @@ import {
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import { ComposerUsageRing } from "./ComposerUsageRing";
 import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import {
   type ComposerCommandItem,
@@ -5782,6 +5783,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }}
         onOpenProviderSetup={onOpenProviderSetup}
       />
+
+      {!providerCatalogPending && (multipleModelSelections?.length ?? 0) < 2 ? (
+        <ComposerUsageRing
+          provider={selectedProviderStatus}
+          connected={props.environmentUnavailable === null}
+          size={composerControlsCollapsed ? "xs" : "sm"}
+          timestampFormat={settings.timestampFormat}
+        />
+      ) : null}
 
       <>
         {restingBlockDefs.map((def, index) => {

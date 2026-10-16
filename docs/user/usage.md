@@ -78,6 +78,10 @@ the dialog.
 
 ## Track subscription limits
 
+The ring beside the Claude or Codex model shows the selected profile's percentage **used**,
+with weekly limits shown first. Hover or click for the reset time. A dash means current usage
+is unavailable; it does not mean zero. This is separate from the pooled allowance in Limits.
+
 **Usage → Limits** pools every subscription account it can see per provider, so with several Codex
 or Claude accounts across your environments and hubs you read one number per window rather than a
 list. Each window card shows how much of the pool is left and a bar with one segment per account,

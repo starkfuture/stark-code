@@ -6,7 +6,12 @@ import {
 } from "../composerFooterLayout";
 import { measureRestingComposerControls } from "./restingComposerControlsMeasurement";
 
-function measurePicker(input: { clientWidth: number; flexGrow: string; maxWidth?: string }) {
+function measurePicker(input: {
+  clientWidth: number;
+  flexGrow: string;
+  maxWidth?: string;
+  usageRingWidth?: number;
+}) {
   const label = { clientWidth: input.clientWidth, scrollWidth: 160 };
   const picker = {
     getBoundingClientRect: () => ({ width: 52 }),
@@ -15,6 +20,9 @@ function measurePicker(input: { clientWidth: number; flexGrow: string; maxWidth?
   const controls = {
     querySelector: (selector: string) => {
       if (selector === "[data-chat-provider-model-picker]") return picker;
+      if (selector === "[data-composer-usage-ring]" && input.usageRingWidth !== undefined) {
+        return { getBoundingClientRect: () => ({ width: input.usageRingWidth }) };
+      }
       if (selector === "[data-resting-controls-overflow]") {
         return { getBoundingClientRect: () => ({ width: 24 }) };
       }
@@ -39,6 +47,15 @@ function measurePicker(input: { clientWidth: number; flexGrow: string; maxWidth?
 afterEach(() => vi.unstubAllGlobals());
 
 describe("measureRestingComposerControls", () => {
+  it("moves controls to overflow when the usage ring takes the remaining space", () => {
+    const measurement = measurePicker({ clientWidth: 0, flexGrow: "0", usageRingWidth: 28 });
+    expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth: 200 })).toEqual({
+      hiddenCount: 1,
+      iconOnlyCount: 1,
+      visible: true,
+    });
+  });
+
   it("keeps controls inline when the model label is deliberately collapsed", () => {
     const measurement = measurePicker({ clientWidth: 0, flexGrow: "0" });
 

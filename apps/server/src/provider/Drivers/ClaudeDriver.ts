@@ -19,7 +19,9 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
@@ -45,6 +47,7 @@ import {
   probeClaudeWorkspaceSnapshot,
 } from "../ClaudeProvider.ts";
 import { makeManagedServerProvider } from "@starkfuture/provider-core/server/managedProvider";
+import type { ManagedServerProvider } from "@starkfuture/provider-core/server/snapshot";
 import * as ModelCatalog from "@starkfuture/provider-core/server/ModelCatalog";
 import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
 import {
@@ -76,6 +79,27 @@ const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
+
+/** A live CLI keeps its login even when the provider's active organization changes. */
+export const makeClaudeUsagePublisher = Effect.fn("makeClaudeUsagePublisher")(function* (
+  publish: ManagedServerProvider["applyUsageLimits"],
+) {
+  const generation = yield* Ref.make(0);
+  const lock = yield* Semaphore.make(1);
+  return {
+    capture: Effect.gen(function* () {
+      const capturedGeneration = yield* Ref.get(generation);
+      return (update: Parameters<typeof publish>[0]) =>
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            if ((yield* Ref.get(generation)) === capturedGeneration) yield* publish(update);
+          }),
+        );
+    }),
+    // Serialize invalidation with the entire publication, not just the check.
+    invalidate: lock.withPermits(1)(Ref.update(generation, (current) => current + 1)),
+  };
+});
 
 function isClaudeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
@@ -170,6 +194,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       });
 
       const scopedLimitNames = yield* makeClaudeScopedLimitNames;
+      const usagePublisher = yield* makeClaudeUsagePublisher((update) =>
+        snapshot.applyUsageLimits(update),
+      );
       const orchestrationAdapter = yield* createClaudeAdapterV2(
         {
           instanceId,
@@ -179,7 +206,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
           enabled,
           config,
         },
-        { scopedLimitNames, onUsageLimits: (update) => snapshot.applyUsageLimits(update) },
+        { scopedLimitNames, captureUsageLimits: usagePublisher.capture },
       ).pipe(
         Effect.mapError(
           (cause) =>
@@ -357,7 +384,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         accentColor,
         enabled,
         snapshot,
-        invalidateCaches: Cache.invalidateAll(capabilitiesProbeCache),
+        invalidateCaches: usagePublisher.invalidate.pipe(
+          Effect.andThen(Cache.invalidateAll(capabilitiesProbeCache)),
+        ),
         snapshotForCwd: (cwd: string) =>
           snapshot.getSnapshot.pipe(
             Effect.flatMap((machineSnapshot) =>

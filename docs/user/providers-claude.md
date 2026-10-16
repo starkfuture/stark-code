@@ -17,8 +17,13 @@ shared provider settings.
 
 ## Switch organizations on the shared login
 
-Open **Settings > Providers > Claude organizations** on web or desktop. Install
-[claude-swap](https://github.com/realiti4/claude-swap) 0.25 or newer on the connected
+Open **Claude organizations** at the bottom of the sidebar to switch quickly.
+Choose a saved organization directly; the checkmark and sidebar label update after
+the switch succeeds. **Manage organizations** opens the setup and automatic
+switching controls for the same machine. The picker follows the current
+conversation's machine, including remote conversations.
+
+Install [claude-swap](https://github.com/realiti4/claude-swap) 0.25 or newer on the connected
 environment's machine first (`uv tool install claude-swap`). Load organizations to
 see saved logins, usage windows, and reset times. Organizations with the same email
 stay separate.

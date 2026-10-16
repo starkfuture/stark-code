@@ -1,11 +1,19 @@
 import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { usePullRequestsSupported } from "../../state/environments";
+import {
+  useEnvironment,
+  usePrimaryEnvironmentId,
+  usePullRequestsSupported,
+} from "../../state/environments";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { resolveThreadRouteTarget } from "../../threadRoutes";
+import { searchableSetting } from "../settings/settingsSearch";
+import { ClaudeOrganizationSwitcher } from "./ClaudeOrganizationSwitcher";
 import { StarkWordmark } from "../StarkWordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -240,12 +248,52 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
+function SidebarClaudeOrganizations() {
+  const navigate = useNavigate();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const routeTarget = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params),
+  });
+  const draftEnvironmentId = useComposerDraftStore((store) => {
+    if (routeTarget?.kind !== "draft") return null;
+    const draft = store.getDraftSession(routeTarget.draftId);
+    return draft?.promotedTo?.environmentId ?? draft?.environmentId ?? null;
+  });
+  // Follow the conversation's machine, including drafts. Never fall back to the
+  // local login when a selected remote conversation is unavailable.
+  const environmentId =
+    routeTarget?.kind === "server"
+      ? routeTarget.threadRef.environmentId
+      : routeTarget?.kind === "draft"
+        ? draftEnvironmentId
+        : primaryEnvironmentId;
+  const environment = useEnvironment(environmentId);
+  if (!environment) return null;
+  return (
+    <ClaudeOrganizationSwitcher
+      environmentId={environment.environmentId}
+      environmentLabel={environment.label}
+      onManage={() => {
+        if (isMobile) setOpenMobile(false);
+        void navigate({
+          to: "/settings/providers",
+          search: { machine: environment.environmentId },
+          hash: searchableSetting("claude-organizations").id,
+        });
+      }}
+    />
+  );
+}
+
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter>
       <SidebarThreadUndoNotice />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
+      <SidebarClaudeOrganizations />
       <SidebarUtilityMenu />
     </SidebarFooter>
   );

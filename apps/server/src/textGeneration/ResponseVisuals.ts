@@ -18,7 +18,9 @@ import {
   ResponseVisualsTable,
   RESPONSE_VISUALS_MODEL,
   RESPONSE_VISUALS_VERSION,
-  resolveProviderInstanceEnabled,
+  ProviderInstanceId,
+  resolveProjectProviderInstanceEnabled,
+  type ProviderInstanceConfig,
 } from "@starkfuture/contracts";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
 import {
@@ -33,6 +35,7 @@ import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const isResponseVisualsError = Schema.is(ResponseVisualsError);
@@ -80,7 +83,13 @@ const decodeCache = Schema.decodeUnknownOption(
 const decodeInput = Schema.decodeUnknownOption(ResponseVisualsInput);
 const decodeClaudeSettings = Schema.decodeUnknownOption(ClaudeSettings);
 const decodeEnvelope = Schema.decodeUnknownOption(Schema.fromJsonString(Envelope));
-const decodeOutput = Schema.decodeUnknownOption(Schema.fromJsonString(FormatterOutput));
+const decodeOutput = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
+const decodeSummary = Schema.decodeUnknownOption(FormatterOutput.fields.summary);
+const decodeTable = Schema.decodeUnknownOption(FormatterOutput.fields.table);
+const decodeFlowchart = Schema.decodeUnknownOption(FormatterOutput.fields.flowchart);
+const decodeReason = Schema.decodeUnknownOption(FormatterOutput.fields.reason);
 const decodeResult = Schema.decodeUnknownOption(ResponseVisualsResult);
 
 // Only plain labels enter Mermaid syntax. No model-written directives, HTML, styles, or links.
@@ -92,9 +101,35 @@ const systemPrompt = [
   "Use only facts stated in the answer. Do not add recommendations, links, research, images, or HTML.",
   "Omit redundant additions. Return null for unused fields; if all additions are null explain why in reason.",
   "Use the requested language, or the answer's language. A requested table or flowchart is a preference, not a reason to invent data.",
+  "Flowchart node IDs must be unique letters followed by letters or digits, at most 16 characters (for example A, B2). Every edge must refer to an existing node ID; never use spaces, punctuation, or labels as IDs.",
   "Return exactly one JSON object without Markdown fences, matching this schema:",
   encodeJson(toJsonSchemaObject(FormatterOutput)),
 ].join("\n");
+
+// CLI stderr can echo the selected answer, paths, settings, and credentials. Retain only
+// fixed diagnostic prefixes; every dynamic suffix and every unknown line is redacted.
+const redactStderrLine = (stderr: string) => {
+  const first =
+    stderr
+      .split(/[\r\n]/, 1)[0]
+      ?.trim()
+      .slice(0, 240) ?? "";
+  if (!first) return "[empty]";
+  for (const prefix of [
+    "error: unknown option",
+    "error: missing required argument",
+    "error: too many arguments",
+    "error: authentication failed",
+    "error: invalid api key",
+    "error: rate limit exceeded",
+    "error: connection refused",
+    "error: permission denied",
+  ]) {
+    if (first.toLowerCase() === prefix || first.toLowerCase().startsWith(`${prefix} `))
+      return `${prefix} [redacted]`;
+  }
+  return "[redacted]";
+};
 
 export class ResponseVisuals extends Context.Service<
   ResponseVisuals,
@@ -111,6 +146,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const settings = yield* ServerSettings.ServerSettingsService;
+  const threads = yield* ThreadManagement.ThreadManagementService;
   const config = yield* ServerConfig.ServerConfig;
   const baseEnvironment = yield* HostProcess.Environment;
   const home = yield* HostProcess.HomeDirectory;
@@ -118,17 +154,16 @@ const make = Effect.gen(function* () {
   const gate = yield* Semaphore.make(1);
   const cache = new Map<string, ResponseVisualsResult>();
   const cachePath = path.join(config.stateDir, "response-visuals-v1.json");
-  let cacheLoaded = false;
-
-  const loadCache = Effect.gen(function* () {
-    if (cacheLoaded) return;
-    cacheLoaded = true;
-    const stat = yield* fs.stat(cachePath).pipe(Effect.orElseSucceed(() => null));
-    if (!stat || stat.type !== "File" || stat.size > 1024n * 1024n) return;
-    const raw = yield* fs.readFileString(cachePath).pipe(Effect.orElseSucceed(() => ""));
-    const parsed = decodeCache(raw);
-    if (Option.isSome(parsed)) for (const entry of parsed.value) cache.set(entry.key, entry.result);
-  });
+  const loadCache = yield* Effect.cached(
+    Effect.gen(function* () {
+      const stat = yield* fs.stat(cachePath).pipe(Effect.orElseSucceed(() => null));
+      if (!stat || stat.type !== "File" || stat.size > 1024n * 1024n) return;
+      const raw = yield* fs.readFileString(cachePath).pipe(Effect.orElseSucceed(() => ""));
+      const parsed = decodeCache(raw);
+      if (Option.isSome(parsed))
+        for (const entry of parsed.value) cache.set(entry.key, entry.result);
+    }),
+  );
   const saveCache = Effect.gen(function* () {
     while (cache.size > 64) cache.delete(cache.keys().next().value!);
     const text = encodeJson([...cache].map(([key, result]) => ({ key, result })));
@@ -164,14 +199,10 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const generate = Effect.fn("ResponseVisuals.generate")(function* (input: ResponseVisualsInput) {
-    const currentSettings = yield* settings.getSettings.pipe(
-      Effect.mapError((cause) => new ResponseVisualsError({ reason: "unavailable", cause })),
-    );
-    const instance = Object.values(deriveProviderInstanceConfigMap(currentSettings)).find(
-      (entry) => entry.driver === "claudeAgent" && resolveProviderInstanceEnabled(entry),
-    );
-    if (!instance) return yield* new ResponseVisualsError({ reason: "unavailable" });
+  const generate = Effect.fn("ResponseVisuals.generate")(function* (
+    input: ResponseVisualsInput,
+    instance: ProviderInstanceConfig,
+  ) {
     const parsedSettings = decodeClaudeSettings(instance.config ?? {});
     if (Option.isNone(parsedSettings))
       return yield* new ResponseVisualsError({ reason: "unavailable" });
@@ -282,7 +313,7 @@ const make = Effect.gen(function* () {
         }),
       )
       .pipe(Effect.mapError((cause) => new ResponseVisualsError({ reason: "unavailable", cause })));
-    const [stdout, , exitCode] = yield* Effect.all(
+    const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         collect(child.stdout, 32 * 1024),
         collect(child.stderr, 4 * 1024),
@@ -292,64 +323,78 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded" },
     );
-    if (exitCode !== 0) return yield* new ResponseVisualsError({ reason: "unavailable" });
-    const parsedEnvelope = decodeEnvelope(stdout);
-    if (Option.isNone(parsedEnvelope) || parsedEnvelope.value.is_error)
-      return yield* new ResponseVisualsError({ reason: "output" });
-    const envelope = parsedEnvelope.value;
-    if (
-      envelope.modelUsage &&
-      Object.keys(envelope.modelUsage).some((model) => model !== RESPONSE_VISUALS_MODEL)
-    )
-      return yield* new ResponseVisualsError({ reason: "output" });
-    const parsed = decodeOutput(envelope.result);
-    if (Option.isNone(parsed)) return yield* new ResponseVisualsError({ reason: "output" });
-    const value = parsed.value;
-    if (value.table?.rows.some((row) => row.length !== value.table!.columns.length))
-      return yield* new ResponseVisualsError({ reason: "output" });
-    let mermaid: string | null = null;
-    if (value.flowchart) {
-      const { nodes, edges } = value.flowchart;
-      const ids = new Set(nodes.map((node) => node.id));
+    return yield* Effect.gen(function* () {
+      if (exitCode !== 0) return yield* new ResponseVisualsError({ reason: "unavailable" });
+      const parsedEnvelope = decodeEnvelope(stdout);
+      if (Option.isNone(parsedEnvelope) || parsedEnvelope.value.is_error)
+        return yield* new ResponseVisualsError({ reason: "output" });
+      const envelope = parsedEnvelope.value;
       if (
-        ids.size !== nodes.length ||
-        nodes.some((node) => !diagramLabel(node.label)) ||
-        edges.some((edge) => !ids.has(edge.from) || !ids.has(edge.to))
+        envelope.modelUsage &&
+        Object.keys(envelope.modelUsage).some((model) => model !== RESPONSE_VISUALS_MODEL)
       )
         return yield* new ResponseVisualsError({ reason: "output" });
-      mermaid = [
-        "flowchart TD",
-        ...nodes.map((node) => `n${node.id}["${diagramLabel(node.label)}"]`),
-        ...edges.map((edge) => `n${edge.from} --> n${edge.to}`),
-      ].join("\n");
-    }
-    if (!value.summary && !value.table && !mermaid && !value.reason)
-      return yield* new ResponseVisualsError({ reason: "output" });
-    const result = decodeResult({
-      summary: value.summary,
-      table: value.table,
-      mermaid,
-      reason: value.reason,
-      model: RESPONSE_VISUALS_MODEL,
-      formatterVersion: RESPONSE_VISUALS_VERSION,
-      cacheHit: false,
-      generationUsage:
-        envelope.usage || envelope.total_cost_usd !== undefined
-          ? {
-              freshInputTokens: envelope.usage?.input_tokens ?? null,
-              cacheReadInputTokens: envelope.usage?.cache_read_input_tokens ?? null,
-              cacheWriteInputTokens: envelope.usage?.cache_creation_input_tokens ?? null,
-              outputTokens: envelope.usage?.output_tokens ?? null,
-              costUsd: envelope.total_cost_usd ?? null,
-            }
-          : null,
-    });
-    if (
-      Option.isNone(result) ||
-      new TextEncoder().encode(encodeJson(result.value)).byteLength > 12 * 1024
-    )
-      return yield* new ResponseVisualsError({ reason: "output" });
-    return result.value;
+      const parsed = decodeOutput(envelope.result);
+      if (Option.isNone(parsed)) return yield* new ResponseVisualsError({ reason: "output" });
+      const summary = Option.getOrNull(decodeSummary(parsed.value.summary));
+      const parsedTable = Option.getOrNull(decodeTable(parsed.value.table));
+      const table = parsedTable?.rows.some((row) => row.length !== parsedTable.columns.length)
+        ? null
+        : parsedTable;
+      const flowchart = Option.getOrNull(decodeFlowchart(parsed.value.flowchart));
+      const reason = Option.getOrNull(decodeReason(parsed.value.reason));
+      let mermaid: string | null = null;
+      if (flowchart) {
+        const { nodes, edges } = flowchart;
+        const ids = new Set(nodes.map((node) => node.id));
+        if (
+          ids.size === nodes.length &&
+          nodes.every((node) => diagramLabel(node.label)) &&
+          edges.every((edge) => ids.has(edge.from) && ids.has(edge.to))
+        ) {
+          mermaid = [
+            "flowchart TD",
+            ...nodes.map((node) => `n${node.id}["${diagramLabel(node.label)}"]`),
+            ...edges.map((edge) => `n${edge.from} --> n${edge.to}`),
+          ].join("\n");
+        }
+      }
+      if (!summary && !table && !mermaid && !reason)
+        return yield* new ResponseVisualsError({ reason: "output" });
+      const result = decodeResult({
+        summary,
+        table,
+        mermaid,
+        reason,
+        model: RESPONSE_VISUALS_MODEL,
+        formatterVersion: RESPONSE_VISUALS_VERSION,
+        cacheHit: false,
+        generationUsage:
+          envelope.usage || envelope.total_cost_usd !== undefined
+            ? {
+                freshInputTokens: envelope.usage?.input_tokens ?? null,
+                cacheReadInputTokens: envelope.usage?.cache_read_input_tokens ?? null,
+                cacheWriteInputTokens: envelope.usage?.cache_creation_input_tokens ?? null,
+                outputTokens: envelope.usage?.output_tokens ?? null,
+                costUsd: envelope.total_cost_usd ?? null,
+              }
+            : null,
+      });
+      if (
+        Option.isNone(result) ||
+        new TextEncoder().encode(encodeJson(result.value)).byteLength > 12 * 1024
+      )
+        return yield* new ResponseVisualsError({ reason: "output" });
+      return result.value;
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Response visual CLI failed", {
+          reason: error.reason,
+          exitCode,
+          stderrLine: redactStderrLine(stderr),
+        }),
+      ),
+    );
   });
 
   const format = (raw: ResponseVisualsInput) =>
@@ -362,6 +407,26 @@ const make = Effect.gen(function* () {
       )
         return yield* new ResponseVisualsError({ reason: "invalid" });
       const input = decoded.value;
+      const thread = yield* threads
+        .getThreadShell(input.threadId)
+        .pipe(
+          Effect.mapError((cause) => new ResponseVisualsError({ reason: "unavailable", cause })),
+        );
+      if (!thread || thread.deletedAt !== null)
+        return yield* new ResponseVisualsError({ reason: "unavailable" });
+      const currentSettings = yield* settings.getSettings.pipe(
+        Effect.mapError((cause) => new ResponseVisualsError({ reason: "unavailable", cause })),
+      );
+      const instance = Object.entries(deriveProviderInstanceConfigMap(currentSettings)).find(
+        ([id, entry]) =>
+          entry.driver === "claudeAgent" &&
+          resolveProjectProviderInstanceEnabled(
+            currentSettings,
+            thread.projectId,
+            ProviderInstanceId.make(id),
+          ),
+      )?.[1];
+      if (!instance) return yield* new ResponseVisualsError({ reason: "disabled" });
       const key = Hex.encode(
         yield* crypto
           .digest(
@@ -381,24 +446,26 @@ const make = Effect.gen(function* () {
       yield* loadCache;
       const saved = cache.get(key);
       if (saved) return { ...saved, cacheHit: true };
-      const outcome = yield* generate(input).pipe(
-        Effect.provideService(Path.Path, path),
-        Effect.provideService(FileSystem.FileSystem, fs),
-        Effect.scoped,
-        Effect.timeoutOption("45 seconds"),
+      return yield* Effect.gen(function* () {
+        const outcome = yield* generate(input, instance).pipe(
+          Effect.provideService(Path.Path, path),
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.scoped,
+          Effect.timeoutOption("45 seconds"),
+        );
+        if (Option.isNone(outcome)) return yield* new ResponseVisualsError({ reason: "timeout" });
+        cache.set(key, outcome.value);
+        yield* saveCache;
+        return outcome.value;
+      }).pipe(
+        gate.withPermitsIfAvailable(1),
+        Effect.flatMap((result) =>
+          Option.isSome(result)
+            ? Effect.succeed(result.value)
+            : Effect.fail(new ResponseVisualsError({ reason: "busy" })),
+        ),
       );
-      if (Option.isNone(outcome)) return yield* new ResponseVisualsError({ reason: "timeout" });
-      cache.set(key, outcome.value);
-      yield* saveCache;
-      return outcome.value;
-    }).pipe(
-      gate.withPermitsIfAvailable(1),
-      Effect.flatMap((result) =>
-        Option.isSome(result)
-          ? Effect.succeed(result.value)
-          : Effect.fail(new ResponseVisualsError({ reason: "busy" })),
-      ),
-    );
+    });
   return ResponseVisuals.of({ format });
 });
 

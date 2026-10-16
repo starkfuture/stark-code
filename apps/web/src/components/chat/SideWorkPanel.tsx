@@ -99,6 +99,7 @@ export function SideWorkPanel(props: {
     ? (nativeReplies.data ?? []).map((reply) => ({
         id: reply.id,
         text: reply.text,
+        truncated: reply.truncated === true,
         label: `${reply.provider} · ${reply.text.replace(/\s+/g, " ").slice(0, 90)}`,
       }))
     : (props.projection?.messages ?? [])

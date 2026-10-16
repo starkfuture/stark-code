@@ -10,7 +10,11 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as KeyedLock from "@starkfuture/shared/KeyedLock";
 import { NativeAgentReply, type TerminalNativeRepliesInput } from "@starkfuture/contracts";
-import { nativeReplyHookCommand, nativeReplyHookSource } from "./NativeReplyHook.ts";
+import {
+  nativeReplyHookCommand,
+  nativeReplyHookSource,
+  truncateNativeReplyText,
+} from "./NativeReplyHook.ts";
 
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_HISTORY_BYTES = 2_097_152;
@@ -21,9 +25,8 @@ const StopDelivery = Schema.Struct({
   hook_event_name: Schema.Literal("Stop"),
   session_id: id,
   turn_id: Schema.NullOr(id),
-  last_assistant_message: Schema.String.check(Schema.isNonEmpty()).check(
-    Schema.isMaxLength(131_072),
-  ),
+  last_assistant_message: Schema.String.check(Schema.isNonEmpty()),
+  truncated: Schema.optional(Schema.Boolean),
   stop_hook_active: Schema.Boolean,
   // A subagent completion cannot be attributed to its parent terminal.
   agent_id: Schema.optional(Schema.Null),
@@ -129,7 +132,6 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
   yield* storage(fs.makeDirectory(input.directory, { recursive: true, mode: 0o700 }));
   const scriptPath = path.join(input.directory, "capture.cjs");
   let helperReady = false;
-  const command = nativeReplyHookCommand({ ...input, scriptPath });
   let disposed = false;
   const accept = Effect.fn("NativeReplyCapture.accept")(function* (token: string, body: string) {
     const binding = bindings.get(token);
@@ -142,11 +144,8 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
     const parsed = yield* decodeDelivery(body).pipe(Effect.result);
     if (parsed._tag === "Failure") return 400;
     const delivery = parsed.success;
-    if (
-      !delivery.last_assistant_message.trim() ||
-      Buffer.byteLength(delivery.last_assistant_message) > 131_072
-    )
-      return 413;
+    if (!delivery.last_assistant_message.trim()) return 400;
+    const boundedReply = truncateNativeReplyText(delivery.last_assistant_message);
     if (binding.provider === "codex" && delivery.turn_id === null) return 400;
     return yield* locks
       .withLock(
@@ -179,7 +178,8 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
             provider: binding.provider,
             sessionId: delivery.session_id,
             turnId: delivery.turn_id,
-            text: delivery.last_assistant_message,
+            text: boundedReply.text,
+            ...(delivery.truncated || boundedReply.truncated ? { truncated: true } : {}),
             capturedAt: DateTime.formatIso(yield* DateTime.now),
             sequence: state.sequence + 1,
           };
@@ -292,7 +292,7 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
     const token = Buffer.from(yield* storage(crypto.randomBytes(32))).toString("hex");
     bindings.set(token, { ...binding, expiresAt: null });
     return {
-      command,
+      command: nativeReplyHookCommand({ ...input, scriptPath, provider: binding.provider }),
       env: {
         STARK_NATIVE_REPLY_ENDPOINT: `http://127.0.0.1:${port}/native-replies`,
         STARK_NATIVE_REPLY_TOKEN: token,

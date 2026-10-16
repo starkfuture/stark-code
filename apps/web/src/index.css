@@ -1776,12 +1776,12 @@ code {
 
 .assistant-reader .chat-markdown :is(p, h1, h2, h3, h4, h5, h6),
 .assistant-reader .chat-markdown > :is(ul, ol, blockquote) {
-  max-inline-size: 70ch;
+  max-inline-size: 33rem;
 }
 
 .assistant-reader
   .chat-markdown
-  :is(p, ul, ol, blockquote):has(
+  p:has(
     img,
     video,
     audio,

@@ -23,9 +23,8 @@ const quotePosix = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 function nativeChildGuardCommand(platform: NodeJS.Platform, nodeExecutable: string): string {
   // Exit 2 blocks the tool if the guard runtime itself cannot start.
-  return platform === "win32"
-    ? `node -e "${nativeChildGuard.replaceAll('"', '\\"')}" || exit /b 2`
-    : `ELECTRON_RUN_AS_NODE=1 ${quotePosix(nodeExecutable)} -e ${quotePosix(nativeChildGuard)} || exit 2`;
+  const executable = platform === "win32" ? nodeExecutable.replaceAll("\\", "/") : nodeExecutable;
+  return `ELECTRON_RUN_AS_NODE=1 ${quotePosix(executable)} -e ${quotePosix(nativeChildGuard)} || exit 2`;
 }
 
 /** Launch the interactive CLI directly, without SDK or app-server transport flags. */
@@ -102,6 +101,7 @@ export function nativeAgentLaunch(input: {
                     hooks: [
                       {
                         type: "command",
+                        shell: "bash",
                         command: input.replyCaptureCommand,
                         async: true,
                         timeout: 5,
@@ -119,6 +119,8 @@ export function nativeAgentLaunch(input: {
               hooks: [
                 {
                   type: "command",
+                  shell: "bash",
+                  onFailure: "block",
                   command: nativeChildGuardCommand(
                     input.platform ?? "linux",
                     input.nodeExecutable ?? "node",

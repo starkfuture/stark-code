@@ -10,6 +10,8 @@ import {
   CommandId,
   MessageId,
   RuntimeRequestId,
+  RESPONSE_VISUALS_MODEL,
+  RESPONSE_VISUALS_VERSION,
   type AuthEnvironmentScope,
   AuthOrchestrationOperateScope,
   ORCHESTRATION_V2_WS_METHODS,
@@ -607,8 +609,8 @@ it.effect("refuses reply generation to read-only clients before invoking the mod
                 table: null,
                 mermaid: null,
                 reason: "Nothing to add.",
-                model: "claude-sonnet-5-5" as const,
-                formatterVersion: "2" as const,
+                model: RESPONSE_VISUALS_MODEL,
+                formatterVersion: RESPONSE_VISUALS_VERSION,
                 cacheHit: false,
                 generationUsage: null,
               };
@@ -618,7 +620,12 @@ it.effect("refuses reply generation to read-only clients before invoking the mod
         ),
       ),
     );
-    expect(yield* client[method]({ answer: "Private answer" }).pipe(Effect.flip)).toMatchObject({
+    expect(
+      yield* client[method]({
+        threadId: ThreadId.make("visual-auth"),
+        answer: "Private answer",
+      }).pipe(Effect.flip),
+    ).toMatchObject({
       requiredPermission: AuthOrchestrationOperateScope,
     });
     expect(handled).toBe(false);

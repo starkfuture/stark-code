@@ -188,6 +188,37 @@ describe("native agent shell launch", () => {
       ).toBe(2);
     }),
   );
+  it.effect(
+    "runs Windows Claude safety hooks with Bash syntax and the supplied node executable",
+    (ctx) =>
+      Effect.gen(function* () {
+        if ((yield* HostProcess.Platform) === "win32")
+          return ctx.skip("Bash command execution on POSIX host");
+        const launch = nativeAgentLaunch({
+          driver: "claudeAgent",
+          config: {},
+          home: "/tmp",
+          platform: "win32",
+          nodeExecutable: process.execPath,
+          replyCaptureCommand: "ELECTRON_RUN_AS_NODE=1 '/capture node' '/capture script'",
+        });
+        const hooks = JSON.parse(launch.args[launch.args.indexOf("--settings") + 1]!).hooks;
+        expect(hooks.PreToolUse[0].hooks[0].shell).toBe("bash");
+        expect(hooks.PreToolUse[0].hooks[0].onFailure).toBe("block");
+        expect(hooks.Stop[0].hooks[0].shell).toBe("bash");
+        const result = NodeChildProcess.execFileSync(
+          "/bin/bash",
+          ["-c", hooks.PreToolUse[0].hooks[0].command],
+          {
+            env: { PATH: "/usr/bin:/bin" },
+            input: JSON.stringify({ tool_name: "Agent", permission_mode: "bypassPermissions" }),
+            encoding: "utf8",
+          },
+        );
+        expect(JSON.parse(result).hookSpecificOutput.permissionDecision).toBe("deny");
+      }),
+  );
+
   it("does not interpret shell substitutions in configuration", () => {
     const result = nativeAgentLaunch({
       driver: "codex",

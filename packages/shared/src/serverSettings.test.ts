@@ -10,6 +10,7 @@ import * as Duration from "effect/Duration";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveServerBackgroundActivitySettings } from "./backgroundActivitySettings.ts";
 import { createModelSelection } from "./model.ts";
+import { resolveProjectSettings } from "./projectSettings.ts";
 import { resolveProjectScripts, projectScriptsInheritDefaults } from "./projectScripts.ts";
 import {
   applyServerSettingsPatch,
@@ -27,6 +28,26 @@ import {
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
 
 describe("fallbackTextGenerationModelSelection", () => {
+  it("uses low effort only for an automatic Claude fallback", () => {
+    const claude = ProviderInstanceId.make("claudeAgent");
+    expect(fallbackTextGenerationModelSelection({}, (id) => id === claude)).toEqual({
+      instanceId: claude,
+      model: "claude-sonnet-5-5",
+      options: [{ id: "effort", value: "low" }],
+    });
+    const explicit = {
+      instanceId: claude,
+      model: "claude-sonnet-5-5",
+      options: [{ id: "effort", value: "high" }],
+    };
+    const settings = { ...DEFAULT_SERVER_SETTINGS, textGenerationModelSelection: explicit };
+    expect(
+      resolveProjectSettings(settings, ProjectId.make("project-1")).settings
+        .textGenerationModelSelection,
+    ).toEqual(explicit);
+    const codex = ProviderInstanceId.make("codex");
+    expect(fallbackTextGenerationModelSelection({}, (id) => id === codex)?.options).toBeUndefined();
+  });
   it("ignores a configured non-default instance at machine scope, matching no fallback", () => {
     const configured = ProviderInstanceId.make("codex_work");
     const providerInstances = {

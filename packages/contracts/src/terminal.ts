@@ -116,6 +116,8 @@ export const NativeAgentReply = Schema.Struct({
   turnId: Schema.NullOr(Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(256))),
   text: Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(131_072)),
   capturedAt: Schema.String,
+  /** The captured prefix is shorter than the provider's completed reply. */
+  truncated: Schema.optional(Schema.Boolean),
   /** Durable capture order. Async hooks can arrive out of provider turn order. */
   sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 });
@@ -140,7 +142,6 @@ export const TerminalSessionSnapshot = Schema.Struct({
   /** Server-computed display title (idle shell vs subprocess command). */
   label: Schema.String.check(Schema.isMaxLength(128)),
   agentShell: Schema.optional(Schema.Boolean),
-  nativeReplies: Schema.optional(Schema.Array(NativeAgentReply)),
   updatedAt: Schema.String,
   sequence: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 });
@@ -204,12 +205,6 @@ const TerminalOutputEvent = Schema.Struct({
   data: Schema.String,
 });
 
-const TerminalNativeReplyEvent = Schema.Struct({
-  ...TerminalEventBaseSchema.fields,
-  type: Schema.Literal("nativeReply"),
-  reply: NativeAgentReply,
-});
-
 const TerminalExitedEvent = Schema.Struct({
   ...TerminalEventBaseSchema.fields,
   type: Schema.Literal("exited"),
@@ -247,7 +242,6 @@ const TerminalActivityEvent = Schema.Struct({
 });
 
 export const TerminalEvent = Schema.Union([
-  TerminalNativeReplyEvent,
   TerminalStartedEvent,
   TerminalOutputEvent,
   TerminalExitedEvent,
@@ -265,7 +259,6 @@ const TerminalAttachSnapshotEvent = Schema.Struct({
 });
 
 export const TerminalAttachStreamEvent = Schema.Union([
-  TerminalNativeReplyEvent,
   TerminalAttachSnapshotEvent,
   TerminalOutputEvent,
   TerminalExitedEvent,

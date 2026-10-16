@@ -27,6 +27,9 @@ review and approve Stark Code's local Stop hook first; its existing hooks and
 Computer Use notification stay in place. Only completed replies are captured:
 streaming and interrupted replies may be absent, and asynchronous replies can
 arrive late. Capture does not copy terminal history or add anything to the chat.
+Very long replies are shortened in Reader and marked; the full reply stays in
+the terminal. If capture is unavailable, the native terminal still opens.
+Remote images in Reader load only after you choose to load them.
 
 ## Terminal history
 

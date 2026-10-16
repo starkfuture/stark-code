@@ -1,6 +1,5 @@
 import type {
   EnvironmentId,
-  NativeAgentReply,
   TerminalAttachStreamEvent,
   TerminalMetadataStreamEvent,
   TerminalSessionSnapshot,
@@ -27,7 +26,6 @@ export {
 
 export interface TerminalSessionState {
   readonly summary: TerminalSummary | null;
-  readonly nativeReplies: ReadonlyArray<NativeAgentReply>;
   readonly output: TerminalOutputState;
   readonly status: TerminalSessionSnapshot["status"] | "closed";
   readonly error: string | null;
@@ -38,7 +36,6 @@ export interface TerminalSessionState {
 }
 
 export interface TerminalBufferState {
-  readonly nativeReplies: ReadonlyArray<NativeAgentReply>;
   readonly output: TerminalOutputState;
   readonly status: TerminalSessionSnapshot["status"] | "closed";
   readonly error: string | null;
@@ -67,7 +64,6 @@ export function selectRunningSubprocessTerminalIds(
 }
 
 export const EMPTY_TERMINAL_BUFFER_STATE = Object.freeze<TerminalBufferState>({
-  nativeReplies: [],
   output: EMPTY_TERMINAL_OUTPUT_STATE,
   status: "closed",
   error: null,
@@ -78,7 +74,6 @@ export const EMPTY_TERMINAL_BUFFER_STATE = Object.freeze<TerminalBufferState>({
 
 export const EMPTY_TERMINAL_SESSION_STATE = Object.freeze<TerminalSessionState>({
   summary: null,
-  nativeReplies: [],
   output: EMPTY_TERMINAL_OUTPUT_STATE,
   status: "closed",
   error: null,
@@ -107,7 +102,6 @@ function terminalBufferStateFromSnapshot(
   current: TerminalBufferState = EMPTY_TERMINAL_BUFFER_STATE,
 ): TerminalBufferState {
   return {
-    nativeReplies: retainNativeReplies(snapshot.nativeReplies ?? current.nativeReplies),
     output: resetOutput(current.output, snapshot.history, maxBufferBytes),
     status: snapshot.status,
     error: null,
@@ -129,7 +123,6 @@ export function combineTerminalSessionState(
 ): TerminalSessionState {
   return {
     summary,
-    nativeReplies: buffer.nativeReplies,
     output: buffer.output,
     status: buffer.version > 0 ? buffer.status : (summary?.status ?? buffer.status),
     error: buffer.error,
@@ -138,21 +131,6 @@ export function combineTerminalSessionState(
     version: buffer.version,
     lifecycleVersion: buffer.lifecycleVersion,
   };
-}
-
-function retainNativeReplies(
-  replies: ReadonlyArray<NativeAgentReply>,
-): ReadonlyArray<NativeAgentReply> {
-  const retained = replies.slice(-100);
-  const encoder = new TextEncoder();
-  let bytes = retained.reduce(
-    (total, reply) => total + encoder.encode(JSON.stringify(reply)).byteLength,
-    0,
-  );
-  while (bytes > 2 * 1024 * 1024 && retained.length > 1) {
-    bytes -= encoder.encode(JSON.stringify(retained.shift()!)).byteLength;
-  }
-  return retained;
 }
 
 export function applyTerminalAttachStreamEvent(
@@ -171,15 +149,6 @@ export function applyTerminalAttachStreamEvent(
       return {
         ...terminalBufferStateFromSnapshot(event.snapshot, maxBufferBytes, current),
         lifecycleVersion: current.lifecycleVersion + 1,
-      };
-    case "nativeReply":
-      return {
-        ...current,
-        nativeReplies: retainNativeReplies([
-          ...current.nativeReplies.filter((reply) => reply.id !== event.reply.id),
-          event.reply,
-        ]),
-        version: current.version + 1,
       };
     case "output":
       return {

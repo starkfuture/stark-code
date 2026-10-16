@@ -218,6 +218,8 @@ interface ChatMarkdownProps {
   text: string;
   /** Readable assistant prose and a measured contents list for long, completed replies. */
   reader?: boolean;
+  /** Captured/pasted replies must not contact image hosts until the reader asks to load them. */
+  remoteImagePolicy?: "automatic" | "click-to-load";
   cwd: string | undefined;
   threadRef?: ScopedThreadRef | undefined;
   /** Panel that receives pull request links, including the standalone PR view. */
@@ -1565,6 +1567,50 @@ function ChatMarkdownVideo(props: {
   );
 }
 
+function RemoteMarkdownMedia({
+  source,
+  alt,
+  kind,
+  copyMarkdown,
+  children,
+}: {
+  source: string;
+  alt: string;
+  kind: "image" | "video";
+  copyMarkdown: string;
+  children: ReactNode;
+}) {
+  const [allowed, setAllowed] = useState(false);
+  if (allowed) return children;
+  let host = source;
+  try {
+    host = new URL(source).host;
+  } catch {
+    /* Keep the authored source readable. */
+  }
+  return (
+    <span
+      data-markdown-copy={copyMarkdown}
+      className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
+    >
+      <span className="min-w-0 [overflow-wrap:anywhere]">
+        {alt || `Remote ${kind}`} · {host}
+      </span>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setAllowed(true);
+        }}
+      >
+        Load {kind}
+      </Button>
+    </span>
+  );
+}
+
 /** Environment-hosted media loads through an exact-file signed asset URL. */
 export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props: {
   readonly environmentId: EnvironmentId;
@@ -2323,6 +2369,7 @@ function useChatMarkdownState({
   renderContextReference,
   headingLevelOffset = 0,
   githubMedia = false,
+  remoteImagePolicy = "automatic",
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const [localMediaPreview, setLocalMediaPreview] = useState<ExpandedImagePreview | null>(null);
@@ -2730,6 +2777,7 @@ function useChatMarkdownState({
       expandMedia,
       fileLinkChip,
       githubMedia,
+      remoteImagePolicy,
       renderContextReference,
       headingLevelOffset,
       imageBaseDir,
@@ -2763,6 +2811,7 @@ function useChatMarkdownState({
       expandMedia,
       fileLinkChip,
       githubMedia,
+      remoteImagePolicy,
       renderContextReference,
       headingLevelOffset,
       imageBaseDir,
@@ -2914,6 +2963,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
   },
   a: function MarkdownAnchor({ node, href, children, title: _title, ...props }) {
     const {
+      remoteImagePolicy,
       canOperateHost,
       canOperatePreview,
       cwd,
@@ -3130,7 +3180,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
             });
           }}
         >
-          {faviconHost && hasText && !isPullRequestAutolink ? (
+          {faviconHost &&
+          hasText &&
+          !isPullRequestAutolink &&
+          remoteImagePolicy !== "click-to-load" ? (
             <MarkdownExternalLinkContent host={faviconHost} plainText={plainHastText(node)}>
               {linkChildren}
             </MarkdownExternalLinkContent>
@@ -3220,6 +3273,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       cwd,
       environmentId,
       githubMedia,
+      remoteImagePolicy,
       imageBaseDir,
       threadRef,
       renderContextReference,
@@ -3252,96 +3306,115 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const directUri = imageSource._tag === "Direct" ? imageSource.uri : null;
     const githubMediaUrl =
       directUri === null ? null : githubMediaFetchUrl(resolveProtocolRelativeMediaUrl(directUri));
-    if (
-      githubMedia &&
-      cwd !== undefined &&
-      environmentId !== null &&
-      directUri !== null &&
-      githubMediaUrl !== null
-    ) {
-      return (
-        <ChatMarkdownAssetImage
-          environmentId={environmentId}
-          resource={{ _tag: "github-media", cwd, url: githubMediaUrl }}
-          alt={altText}
-          kind={kind}
-          copyMarkdown={copyMarkdown}
-          standalone={standalone}
-          className={className}
-          style={authoredSizeStyle}
-          imageProps={imageProps}
-          srcFragment={markdownImageSourceFragment(classifiedSrc)}
-          originalUrl={resolveProtocolRelativeMediaUrl(directUri)}
-          // A pull request body draws its own boxes; keep the author's, not the workspace frame.
-          framed={false}
-          // A server too old to sign this resource, or one with no route to GitHub, still leaves
-          // the public half of these working exactly as it did before. The canonical URL, not the
-          // authored one: a `blob` link addresses the page, and only the raw host has the bytes.
-          fallbackSrc={githubMediaUrl}
-          onImageExpand={imageExpand}
-        />
-      );
-    }
-    if (imageSource._tag === "Direct") {
-      const mediaSrc = resolveProtocolRelativeMediaUrl(imageSource.uri);
-      const originalUrl =
-        resolveExternalWebLinkHost(imageSource.uri) !== null ? imageSource.uri : undefined;
-      const reference = mediaUrlReference(imageSource.uri);
-      const actionsSource: MediaActionSource = {
-        kind,
-        name: altText || kind,
-        src: mediaSrc,
-        ...(reference ? { reference } : {}),
-      };
-      if (kind === "video") {
+    const renderImage = () => {
+      if (
+        githubMedia &&
+        cwd !== undefined &&
+        environmentId !== null &&
+        directUri !== null &&
+        githubMediaUrl !== null
+      ) {
         return (
-          <ChatMarkdownVideo
-            src={mediaSrc}
+          <ChatMarkdownAssetImage
+            environmentId={environmentId}
+            resource={{ _tag: "github-media", cwd, url: githubMediaUrl }}
             alt={altText}
+            kind={kind}
             copyMarkdown={copyMarkdown}
-            originalUrl={originalUrl}
+            standalone={standalone}
+            className={className}
             style={authoredSizeStyle}
-            actionsSource={actionsSource}
+            imageProps={imageProps}
+            srcFragment={markdownImageSourceFragment(classifiedSrc)}
+            originalUrl={resolveProtocolRelativeMediaUrl(directUri)}
+            // A pull request body draws its own boxes; keep the author's, not the workspace frame.
+            framed={false}
+            // A server too old to sign this resource, or one with no route to GitHub, still leaves
+            // the public half of these working exactly as it did before. The canonical URL, not the
+            // authored one: a `blob` link addresses the page, and only the raw host has the bytes.
+            fallbackSrc={githubMediaUrl}
+            onImageExpand={imageExpand}
           />
         );
       }
-      return (
-        <ChatMarkdownImage
-          key={mediaSrc}
-          src={mediaSrc}
-          alt={altText}
-          copyMarkdown={copyMarkdown}
-          standalone={standalone}
-          className={className}
-          style={authoredSizeStyle}
-          imageProps={imageProps}
-          actionsSource={actionsSource}
-          originalUrl={originalUrl}
-          onImageExpand={imageExpand}
-        />
-      );
-    }
-    if (imageSource._tag === "WorkspaceFile" && threadRef) {
-      return (
-        <ChatMarkdownAssetImage
-          environmentId={threadRef.environmentId}
-          resource={{
-            _tag: "media-file",
-            threadId: threadRef.threadId,
-            path: imageSource.path,
-          }}
-          alt={altText}
-          kind={kind}
-          copyMarkdown={copyMarkdown}
-          srcFragment={markdownImageSourceFragment(classifiedSrc)}
-          standalone={standalone}
-          style={authoredSizeStyle}
-          workspaceRoot={cwd}
-          onImageExpand={imageExpand}
-        />
-      );
-    }
-    return <ChatMarkdownImageFallback alt={altText} copyMarkdown={copyMarkdown} kind={kind} />;
+      if (imageSource._tag === "Direct") {
+        const mediaSrc = resolveProtocolRelativeMediaUrl(imageSource.uri);
+        const originalUrl =
+          resolveExternalWebLinkHost(imageSource.uri) !== null ? imageSource.uri : undefined;
+        const reference = mediaUrlReference(imageSource.uri);
+        const actionsSource: MediaActionSource = {
+          kind,
+          name: altText || kind,
+          src: mediaSrc,
+          ...(reference ? { reference } : {}),
+        };
+        if (kind === "video") {
+          return (
+            <ChatMarkdownVideo
+              src={mediaSrc}
+              alt={altText}
+              copyMarkdown={copyMarkdown}
+              originalUrl={originalUrl}
+              style={authoredSizeStyle}
+              actionsSource={actionsSource}
+            />
+          );
+        }
+        return (
+          <ChatMarkdownImage
+            key={mediaSrc}
+            src={mediaSrc}
+            alt={altText}
+            copyMarkdown={copyMarkdown}
+            standalone={standalone}
+            className={className}
+            style={authoredSizeStyle}
+            imageProps={imageProps}
+            actionsSource={actionsSource}
+            originalUrl={originalUrl}
+            onImageExpand={imageExpand}
+          />
+        );
+      }
+      if (imageSource._tag === "WorkspaceFile" && threadRef) {
+        return (
+          <ChatMarkdownAssetImage
+            environmentId={threadRef.environmentId}
+            resource={{
+              _tag: "media-file",
+              threadId: threadRef.threadId,
+              path: imageSource.path,
+            }}
+            alt={altText}
+            kind={kind}
+            copyMarkdown={copyMarkdown}
+            srcFragment={markdownImageSourceFragment(classifiedSrc)}
+            standalone={standalone}
+            style={authoredSizeStyle}
+            workspaceRoot={cwd}
+            onImageExpand={imageExpand}
+          />
+        );
+      }
+      return <ChatMarkdownImageFallback alt={altText} copyMarkdown={copyMarkdown} kind={kind} />;
+    };
+    const remoteSource =
+      directUri && /^(?:https?:|\/\/)/i.test(directUri)
+        ? resolveProtocolRelativeMediaUrl(directUri)
+        : null;
+    return remoteImagePolicy === "click-to-load" && remoteSource ? (
+      <RemoteMarkdownMedia
+        key={remoteSource}
+        source={remoteSource}
+        alt={altText}
+        kind={kind}
+        copyMarkdown={copyMarkdown}
+      >
+        {renderImage()}
+      </RemoteMarkdownMedia>
+    ) : (
+      renderImage()
+    );
   },
   table: function MarkdownTableRenderer({ node: _node, ...props }) {
     return <MarkdownTable {...props} />;

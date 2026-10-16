@@ -6,7 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import {
   MessageId,
   ThreadId,
-  TurnItemId,
+  RESPONSE_VISUALS_MODEL,
+  RESPONSE_VISUALS_VERSION,
+  type NativeAgentReply,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ThreadProjection,
 } from "@starkfuture/contracts";
@@ -19,9 +21,19 @@ const state = vi.hoisted(() => ({
   start: vi.fn(),
   interrupt: vi.fn(),
   approve: vi.fn(),
+  visual: vi.fn(),
+  nativeReplies: [] as NativeAgentReply[],
   child: null as EnvironmentThreadShell | null,
   projection: null as OrchestrationV2ThreadProjection | null,
   shells: [] as EnvironmentThreadShell[],
+}));
+vi.mock("@effect/atom-react", () => ({ useAtomValue: () => state.allowed }));
+vi.mock("../../state/responseVisuals", () => ({
+  responseVisualsEnvironment: { format: { permissionAtom: () => "visual-permission" } },
+}));
+vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.visual }));
+vi.mock("../../state/nativeReplies", () => ({
+  useNativeReplies: () => ({ data: state.nativeReplies, error: null }),
 }));
 vi.mock("../../state/session", () => ({ useEnvironmentScope: () => state.allowed }));
 vi.mock("../../state/threads", () => ({
@@ -78,12 +90,12 @@ const projection = {
   ...makeThreadProjectionFixture(),
   messages: [answer("Main answer to visualize")],
 };
-async function render(nativeShellMode = false) {
+async function render(nativeShellMode = false, messages = projection.messages) {
   await act(() =>
     root.render(
       <SideWorkPanel
         parent={parent}
-        projection={projection}
+        projection={{ ...projection, messages }}
         workspaceRoot="/work"
         nativeShellMode={nativeShellMode}
         onOpenThread={onOpen}
@@ -119,11 +131,25 @@ beforeEach(async () => {
   localStorage.clear();
   state.allowed = true;
   state.child = null;
+  state.nativeReplies = [];
   state.projection = null;
   state.shells = [parent];
   state.start.mockReset().mockResolvedValue({ _tag: "Success" });
   state.interrupt.mockReset().mockResolvedValue({ _tag: "Success" });
   state.approve.mockReset().mockResolvedValue({ _tag: "Success" });
+  state.visual.mockReset().mockResolvedValue({
+    _tag: "Success",
+    value: {
+      summary: "A visual overview.",
+      table: null,
+      mermaid: null,
+      reason: null,
+      model: RESPONSE_VISUALS_MODEL,
+      formatterVersion: RESPONSE_VISUALS_VERSION,
+      cacheHit: false,
+      generationUsage: null,
+    },
+  });
   onOpen.mockClear();
   container = document.createElement("div");
   document.body.append(container);
@@ -159,69 +185,71 @@ it("starts an independent side question and shows its live response without navi
   expect(onOpen).toHaveBeenCalledWith(call.input.threadId);
 });
 
-it("formats the reviewed response in a separate Manual chat", async () => {
-  await click("Format");
-  expect(
-    container.querySelector<HTMLTextAreaElement>('[aria-label="Response to format"]')?.value,
-  ).toBe("Main answer to visualize");
-  await type("Formatting instructions", "Use a compact comparison table");
-  await click("Format in separate chat");
-  const call = state.start.mock.calls[0]![0];
-  expect(call.input.threadId).not.toBe(parent.id);
-  expect(call.input.message.text).toContain("Use a compact comparison table");
-  expect(call.input.message.text).toContain("html_render");
-  expect(call.input.runtimeMode).toBe("approval-required");
-  expect(call.input.interactionMode).toBe("default");
-  expect(onOpen).not.toHaveBeenCalled();
-  state.child = makeThreadFixture({ id: ThreadId.make(call.input.threadId) });
-  state.projection = {
-    ...makeThreadProjectionFixture(),
-    turnItems: [false, true].map((failed, ordinal) => ({
-      id: TurnItemId.make(`render-${ordinal}`),
-      threadId: state.child!.id,
-      runId: null,
-      nodeId: null,
-      providerThreadId: null,
-      providerTurnId: null,
-      nativeItemRef: null,
-      parentItemId: null,
-      ordinal,
-      status: "completed",
-      title: null,
-      startedAt: now,
-      completedAt: now,
-      updatedAt: now,
-      type: "dynamic_tool",
-      toolName: "mcp__stark-code__html_render",
-      input: {},
-      output: {
-        isError: failed,
-        structuredContent: {
-          htmlRender: {
-            attachmentId: `render-${ordinal}-html`,
-            title: failed ? "Failed page" : "Comparison table",
-            height: 320,
-          },
-        },
-      },
-    })),
-  };
-  await render();
-  expect(container.querySelector('[aria-label="HTML result"]')?.textContent).toBe(
-    "Comparison table",
+it("lists completed replies and makes a visual of the selected answer without starting a chat", async () => {
+  await render(false, [
+    { ...answer("First completed answer"), id: MessageId.make("first") },
+    { ...answer("Second completed answer"), id: MessageId.make("second") },
+    { ...answer("Still streaming"), id: MessageId.make("streaming"), streaming: true },
+    { ...answer("User prompt"), id: MessageId.make("prompt"), role: "user", createdBy: "user" },
+  ]);
+  await click("Make visual");
+  const select = container.querySelector<HTMLSelectElement>('[aria-label="Reply to read"]')!;
+  expect([...select.options].map((option) => option.value)).toEqual(["second", "first", "paste"]);
+  expect(select.value).toBe("second");
+  await act(() => {
+    select.value = "first";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const original = container.querySelector('[aria-label="Original reply"]')!;
+  expect(original.textContent).toBe("First completed answer");
+  const generate = container.querySelector<HTMLButtonElement>("[data-reply-reader] button")!;
+  await act(() => generate.click());
+  expect(state.visual).toHaveBeenCalledExactlyOnceWith({
+    environmentId: parent.environmentId,
+    input: { threadId: parent.id, answer: "First completed answer", visualRequest: "auto" },
+  });
+  expect(container.querySelector('[aria-label="AI overview"]')?.textContent).toContain(
+    "A visual overview.",
   );
-  expect(container.textContent).not.toContain("Failed page");
+  expect(original.textContent).toContain("First completed answer");
+  expect(state.start).not.toHaveBeenCalled();
+  expect(onOpen).not.toHaveBeenCalled();
 });
 
-it("never fabricates terminal history for the formatter", async () => {
+it("shows native capture's empty state without substituting chat history or starting an agent", async () => {
   await render(true);
-  await click("Format");
-  expect(
-    container.querySelector<HTMLTextAreaElement>('[aria-label="Response to format"]')?.value,
-  ).toBe("");
-  await click("Format in separate chat");
+  await click("Make visual");
+  expect(container.textContent).toContain("Completed native replies appear here");
+  expect(container.textContent).not.toContain("Main answer to visualize");
+  expect(container.querySelector("[data-reply-reader]")).toBeNull();
+  expect(state.visual).not.toHaveBeenCalled();
   expect(state.start).not.toHaveBeenCalled();
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain("paste the text");
+});
+
+it("reads a captured shell reply without starting a side chat", async () => {
+  state.nativeReplies = [
+    {
+      id: "native-1",
+      threadId: parent.id,
+      terminalId: "native-claude",
+      provider: "claude",
+      sessionId: "session",
+      turnId: null,
+      text: "Captured native answer",
+      capturedAt: "2026-10-15T00:00:00Z",
+      sequence: 1,
+      truncated: true,
+    },
+  ];
+  await render(true);
+  await click("Make visual");
+  expect(container.querySelector('[aria-label="Original reply"]')?.textContent).toContain(
+    "Captured native answer",
+  );
+  expect(container.textContent).toContain("This captured reply was shortened");
+  expect(container.textContent).not.toContain("Main answer to visualize");
+  expect(state.start).not.toHaveBeenCalled();
+  expect(state.visual).not.toHaveBeenCalled();
 });
 
 it("keeps side work unavailable to a connection without thread permissions", async () => {

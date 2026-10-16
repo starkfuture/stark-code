@@ -95,6 +95,7 @@ export function NativeAgentShell(props: {
             answers={(replies.data ?? []).map((reply) => ({
               id: reply.id,
               text: reply.text,
+              truncated: reply.truncated === true,
               label: `${reply.provider === "claude" ? "Claude" : "Codex"} · ${reply.text.replace(/\s+/g, " ").slice(0, 90)}`,
             }))}
             emptyMessage="Completed replies from new native sessions appear here. Restart a session opened before Reader was added. For Codex, review and approve the capture hook in its terminal when prompted. Interrupted replies may not be captured."

@@ -335,7 +335,6 @@ interface TerminalSessionState {
   childCommandLabel: string | null;
   runtimeEnv: Record<string, string> | null;
   agentShell: boolean;
-  nativeReplies: ReadonlyArray<NativeAgentReply>;
   readonly workspaceOwnerToken: symbol;
 }
 
@@ -420,7 +419,6 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     exitSignal: session.exitSignal,
     label: terminalWireLabel(session),
     ...(session.agentShell ? { agentShell: true } : {}),
-    nativeReplies: session.nativeReplies,
     updatedAt: session.updatedAt,
     sequence: session.eventSequence,
   };
@@ -454,7 +452,6 @@ function shouldPublishTerminalMetadataEvent(event: TerminalEvent): boolean {
     case "activity":
       return true;
     case "output":
-    case "nativeReply":
     case "cleared":
       return false;
   }
@@ -468,7 +465,6 @@ function terminalEventToAttachEvent(event: TerminalEvent): TerminalAttachStreamE
         snapshot: event.snapshot,
       };
     case "output":
-    case "nativeReply":
     case "exited":
     case "closed":
     case "error":
@@ -1211,10 +1207,7 @@ interface TerminalManagerOptions {
     capture?: {
       readonly bind: (
         provider: "claude" | "codex",
-      ) => Effect.Effect<
-        NativeReplyCapture.NativeReplyLaunch,
-        NativeReplyCapture.NativeReplyCaptureError
-      >;
+      ) => Effect.Effect<NativeReplyCapture.NativeReplyLaunch | undefined>;
     },
   ) => Effect.Effect<
     ShellCandidate & { readonly captureEnv?: Readonly<Record<string, string>> },
@@ -1335,13 +1328,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
           ((yield* HostProcess.IsExecutable) ? "node" : yield* HostProcess.ExecutablePath);
         const captureLaunch =
           capture && (instance.driver === "claudeAgent" || instance.driver === "codex")
-            ? yield* capture
-                .bind(instance.driver === "claudeAgent" ? "claude" : "codex")
-                .pipe(
-                  Effect.mapError(
-                    (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
-                  ),
-                )
+            ? yield* capture.bind(instance.driver === "claudeAgent" ? "claude" : "codex")
             : undefined;
         const launch = yield* Effect.try({
           try: () =>
@@ -1512,7 +1499,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     });
 
   const hostEnvironment = yield* HostProcess.Environment;
-  const replyCapture = yield* NativeReplyCapture.make({
+  const replyCaptureResult = yield* NativeReplyCapture.make({
     directory: path.join(logsDir, "native-replies"),
     platform,
     nodeExecutable:
@@ -1520,29 +1507,27 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       ((yield* HostProcess.IsExecutable) ? "node" : yield* HostProcess.ExecutablePath),
     onReply: (reply, retained) =>
       Effect.gen(function* () {
-        const state = yield* SynchronizedRef.get(managerStateRef);
-        const session = state.sessions.get(toSessionKey(reply.threadId, reply.terminalId));
-        for (const current of state.sessions.values()) {
-          if (current.threadId === reply.threadId) {
-            current.nativeReplies = retained.filter(
-              (item) => item.terminalId === current.terminalId,
-            );
-          }
-        }
-        yield* publishEvent({
-          type: "nativeReply",
-          threadId: reply.threadId,
-          terminalId: reply.terminalId,
-          reply,
-          ...(session ? { sequence: advanceEventSequence(session).sequence } : {}),
-        });
         // Capture still owns the history lock here. Deliver its committed window
         // directly: reading history again from this callback would deadlock.
         for (const listener of nativeReplyListeners) {
           yield* listener(reply, retained).pipe(Effect.ignoreCause({ log: true }));
         }
       }),
-  }).pipe(Effect.orDie);
+  }).pipe(Effect.result);
+  if (replyCaptureResult._tag === "Failure") {
+    yield* Effect.logWarning(
+      "Native reply capture is unavailable; native terminals remain usable.",
+    );
+  }
+  const replyCapture =
+    replyCaptureResult._tag === "Success"
+      ? replyCaptureResult.success
+      : NativeReplyCapture.NativeReplyCapture.of({
+          bind: () => Effect.fail(replyCaptureResult.failure),
+          list: () => Effect.fail(replyCaptureResult.failure),
+          retire: () => Effect.void,
+          remove: () => Effect.void,
+        });
   const listNativeReplies: TerminalManager["Service"]["listNativeReplies"] = (input) =>
     replyCapture.list(input).pipe(
       Effect.mapError(
@@ -2275,11 +2260,19 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
                   input.worktreePath ?? input.cwd,
                   {
                     bind: (provider) =>
-                      replyCapture.bind({
-                        threadId: session.threadId,
-                        terminalId: session.terminalId,
-                        provider,
-                      }),
+                      replyCapture
+                        .bind({
+                          threadId: session.threadId,
+                          terminalId: session.terminalId,
+                          provider,
+                        })
+                        .pipe(
+                          Effect.catch(() =>
+                            Effect.logWarning(
+                              "Native reply capture could not start; launching the native terminal without capture.",
+                            ).pipe(Effect.as(undefined)),
+                          ),
+                        ),
                   },
                 ),
               ];
@@ -2676,7 +2669,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         childCommandLabel: null,
         runtimeEnv: normalizedRuntimeEnv(input.env),
         agentShell: input.agentShell === true,
-        nativeReplies: yield* listNativeReplies({ threadId: input.threadId, terminalId }),
         workspaceOwnerToken: Symbol("native workspace owner"),
       };
 
@@ -3189,7 +3181,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           childCommandLabel: null,
           runtimeEnv: normalizedRuntimeEnv(input.env),
           agentShell: input.agentShell === true,
-          nativeReplies: yield* listNativeReplies({ threadId: input.threadId, terminalId }),
           workspaceOwnerToken: Symbol("native workspace owner"),
         };
         const createdSession = session;

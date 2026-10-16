@@ -127,6 +127,7 @@ export function fallbackTextGenerationModelSelection(
       DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[driver] ??
       DEFAULT_MODEL_BY_PROVIDER[driver] ??
       DEFAULT_TEXT_GENERATION_MODEL,
+    ...(driver === "claudeAgent" ? { options: [{ id: "effort", value: "low" }] } : {}),
   };
 }
 

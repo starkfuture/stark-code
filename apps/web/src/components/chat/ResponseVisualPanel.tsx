@@ -17,6 +17,7 @@ export interface ReaderAnswer {
   readonly id: string;
   readonly text: string;
   readonly label: string;
+  readonly truncated?: boolean;
 }
 
 /** Source stays verbatim; additions never replace the provider's answer. */
@@ -72,6 +73,7 @@ export function ResponseVisualPanel(props: {
           key={`${chosen === "paste" ? "paste" : selected?.id}:${answer}`}
           {...props}
           answer={answer}
+          truncated={chosen !== "paste" && selected?.truncated === true}
         />
       ) : (
         <p className="p-4 text-sm text-muted-foreground">
@@ -87,6 +89,7 @@ function VisualReader(props: {
   answer: string;
   cwd: string;
   threadRef: ScopedThreadRef;
+  truncated: boolean;
 }) {
   const canGenerate = useAtomValue(
     responseVisualsEnvironment.format.permissionAtom(props.environmentId),
@@ -108,7 +111,7 @@ function VisualReader(props: {
     try {
       const response = await generate({
         environmentId: props.environmentId,
-        input: { answer: props.answer, visualRequest },
+        input: { threadId: props.threadRef.threadId, answer: props.answer, visualRequest },
       });
       if (response._tag === "Failure") {
         const cause = squashAtomCommandFailure(response);
@@ -164,10 +167,21 @@ function VisualReader(props: {
       ) : null}
       {result ? <ResponseVisualOverview result={result} /> : null}
       <div className="min-w-0" aria-label="Original reply">
+        {props.truncated ? (
+          <p className="mb-3 text-sm text-muted-foreground">
+            This captured reply was shortened. Read the full reply in the terminal.
+          </p>
+        ) : null}
         {result ? (
           <h3 className="mb-3 text-xs font-medium text-muted-foreground">Original reply</h3>
         ) : null}
-        <ChatMarkdown reader text={props.answer} cwd={props.cwd} threadRef={props.threadRef} />
+        <ChatMarkdown
+          reader
+          remoteImagePolicy="click-to-load"
+          text={props.answer}
+          cwd={props.cwd}
+          threadRef={props.threadRef}
+        />
       </div>
     </div>
   );

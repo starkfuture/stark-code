@@ -102,11 +102,39 @@ it.layer(NodeServices.layer)("native completed replies", (it) => {
       ).toBe(400);
       expect(yield* post(launch, delivery({ last_assistant_message: null }))).toBe(400);
       expect(yield* post(launch, delivery({ turn_id: null }))).toBe(400);
-      expect(yield* post(launch, delivery({ last_assistant_message: "💡".repeat(40_000) }))).toBe(
-        413,
-      );
+      const oversized = yield* post(
+        launch,
+        delivery({ last_assistant_message: "x".repeat(1_100_000) }),
+      ).pipe(Effect.exit);
+      expect(Exit.isFailure(oversized) || oversized.value === 413).toBe(true);
       expect(replies).toEqual([]);
       expect(yield* capture.list({ threadId: "another-thread" })).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("truncates long endpoint deliveries at a complete UTF-8 character and marks them", () =>
+    Effect.gen(function* () {
+      const { capture, launch } = yield* create();
+      const prefix = "x".repeat(131_071);
+      expect(
+        yield* post(launch, delivery({ last_assistant_message: prefix + "💡".repeat(10_000) })),
+      ).toBe(200);
+      const rows = yield* capture.list({ threadId: "stark-thread" });
+      expect(rows[0]?.text).toBe(prefix);
+      expect(rows[0]?.truncated).toBe(true);
+      expect(Buffer.byteLength(rows[0]!.text)).toBeLessThanOrEqual(131_072);
+      expect(rows[0]?.text).not.toContain("�");
+      expect(
+        yield* post(
+          launch,
+          delivery({
+            turn_id: "turn-2",
+            last_assistant_message: "Already shortened",
+            truncated: true,
+          }),
+        ),
+      ).toBe(200);
+      expect((yield* capture.list({ threadId: "stark-thread" }))[1]?.truncated).toBe(true);
     }).pipe(Effect.scoped),
   );
 
@@ -194,11 +222,29 @@ it.layer(NodeServices.layer)("native completed replies", (it) => {
           out: "{}\n",
           err: "",
         });
+        const longPrefix = "x".repeat(131_071);
+        expect(
+          yield* run(
+            delivery({
+              turn_id: null,
+              last_assistant_message: longPrefix + "💡" + "y".repeat(2_000_000),
+            }),
+          ),
+        ).toEqual({ code: 0, out: "{}\n", err: "" });
+        // The helper still has a finite defensive input limit and drains oversize stdin neutrally.
+        expect(yield* run(delivery({ last_assistant_message: "z".repeat(8_388_608) }))).toEqual({
+          code: 0,
+          out: "{}\n",
+          err: "",
+        });
         const rows = yield* capture.list({ threadId: "claude-thread" });
         expect(rows.map((reply) => reply.text)).toEqual([
           "A completed reply.",
           "Reply after /clear",
+          longPrefix,
         ]);
+        expect(rows.at(-1)?.truncated).toBe(true);
+        expect(rows[0]?.truncated).toBeUndefined();
         expect(rows.every((reply) => reply.provider === "claude" && reply.turnId === null)).toBe(
           true,
         );

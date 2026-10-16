@@ -1,8 +1,10 @@
 import * as Schema from "effect/Schema";
+import { ThreadId } from "./baseSchemas.ts";
 
 export const RESPONSE_VISUALS_MODEL = "claude-sonnet-5-5";
-export const RESPONSE_VISUALS_VERSION = "2";
+export const RESPONSE_VISUALS_VERSION = "3";
 export const ResponseVisualsInput = Schema.Struct({
+  threadId: ThreadId,
   answer: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(24_000)),
   language: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(40))),
   visualRequest: Schema.optionalKey(Schema.Literals(["auto", "table", "flowchart"])),
@@ -47,7 +49,15 @@ export type ResponseVisualsResult = typeof ResponseVisualsResult.Type;
 export class ResponseVisualsError extends Schema.TaggedError<ResponseVisualsError>()(
   "ResponseVisualsError",
   {
-    reason: Schema.Literals(["invalid", "busy", "unavailable", "timeout", "output", "storage"]),
+    reason: Schema.Literals([
+      "invalid",
+      "busy",
+      "disabled",
+      "unavailable",
+      "timeout",
+      "output",
+      "storage",
+    ]),
     cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {
@@ -55,6 +65,7 @@ export class ResponseVisualsError extends Schema.TaggedError<ResponseVisualsErro
     return {
       invalid: "Choose a nonempty answer of at most 24,000 characters and 48 KiB.",
       busy: "A visual is already being prepared. Try again when it finishes.",
+      disabled: "Enable a Claude connection for this project to make a visual.",
       unavailable:
         "Sonnet formatting is unavailable. Check the enabled Claude connection and try again.",
       timeout: "The visual took too long. Your original answer is unchanged.",

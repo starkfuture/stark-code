@@ -16,12 +16,16 @@ import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
 import { GitHubIcon } from "./Icons";
 import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
+import * as assetUrls from "../assets/assetUrls";
 
 vi.mock("../hooks/useFileMetadata", () => ({ useFileMetadata: () => null }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
 vi.mock("./chat/MermaidDiagram", () => ({
   // Real Mermaid needs layout APIs jsdom lacks; a rendered diagram is an SVG.
   MermaidDiagram: () => <svg aria-label="Diagram" />,
+}));
+vi.mock("./media/MediaActions", () => ({
+  MediaActions: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
 vi.mock("../hooks/useSettings", async (importOriginal) => {
@@ -94,6 +98,91 @@ function codeButton(renderer: ReactTestRenderer, label: string) {
   if (!button) throw new Error(`Missing code button: ${label}`);
   return button.props as ComponentProps<typeof Button>;
 }
+
+describe("ChatMarkdown remote media consent", () => {
+  it.each([
+    "https://images.example.test/first.png",
+    "http://images.example.test/first.png",
+    "//images.example.test/first.png",
+  ])("loads %s only after a click and asks again for a changed source", async (source) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = async (url: string, policy: "automatic" | "click-to-load" = "click-to-load") => {
+      await act(async () =>
+        root.render(
+          <ChatMarkdown
+            cwd={undefined}
+            remoteImagePolicy={policy}
+            text={`![Chart](${url})\n\n[Source](https://source.example.test/report)`}
+          />,
+        ),
+      );
+    };
+    try {
+      await render(source);
+      expect(container.querySelector("img, video")).toBeNull();
+      expect(container.textContent).toContain("images.example.test");
+      expect(
+        container.querySelector("[data-markdown-copy]")?.getAttribute("data-markdown-copy"),
+      ).toBe(`![Chart](${source})`);
+      const load = container.querySelector<HTMLButtonElement>("button")!;
+      expect(load.textContent).toBe("Load image");
+      await act(async () => load.click());
+      expect(container.querySelector<HTMLImageElement>('img[alt="Chart"]')?.src).toMatch(
+        /images\.example\.test\/first\.png$/,
+      );
+      await render("https://images.example.test/second.png");
+      expect(container.querySelector("img, video")).toBeNull();
+      expect(container.querySelector("button")?.textContent).toBe("Load image");
+      await render("https://images.example.test/second.png", "automatic");
+      expect(container.querySelector<HTMLImageElement>('img[alt="Chart"]')?.src).toBe(
+        "https://images.example.test/second.png",
+      );
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not ask the server to fetch protected remote media until consent", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const asset = vi.spyOn(assetUrls, "useAssetUrlState").mockReturnValue({ _tag: "Loading" });
+    const refresh = vi.spyOn(assetUrls, "useAssetUrlRefresh").mockReturnValue(async () => null);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () =>
+        root.render(
+          <ChatMarkdown
+            cwd="/repo"
+            environmentId={EnvironmentId.make("test")}
+            githubMedia
+            remoteImagePolicy="click-to-load"
+            text="![Private chart](https://github.com/example/project/blob/main/chart.png)"
+          />,
+        ),
+      );
+      expect(asset).not.toHaveBeenCalled();
+      expect(container.querySelector("img")).toBeNull();
+      await act(async () => container.querySelector<HTMLButtonElement>("button")!.click());
+      expect(asset).toHaveBeenCalledWith(EnvironmentId.make("test"), {
+        _tag: "github-media",
+        cwd: "/repo",
+        url: "https://raw.githubusercontent.com/example/project/main/chart.png",
+      });
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      asset.mockRestore();
+      refresh.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("ChatMarkdown bare anchor placeholders", () => {
   it.each(["<A>", "<a>", "<a >", "<a/>", "<A/>", "<a />"])(

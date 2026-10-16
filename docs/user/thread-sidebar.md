@@ -57,6 +57,8 @@ or flowchart above the original answer. It uses one bounded Sonnet request with
 only that reply; it does not receive your conversation, tools, plugins or files.
 Reading alone uses no tokens. Repeat requests reuse the saved result. Very long
 replies need a shorter pasted excerpt, and failed requests are not retried automatically.
+Claude must be enabled for the current project. Remote images in the selected or
+pasted reply load only when you choose to load them.
 
 Side chats are saved as ordinary chats. Earlier formatting chats remain available
 from **Make visual → Earlier formatting chats** and the chat sidebar. Open a side

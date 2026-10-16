@@ -33,29 +33,47 @@ function sectionLabel(element: HTMLElement): string {
   return (copy.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
-/** Read rendered, top-level Markdown blocks. Code, quotes, list labels and card UI are not sections. */
+/** Read authored headings, leading labels and standalone label lines, never inline emphasis or card UI. */
 export function readerSections(markdown: HTMLElement): ReaderSection[] {
   const sections: ReaderSection[] = [];
-  for (const block of markdown.children) {
-    if (!(block instanceof HTMLElement)) continue;
+  const visit = (block: Element, level = 2) => {
+    if (!(block instanceof HTMLElement)) return;
     if (/^H[1-6]$/.test(block.tagName)) {
       const label = sectionLabel(block);
       if (label) sections.push({ element: block, label, level: Number(block.tagName.slice(1)) });
-    } else if (block.tagName === "P") {
-      for (const child of block.children) {
-        if (!(child instanceof HTMLElement) || child.tagName !== "STRONG") continue;
-        const label = sectionLabel(child);
-        if (
-          label.endsWith(":") &&
-          label.length > 1 &&
-          atLineBoundary(child.previousSibling, "before") &&
-          atLineBoundary(child.nextSibling, "after")
-        ) {
-          sections.push({ element: child, label, level: 2 });
+    } else if (block.tagName === "P" || block.tagName === "LI") {
+      let leading = true;
+      for (const child of block.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE && !child.textContent?.trim()) continue;
+        if (!(child instanceof HTMLElement)) {
+          if (child.nodeType === Node.TEXT_NODE) leading = false;
+          continue;
         }
+        if (leading && child.tagName === "INPUT" && child.getAttribute("type") === "checkbox")
+          continue;
+        if (leading && child.tagName === "P") {
+          visit(child, level);
+        } else if (
+          child.tagName === "STRONG" &&
+          (leading ||
+            (atLineBoundary(child.previousSibling, "before") &&
+              atLineBoundary(child.nextSibling, "after")))
+        ) {
+          const label = sectionLabel(child);
+          if (label.endsWith(":") && label.length > 1) {
+            sections.push({ element: child, label, level });
+          }
+        }
+        leading = false;
       }
+      if (block.tagName === "LI")
+        for (const list of block.children)
+          if (list.tagName === "UL" || list.tagName === "OL") visit(list, Math.min(level + 1, 6));
+    } else if (block.tagName === "UL" || block.tagName === "OL") {
+      for (const item of block.children) if (item.tagName === "LI") visit(item, level);
     }
-  }
+  };
+  for (const block of markdown.children) visit(block);
   return sections;
 }
 
@@ -70,6 +88,40 @@ export function readerViewport(content: HTMLElement): HTMLElement | null {
       return parent;
   }
   return null;
+}
+
+export function readerComposer(
+  content: HTMLElement,
+  viewport: HTMLElement | null,
+): HTMLElement | null {
+  const canvas = content.closest("[data-chat-canvas]");
+  if (!canvas || !viewport || !canvas.contains(viewport)) return null;
+  return canvas.querySelector<HTMLElement>(":scope > [data-chat-composer-overlay]");
+}
+
+/** Measure the reply's own scroll area, subtracting only a composer that actually covers it. */
+export function readerAvailableHeight(
+  content: HTMLElement,
+  viewport: HTMLElement | null,
+  composer: HTMLElement | null,
+): number {
+  if (!viewport) return window.innerHeight;
+  const height = viewport.clientHeight;
+  if (!composer) return height;
+  const viewportBounds = viewport.getBoundingClientRect();
+  const replyBounds = content.getBoundingClientRect();
+  const composerBounds = composer.getBoundingClientRect();
+  const top = viewportBounds.top + viewport.clientTop;
+  const bottom = top + height;
+  if (
+    composerBounds.height <= 0 ||
+    composerBounds.right <= replyBounds.left ||
+    composerBounds.left >= replyBounds.right ||
+    composerBounds.top >= bottom ||
+    composerBounds.bottom <= top
+  )
+    return height;
+  return Math.max(0, Math.min(bottom, composerBounds.top) - top);
 }
 
 export function readerNeedsContents(input: {

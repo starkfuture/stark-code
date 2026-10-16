@@ -24,11 +24,12 @@ import { StarkPagesPanel } from "./StarkPagesPanel";
 let root: Root;
 let container: HTMLDivElement;
 const close = vi.fn();
-const render = (inline = true) =>
+const render = (inline = true, active = true) =>
   act(() =>
     root.render(
       <StarkPagesPanel
         inline={inline}
+        active={active}
         projectRoot="/project"
         agent="claude"
         canPublish={false}
@@ -152,4 +153,28 @@ it("dismisses the source menu with Escape before leaving full view", async () =>
   await act(() => container.querySelector<HTMLElement>("[data-pages-expanded]")!.focus());
   await escape();
   expect(container.querySelector('[data-pages-expanded="true"]')).toBeNull();
+});
+
+it("retains the selected page while another panel is active and releases modal focus", async () => {
+  await render(false);
+  await click("Read project home");
+  const frame = container.querySelector<HTMLIFrameElement>("iframe")!;
+  frame.contentDocument!.documentElement.scrollTop = 220;
+  await click("Expand Pages");
+  await render(false, false);
+  expect(container.querySelector("iframe")).toBe(frame);
+  expect(frame.closest("[hidden]")).not.toBeNull();
+  expect(document.querySelector('[data-pages-overlay="true"]')).toBeNull();
+  const otherTool = document.createElement("button");
+  document.body.append(otherTool);
+  await act(() => otherTool.focus());
+  expect(document.activeElement).toBe(otherTool);
+  await escape();
+  expect(close).not.toHaveBeenCalled();
+  await render(true, true);
+  expect(container.querySelector("iframe")).toBe(frame);
+  expect(frame.contentDocument!.documentElement.scrollTop).toBe(220);
+  expect(frame.closest("[hidden]")).toBeNull();
+  expect(container.querySelector('[data-pages-expanded="true"]')).not.toBeNull();
+  otherTool.remove();
 });

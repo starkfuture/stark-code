@@ -9,6 +9,7 @@ import {
   pullRequestSurfaceId,
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
+  selectAuxiliaryPanel,
   selectSelectedRightPanelSurface,
   selectThreadPanelOpen,
   selectThreadPanelVisibility,
@@ -23,6 +24,7 @@ beforeEach(() => {
   useClosedViewStore.setState({ entries: [] });
   useRightPanelStore.setState({
     byThreadKey: {},
+    auxiliaryPanelByThreadKey: {},
     threadPanelVisibilityByThreadKey: {},
     userActionRevisionByThreadKey: {},
     closeRevisionByThreadKey: {},
@@ -30,6 +32,120 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("switches between Pages and side work without discarding tool tabs or other threads", () => {
+    const store = useRightPanelStore.getState();
+    store.openBrowser(refA, "tab-1");
+    store.openTerminal(refA, "terminal-1");
+    store.openFile(refA, "src/app.ts");
+    store.open(refB, "diff");
+    const before = useRightPanelStore.getState();
+    const tabs = selectThreadRightPanelState(before.byThreadKey, refA).surfaces;
+    const otherThread = selectThreadRightPanelState(before.byThreadKey, refB);
+    const revision = store.getUserActionRevision(refA);
+
+    store.openAuxiliary(refA, "pages");
+    let state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("pages");
+    expect(selectActiveRightPanel(state.byThreadKey, refA)).toBeNull();
+    expect(selectThreadRightPanelState(state.byThreadKey, refA).surfaces).toBe(tabs);
+    expect(store.getUserActionRevision(refA)).toBe(revision + 1);
+
+    store.openAuxiliary(refA, "side-work");
+    state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("side-work");
+    expect(selectThreadRightPanelState(state.byThreadKey, refA).surfaces).toBe(tabs);
+    expect(selectThreadRightPanelState(state.byThreadKey, refB)).toBe(otherThread);
+    expect(useClosedViewStore.getState().entries).toEqual([]);
+  });
+
+  it("reveals file and browser links in place of an auxiliary panel, reusing existing tabs", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "src/app.ts");
+    store.openBrowser(refA, "tab-1");
+    store.openAuxiliary(refA, "pages");
+    store.openAuxiliary(refB, "side-work");
+    store.openFile(refA, "src/app.ts", 42);
+    let state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBeNull();
+    expect(selectActiveRightPanelSurface(state.byThreadKey, refA)).toMatchObject({
+      id: "file:src/app.ts",
+      revealLine: 42,
+    });
+
+    store.openAuxiliary(refA, "side-work");
+    store.openBrowser(refA, "tab-1");
+    state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBeNull();
+    expect(selectActiveRightPanelSurface(state.byThreadKey, refA)?.id).toBe("browser:tab-1");
+    expect(selectThreadRightPanelState(state.byThreadKey, refA).surfaces).toHaveLength(2);
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refB)).toBe("side-work");
+  });
+
+  it("does not let proactive changes replace a selected auxiliary panel", () => {
+    const store = useRightPanelStore.getState();
+    store.openAuxiliary(refA, "pages");
+    // Even a request observing the latest revision must respect the selected view.
+    expect(
+      store.openProactive(refA, { id: "diff", kind: "diff" }, store.getUserActionRevision(refA)),
+    ).toBe(false);
+    const state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("pages");
+    expect(selectThreadRightPanelState(state.byThreadKey, refA).surfaces).toEqual([]);
+  });
+
+  it("retains arriving browser and device resources without stealing auxiliary ownership", () => {
+    const store = useRightPanelStore.getState();
+    store.openAuxiliary(refA, "side-work");
+    const revision = store.getUserActionRevision(refA);
+    store.reconcileBrowserSurfaces(refA, ["tab-1", "tab-hidden"], new Set(["tab-hidden"]));
+    store.openDevice(
+      refA,
+      { hostId: "mac", deviceId: "ios-1", platform: "ios", name: "iPhone" },
+      true,
+    );
+    store.reconcileFileSurfaces(refA, false);
+    const state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("side-work");
+    expect(selectActiveRightPanel(state.byThreadKey, refA)).toBeNull();
+    expect(
+      selectThreadRightPanelState(state.byThreadKey, refA).surfaces.map(({ id }) => id),
+    ).toEqual(["browser:tab-1", "device:mac:ios-1"]);
+    expect(store.getUserActionRevision(refA)).toBe(revision);
+  });
+
+  it("closes only the requested auxiliary panel and toggles back to retained tools", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "files");
+    store.openAuxiliary(refA, "pages");
+    store.openAuxiliary(refB, "side-work");
+    store.close(refB);
+    let state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("pages");
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refB)).toBeNull();
+
+    store.toggleVisibility(refA);
+    state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBeNull();
+    expect(selectActiveRightPanel(state.byThreadKey, refA)).toBeNull();
+    store.toggleVisibility(refA);
+    state = useRightPanelStore.getState();
+    expect(selectActiveRightPanel(state.byThreadKey, refA)).toBe("files");
+  });
+
+  it("removes auxiliary ownership with its thread and excludes it from persistence", () => {
+    const store = useRightPanelStore.getState();
+    store.openAuxiliary(refA, "pages");
+    store.openAuxiliary(refB, "side-work");
+    const persisted = useRightPanelStore.persist
+      .getOptions()
+      .partialize?.(useRightPanelStore.getState());
+    expect(persisted).not.toHaveProperty("auxiliaryPanelByThreadKey");
+    store.removeThread(refA);
+    const state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBeNull();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refB)).toBe("side-work");
+  });
+
   it("records single and bulk tab closes, newest first", () => {
     const store = useRightPanelStore.getState();
     const pr = pullRequestSurface({

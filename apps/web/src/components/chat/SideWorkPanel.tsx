@@ -43,7 +43,7 @@ type SideWorkTab = SideWorkKind | "agents";
 export function SideWorkButton(props: { open: boolean; onToggle: () => void }) {
   return (
     <Button variant="ghost" size="sm" aria-pressed={props.open} onClick={props.onToggle}>
-      Workspace
+      Conversation tools
     </Button>
   );
 }
@@ -56,6 +56,7 @@ export function SideWorkPanel(props: {
   nativeShellMode: boolean;
   onOpenThread: (threadId: ThreadId) => void;
   onClose: () => void;
+  showHeader?: boolean;
 }) {
   const { parent } = props;
   const storageKey = `stark-code:side-work:${scopedThreadKey(scopeThreadRef(parent.environmentId, parent.id))}`;
@@ -192,21 +193,26 @@ export function SideWorkPanel(props: {
 
   return (
     <aside
-      aria-label="Workspace side panel"
+      aria-label="Conversation tools content"
       className="flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-background"
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border p-3">
-        <h2 className="text-sm font-medium">Workspace</h2>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Close workspace panel"
-          onClick={props.onClose}
-        >
-          <XIcon />
-        </Button>
-      </div>
-      <div className="flex flex-wrap gap-1 border-b border-border p-2" aria-label="Workspace views">
+      {props.showHeader !== false ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border p-3">
+          <h2 className="text-sm font-medium">Conversation tools</h2>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Close conversation tools"
+            onClick={props.onClose}
+          >
+            <XIcon />
+          </Button>
+        </div>
+      ) : null}
+      <div
+        className="flex flex-wrap gap-1 border-b border-border p-2"
+        aria-label="Conversation tool views"
+      >
         {(
           [
             ["question", "Side chat"],

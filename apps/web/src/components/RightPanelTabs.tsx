@@ -107,6 +107,8 @@ interface RightPanelTabsProps {
   defaultWidth?: number;
   inlineSize?: PreviewPanelInlineSize;
   layoutControls?: ReactNode;
+  /** Space reserved for controls outside the inline tab bar. */
+  titlebarControlsWidth?: number;
   surfaces: readonly RightPanelSurface[];
   /** Fallback environment for surfaces that do not carry their own. */
   environmentId: EnvironmentId | null;
@@ -174,7 +176,7 @@ const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the Stark Code desktop app.",
   terminal: "Terminal surfaces are only available from a project thread.",
   files: "Files are only available when a project is open.",
-  diff: "Diff is only available for server threads in Git repositories.",
+  diff: "Changes are only available for server threads in Git repositories.",
   pullRequest: "This thread's branch has no pull request yet.",
   pullRequests: "No linked pull requests are available for this thread.",
   device: "Devices are only available from a thread.",
@@ -182,6 +184,7 @@ const SURFACE_DISABLED_REASONS = {
 
 /** Overlays that must win over the launcher's letter shortcuts. */
 const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
+  '[data-auxiliary-panel-overlay="true"]',
   '[data-slot="dialog-popup"]',
   '[data-slot="alert-dialog-popup"]',
   '[data-slot="command-dialog-popup"]',
@@ -332,6 +335,7 @@ function SurfaceMenuItem(props: {
  * surfaces stay visible with a one-line reason.
  */
 function RightPanelEmptyState(props: {
+  open?: boolean;
   onAddBrowser: () => void;
   onAddBrowserInProfile: (profileId: string) => void;
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
@@ -354,12 +358,20 @@ function RightPanelEmptyState(props: {
 
   const actions = [
     {
-      label: "Browser",
-      icon: Globe2,
-      shortcut: "B",
-      available: props.browserAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
-      onClick: props.onAddBrowser,
+      label: "Files",
+      icon: Files,
+      shortcut: "F",
+      available: props.filesAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
+      onClick: props.onAddFiles,
+    },
+    {
+      label: "Changes",
+      icon: FileDiff,
+      shortcut: "D",
+      available: props.diffAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
+      onClick: props.onAddDiff,
     },
     {
       label: "Terminal",
@@ -370,20 +382,12 @@ function RightPanelEmptyState(props: {
       onClick: props.onAddTerminal,
     },
     {
-      label: "Files",
-      icon: Files,
-      shortcut: "F",
-      available: props.filesAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
-      onClick: props.onAddFiles,
-    },
-    {
-      label: "Diff",
-      icon: FileDiff,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
-      onClick: props.onAddDiff,
+      label: "Browser",
+      icon: Globe2,
+      shortcut: "B",
+      available: props.browserAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
+      onClick: props.onAddBrowser,
     },
     {
       label: "Pull request",
@@ -427,6 +431,7 @@ function RightPanelEmptyState(props: {
     shortcutActionsRef.current = availableActions;
   });
   useEffect(() => {
+    if (props.open === false) return;
     const handler = (event: KeyboardEvent) => {
       const action = surfaceShortcutActionForKey(shortcutActionsRef.current, event);
       if (!action) return;
@@ -440,9 +445,10 @@ function RightPanelEmptyState(props: {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, []);
+  }, [props.open, shortcutActionsRef]);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (props.open === false) return;
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
     if (availableActions.length === 0) return;
     if (event.key === "ArrowDown" || event.key === "ArrowRight") {
@@ -469,11 +475,14 @@ function RightPanelEmptyState(props: {
     }
   };
 
-  // Stable identity so React only runs this callback ref on mount/unmount;
-  // an inline arrow would re-attach and re-focus on every render.
-  const focusOnMount = useCallback((node: HTMLDivElement | null) => {
-    node?.focus();
-  }, []);
+  // Focus once when shown; a retained hidden launcher must not take focus
+  // from the Pages or conversation tools occupying the panel.
+  const focusOnMount = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (props.open !== false) node?.focus();
+    },
+    [props.open],
+  );
 
   const isHighlighted = (action: SurfaceAction) =>
     highlightIndex !== -1 && availableActions[highlightIndex] === action;
@@ -492,7 +501,7 @@ function RightPanelEmptyState(props: {
       ref={focusOnMount}
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      aria-label="Open a surface"
+      aria-label="Open a tool"
       data-surface-launcher-keys={availableActions.map((action) => action.shortcut).join("")}
       className={cn(
         "scrollbar-gutter-both flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 outline-none",
@@ -502,7 +511,7 @@ function RightPanelEmptyState(props: {
       )}
     >
       <div className="w-full max-w-xs py-6">
-        <h3 className="mb-3 text-center font-medium text-foreground text-sm">Open a surface</h3>
+        <h3 className="mb-3 text-center font-medium text-foreground text-sm">Open a tool</h3>
         <div className="flex flex-col gap-0.5">
           {actions.map((action) =>
             action.available ? (
@@ -602,7 +611,7 @@ function surfaceTitle(
 ): string {
   switch (surface.kind) {
     case "diff":
-      return "Diff";
+      return "Changes";
     case "files":
       return "Files";
     case "file":
@@ -936,12 +945,20 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
 
   const addSurfaceActions = [
     {
-      label: "Browser",
-      icon: Globe2,
-      shortcut: "B",
-      available: props.browserAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.browser,
-      onClick: props.onAddBrowser,
+      label: "Files",
+      icon: Files,
+      shortcut: "F",
+      available: props.filesAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.files,
+      onClick: props.onAddFiles,
+    },
+    {
+      label: "Changes",
+      icon: FileDiff,
+      shortcut: "D",
+      available: props.diffAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.diff,
+      onClick: props.onAddDiff,
     },
     {
       label: "Terminal",
@@ -952,20 +969,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       onClick: props.onAddTerminal,
     },
     {
-      label: "Files",
-      icon: Files,
-      shortcut: "F",
-      available: props.filesAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.files,
-      onClick: props.onAddFiles,
-    },
-    {
-      label: "Diff",
-      icon: FileDiff,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.diff,
-      onClick: props.onAddDiff,
+      label: "Browser",
+      icon: Globe2,
+      shortcut: "B",
+      available: props.browserAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.browser,
+      onClick: props.onAddBrowser,
     },
     {
       label: "Pull request",
@@ -1177,6 +1186,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           ownsDesktopTitleBar && "wco:pr-(--workspace-native-controls-inset)",
           props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
+        style={
+          props.mode === "inline" &&
+          !props.layoutControls &&
+          props.titlebarControlsWidth !== undefined
+            ? {
+                paddingRight: `calc(${props.titlebarControlsWidth}px + var(--workspace-native-controls-inset, 0px))`,
+              }
+            : undefined
+        }
         data-right-panel-tabbar
       >
         <ScrollArea
@@ -1331,7 +1349,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   ref={addSurfaceTriggerRef}
                   render={
                     <Button
-                      aria-label="Add panel surface"
+                      aria-label="Add tool"
                       className="shrink-0"
                       size="icon-xs"
                       variant="ghost-muted"
@@ -1474,6 +1492,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState
+            open={props.open ?? true}
             onAddBrowser={props.onAddBrowser}
             onAddBrowserInProfile={props.onAddBrowserInProfile}
             browserProfiles={browserProfiles}

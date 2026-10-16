@@ -145,6 +145,26 @@ describe("right panel new-tab shortcut", () => {
     expect(document.querySelector('[role="menu"]:not([data-closed])')).toBeNull();
   });
 
+  it("does not launch a tool while hidden or covered by an auxiliary panel", async () => {
+    await renderPanel();
+    await press("f");
+    expect(addFiles).toHaveBeenCalledOnce();
+    addFiles.mockClear();
+    await renderPanel({ open: false });
+    expect((await press("f")).defaultPrevented).toBe(false);
+    expect(addFiles).not.toHaveBeenCalled();
+    await renderPanel();
+    const overlay = document.createElement("div");
+    overlay.dataset.auxiliaryPanelOverlay = "true";
+    document.body.append(overlay);
+    expect((await press("f")).defaultPrevented).toBe(false);
+    expect((await press("t", { metaKey: true })).defaultPrevented).toBe(false);
+    expect(addFiles).not.toHaveBeenCalled();
+    overlay.remove();
+    await press("f");
+    expect(addFiles).toHaveBeenCalledOnce();
+  });
+
   it.each(["Win32", "Linux x86_64"])(
     "leaves Ctrl+T for the focused terminal on %s",
     async (platform) => {
@@ -183,9 +203,7 @@ describe("right panel new-tab shortcut", () => {
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
     await press("Escape");
     expect(document.querySelector('[role="menu"]:not([data-closed])')).toBeNull();
-    expect(document.activeElement).toBe(
-      container.querySelector('[aria-label="Add panel surface"]'),
-    );
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="Add tool"]'));
     input.remove();
   });
 
@@ -206,8 +224,6 @@ describe("right panel new-tab shortcut", () => {
     };
     await renderPanel(panel);
     await press("t", { metaKey: true });
-    await press("ArrowDown");
-    await press("ArrowDown");
     await press("ArrowDown");
     expect(document.activeElement?.textContent).toContain("Files");
     await press("Enter");

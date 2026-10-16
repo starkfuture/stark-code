@@ -264,9 +264,21 @@ Queued shell commands run in order and cannot be edited or promoted to a steer.
 The environment can disable this feature or change its ten-minute timeout in
 server settings.
 
+## Tools beside your chat
+
+Use **Tools** to open Pages, Files, Changes, a terminal, or Conversation tools
+(side chats, Make visual, and agents). Switching tools keeps your open pages and
+side-chat draft in place. Expand a panel to read across the app, or close it to
+return to the conversation.
+
+**Terminal** runs shell commands beside the chat. **Agent shell** opens the native
+Claude or Codex program in the main conversation area. **Terminal below chat**
+controls the separate bottom drawer. Chat details, including branch and working
+folder controls, are also available in Tools.
+
 ## View Stark Pages
 
-In the local Mac app, open **Pages** from a thread. The chooser switches between
+In the local Mac app, choose **Tools → Pages** from a thread. The chooser switches between
 **Company pages**, shared through Stark Pages, and **Folder pages**, created in
 the current folder. It remembers your choice and keeps your open page and reading
 position when you switch.

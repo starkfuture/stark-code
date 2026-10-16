@@ -32,6 +32,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-requests",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
+export type AuxiliaryPanel = "pages" | "side-work";
 
 export interface DeviceTabTarget {
   hostId: string;
@@ -123,6 +124,9 @@ export interface ThreadPanelVisibility {
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
+  /** Session-only ownership of the shared panel; tool resources remain in byThreadKey. */
+  auxiliaryPanelByThreadKey: Record<string, AuxiliaryPanel>;
+  openAuxiliary: (ref: ScopedThreadRef, panel: AuxiliaryPanel) => void;
   /**
    * A thread whose right panel should open maximized the next time it shows,
    * such as one started for a link the OS opened. Its view consumes it once.
@@ -397,16 +401,32 @@ const automaticUpdate = (
   threadKey: string,
   updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
 ): Partial<RightPanelStoreState> => ({
-  ...updateThread(state, threadKey, updater),
+  ...updateThread(state, threadKey, (current) => {
+    const next = updater(current);
+    // Background resources may arrive while Pages or side work owns the panel.
+    // Retain them without revealing another view over the user's choice.
+    return state.auxiliaryPanelByThreadKey[threadKey] && next.isOpen
+      ? { ...next, isOpen: false }
+      : next;
+  }),
 });
+
+const withoutAuxiliaryPanel = (
+  panels: Record<string, AuxiliaryPanel>,
+  threadKey: string,
+): Record<string, AuxiliaryPanel> => {
+  if (!(threadKey in panels)) return panels;
+  const { [threadKey]: _removed, ...rest } = panels;
+  return rest;
+};
 
 const userAction = (
   state: RightPanelStoreState,
   threadKey: string,
   updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
   closesView = false,
-): Partial<RightPanelStoreState> => ({
-  ...updateThread(state, threadKey, (current) => {
+): Partial<RightPanelStoreState> => {
+  const updated = updateThread(state, threadKey, (current) => {
     const next = updater(current);
     if (next === current) return current;
     const removedDevices = current.surfaces.filter(
@@ -423,20 +443,31 @@ const userAction = (
         ]),
       ],
     };
-  }),
-  userActionRevisionByThreadKey: {
-    ...state.userActionRevisionByThreadKey,
-    [threadKey]: (state.userActionRevisionByThreadKey[threadKey] ?? 0) + 1,
-  },
-  ...(closesView
-    ? {
-        closeRevisionByThreadKey: {
-          ...state.closeRevisionByThreadKey,
-          [threadKey]: (state.closeRevisionByThreadKey[threadKey] ?? 0) + 1,
-        },
-      }
-    : {}),
-});
+  });
+  return {
+    ...updated,
+    ...(updated.byThreadKey[threadKey]?.isOpen
+      ? {
+          auxiliaryPanelByThreadKey: withoutAuxiliaryPanel(
+            state.auxiliaryPanelByThreadKey,
+            threadKey,
+          ),
+        }
+      : {}),
+    userActionRevisionByThreadKey: {
+      ...state.userActionRevisionByThreadKey,
+      [threadKey]: (state.userActionRevisionByThreadKey[threadKey] ?? 0) + 1,
+    },
+    ...(closesView
+      ? {
+          closeRevisionByThreadKey: {
+            ...state.closeRevisionByThreadKey,
+            [threadKey]: (state.closeRevisionByThreadKey[threadKey] ?? 0) + 1,
+          },
+        }
+      : {}),
+  };
+};
 
 const closeAction = (
   state: RightPanelStoreState,
@@ -602,6 +633,17 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
   persist(
     (set, get) => ({
       byThreadKey: {},
+      auxiliaryPanelByThreadKey: {},
+      openAuxiliary: (ref, panel) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          return {
+            ...userAction(state, threadKey, (current) =>
+              current.isOpen ? { ...current, isOpen: false } : current,
+            ),
+            auxiliaryPanelByThreadKey: { ...state.auxiliaryPanelByThreadKey, [threadKey]: panel },
+          };
+        }),
       pendingMaximizeThreadKey: null,
       requestMaximize: (ref) => set({ pendingMaximizeThreadKey: scopedThreadKey(ref) }),
       consumeMaximizeRequest: (ref) => {
@@ -619,6 +661,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         set((state) => {
           const threadKey = scopedThreadKey(ref);
           if (
+            state.auxiliaryPanelByThreadKey[threadKey] ||
             (state.userActionRevisionByThreadKey[threadKey] ?? 0) !== expectedUserActionRevision
           ) {
             return state;
@@ -968,11 +1011,18 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           ),
         ),
       close: (ref) =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) =>
-            current.isOpen ? { ...current, isOpen: false } : current,
-          ),
-        ),
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          return {
+            ...userAction(state, threadKey, (current) =>
+              current.isOpen ? { ...current, isOpen: false } : current,
+            ),
+            auxiliaryPanelByThreadKey: withoutAuxiliaryPanel(
+              state.auxiliaryPanelByThreadKey,
+              threadKey,
+            ),
+          };
+        }),
       // Layout only: it changes no surface, so proactive panels still apply.
       setMaximized: (ref, maximized) =>
         set((state) =>
@@ -983,12 +1033,22 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           }),
         ),
       toggleVisibility: (ref) =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => ({
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          if (state.auxiliaryPanelByThreadKey[threadKey]) {
+            return {
+              ...userAction(state, threadKey, (current) => current),
+              auxiliaryPanelByThreadKey: withoutAuxiliaryPanel(
+                state.auxiliaryPanelByThreadKey,
+                threadKey,
+              ),
+            };
+          }
+          return userAction(state, threadKey, (current) => ({
             ...current,
             isOpen: !current.isOpen,
-          })),
-        ),
+          }));
+        }),
       toggle: (ref, kind) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
@@ -1032,6 +1092,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           const threadKey = scopedThreadKey(ref);
           if (
             !(threadKey in state.byThreadKey) &&
+            !(threadKey in state.auxiliaryPanelByThreadKey) &&
             !(threadKey in state.threadPanelVisibilityByThreadKey) &&
             !(threadKey in state.userActionRevisionByThreadKey) &&
             !(threadKey in state.closeRevisionByThreadKey)
@@ -1047,6 +1108,10 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             state.closeRevisionByThreadKey;
           return {
             byThreadKey,
+            auxiliaryPanelByThreadKey: withoutAuxiliaryPanel(
+              state.auxiliaryPanelByThreadKey,
+              threadKey,
+            ),
             threadPanelVisibilityByThreadKey,
             userActionRevisionByThreadKey,
             closeRevisionByThreadKey,
@@ -1109,6 +1174,13 @@ export function selectThreadRightPanelState(
 ): ThreadRightPanelState {
   if (!ref) return EMPTY_THREAD_STATE;
   return byThreadKey[scopedThreadKey(ref)] ?? EMPTY_THREAD_STATE;
+}
+
+export function selectAuxiliaryPanel(
+  byThreadKey: Record<string, AuxiliaryPanel>,
+  ref: ScopedThreadRef | null | undefined,
+): AuxiliaryPanel | null {
+  return ref ? (byThreadKey[scopedThreadKey(ref)] ?? null) : null;
 }
 
 export function selectThreadPanelVisibility(

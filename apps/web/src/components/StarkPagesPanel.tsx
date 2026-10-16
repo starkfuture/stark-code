@@ -1,6 +1,13 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { ChevronDownIcon, Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { usePreviewPanelInlineSize } from "~/hooks/usePreviewPanelInlineSize";
 import { cn } from "~/lib/utils";
 import { isElectron } from "~/env";
@@ -33,8 +40,14 @@ function initialPagesSource(): PagesSource {
 /** One mounted viewer survives docking, expansion and window-size changes. */
 export function StarkPagesPanel({
   inline,
+  active = true,
+  tools,
   ...props
-}: ComponentProps<typeof StarkPagesSidebar> & { readonly inline: boolean }) {
+}: ComponentProps<typeof StarkPagesSidebar> & {
+  readonly inline: boolean;
+  readonly active?: boolean;
+  readonly tools?: ReactNode;
+}) {
   const [source, setSource] = useState(() => {
     const view = initialPagesSource();
     return { view, visited: new Set<PagesSource>([view]) };
@@ -56,16 +69,29 @@ export function StarkPagesPanel({
   const expandButton = useRef<HTMLButtonElement>(null);
   const overlay = expanded || !inline;
   const { width, handlers } = usePreviewPanelInlineSize(panel, {
-    enabled: !overlay,
+    enabled: active && !overlay,
     container: portalHost?.parentElement,
     widthStorageKey: "starkcode:pages-panel-width",
     defaultWidth: 540,
   });
   useLayoutEffect(() => {
-    if (overlay && portalHost && panel.current && !panel.current.contains(document.activeElement)) {
+    if (
+      active &&
+      overlay &&
+      portalHost &&
+      panel.current &&
+      !panel.current.contains(document.activeElement)
+    ) {
       expandButton.current?.focus({ preventScroll: true });
     }
-  }, [overlay, portalHost]);
+  }, [active, overlay, portalHost]);
+  useEffect(() => {
+    if (!active) return;
+    const toggleExpanded = () => setExpanded((current) => !current);
+    window.addEventListener("starkcode:auxiliary-panel-toggle-expanded", toggleExpanded);
+    return () =>
+      window.removeEventListener("starkcode:auxiliary-panel-toggle-expanded", toggleExpanded);
+  }, [active]);
   const restorePanel = () => {
     setExpanded(false);
     expandButton.current?.focus({ preventScroll: true });
@@ -73,11 +99,11 @@ export function StarkPagesPanel({
 
   return (
     <Dialog.Root
-      open
-      modal={overlay}
+      open={active}
+      modal={active && overlay}
       disablePointerDismissal={!overlay}
       onOpenChange={(open, details) => {
-        if (open) return;
+        if (open || !active) return;
         // Escape restores the reading panel before a second Escape closes it.
         if (expanded) restorePanel();
         else if (overlay || details.reason === "escape-key") props.onClose();
@@ -87,20 +113,24 @@ export function StarkPagesPanel({
           it becomes a modal. display:contents keeps the dock in the flex row. */}
       <div ref={setPortalHost} className="contents" />
       {portalHost ? (
-        <Dialog.Portal container={portalHost} className="contents">
-          {overlay ? (
+        <Dialog.Portal keepMounted container={portalHost} className="contents">
+          {active && overlay ? (
             <Dialog.Backdrop className="fixed inset-0 z-[60] bg-background/60 backdrop-blur-xs" />
           ) : null}
           <Dialog.Popup
             ref={panel}
             role={overlay ? "dialog" : "complementary"}
             aria-label="Stark Pages"
-            aria-modal={overlay || undefined}
+            aria-modal={(active && overlay) || undefined}
             initialFocus={false}
-            data-pages-overlay={overlay ? "true" : undefined}
+            hidden={!active}
+            inert={!active}
+            data-pages-overlay={active && overlay ? "true" : undefined}
+            data-auxiliary-panel-overlay={active && overlay ? "true" : undefined}
             data-pages-expanded={expanded ? "true" : "false"}
             className={cn(
-              "flex min-h-0 min-w-0 flex-col bg-background text-foreground outline-none [-webkit-app-region:no-drag]",
+              "min-h-0 min-w-0 flex-col bg-background text-foreground outline-none [-webkit-app-region:no-drag]",
+              active ? "flex" : "hidden",
               overlay
                 ? "fixed inset-y-0 right-0 z-[60]"
                 : "relative h-full shrink-0 border-l border-border",
@@ -161,6 +191,7 @@ export function StarkPagesPanel({
                 </Menu>
               </div>
               <div className="flex items-center gap-1">
+                {tools}
                 <Tooltip>
                   <TooltipTrigger
                     render={

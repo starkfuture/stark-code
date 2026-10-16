@@ -678,6 +678,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "claude-organizations",
+    title: "Claude organizations",
+    to: "/settings/providers",
+    scope: "environment-defaults",
+    searchTerms: [
+      "claude accounts organization login switch automatic quota limits cswap claude-swap",
+    ],
+    providerSettingsOnly: true,
+  },
+  {
     id: "usage-providers",
     title: "Usage providers",
     to: "/settings/providers",

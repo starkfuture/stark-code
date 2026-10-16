@@ -9,6 +9,7 @@ import { vi } from "vite-plus/test";
 import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
+  AuthProvidersManageScope,
   AuthSourceControlWriteScope,
   ThreadId,
   EnvironmentId,
@@ -74,6 +75,37 @@ describe("command permissions", () => {
         yield* visuals.authorize(registry, env);
         registry.set(sessions(other), AsyncResult.success(grant(false)));
         expect(registry.get(visuals.permissionAtom(other))).toBe(false);
+      }),
+    ),
+  );
+
+  it.effect("requires provider administration on the destination for Claude accounts", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        for (const method of [
+          WS_METHODS.claudeAccountsSnapshot,
+          WS_METHODS.claudeAccountsCommand,
+        ]) {
+          const permissions = createCommandPermissions(runtime, method);
+          registry.set(sessions(env), AsyncResult.success(grant(true)));
+          expect(registry.get(permissions.permissionAtom(env))).toBe(false);
+          expect((yield* permissions.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+            "EnvironmentAuthorizationError",
+          );
+          registry.set(
+            sessions(env),
+            AsyncResult.success({
+              ...grant(true),
+              scopes: [AuthProvidersManageScope],
+              permissions: [AuthProvidersManageScope],
+            }),
+          );
+          yield* permissions.authorize(registry, env);
+          expect(registry.get(permissions.permissionAtom(env))).toBe(true);
+          registry.set(sessions(other), AsyncResult.success(grant(false)));
+          expect(registry.get(permissions.permissionAtom(other))).toBe(false);
+        }
       }),
     ),
   );

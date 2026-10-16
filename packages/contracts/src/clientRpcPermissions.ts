@@ -13,6 +13,8 @@ import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  [WS_METHODS.claudeAccountsSnapshot]: AuthProvidersManageScope,
+  [WS_METHODS.claudeAccountsCommand]: AuthProvidersManageScope,
   [WS_METHODS.responseVisualsFormat]: AuthOrchestrationOperateScope,
   [WS_METHODS.mcpServerReconnect]: AuthOrchestrationOperateScope,
   [WS_METHODS.mcpServerSetEnabled]: AuthProvidersManageScope,

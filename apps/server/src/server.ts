@@ -41,6 +41,7 @@ import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as PullRequestFilesViewed from "./persistence/PullRequestFilesViewed.ts";
 import * as PullRequestReviewGuides from "./persistence/PullRequestReviewGuides.ts";
+import * as ClaudeAccounts from "./provider/ClaudeAccounts.ts";
 import * as ResponseVisuals from "./textGeneration/ResponseVisuals.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -713,6 +714,7 @@ const layerMakeRoutes = Layer.mergeAll(
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
 ).pipe(
+  Layer.provide(ClaudeAccounts.layer.pipe(Layer.provide(ClaudeAccounts.runtimeLayer))),
   Layer.provide(ResponseVisuals.layer),
   // Guides read through the same pull request service as every other surface.
   Layer.provide(

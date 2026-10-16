@@ -15,6 +15,43 @@ Stark Code uses Claude Code's login and configuration. Start with the default pr
 for one account; [provider setup](./install.md#providers) covers installation and
 shared provider settings.
 
+## Switch organizations on the shared login
+
+Open **Settings > Providers > Claude organizations** on web or desktop. Install
+[claude-swap](https://github.com/realiti4/claude-swap) 0.25 or newer on the connected
+environment's machine first (`uv tool install claude-swap`). Load organizations to
+see saved logins, usage windows, and reset times. Organizations with the same email
+stay separate.
+
+To save another organization, use `/login` in Claude Code on that machine, select
+the organization, then choose **Save current login** in Stark Code. Saving captures
+that sign-in; it does not open an OAuth flow. Credentials remain in claude-swap's
+credential storage and are never sent to the app's browser.
+
+To remove a saved organization, use `cswap list` and `cswap remove <number>` in
+Terminal. Review its confirmation: removal also deletes that organization's
+isolated cswap session history and directory mappings. It leaves the current
+shared Claude login signed in.
+
+Switching changes the machine's shared Claude login, including other terminals
+and editors using it. Running Claude processes may keep cached credentials briefly;
+a selected organization is not proof that an in-flight request has changed accounts.
+Separate configuration directories and explicit API keys or token overrides do not
+follow this switch.
+
+Automatic switching is off by default. Choose which saved organizations are eligible
+and the usage percentage that should trigger a switch, then confirm the shared-login
+scope. The switcher checks account and model limits and excludes API-key accounts.
+An exhausted model can trigger switching even if you are using a different model.
+Eligibility is shared with claude-swap outside Stark Code. Avoid running another
+claude-swap automatic switcher at the same time.
+
+Automatic switching runs while the Stark Code server is running and stops when that
+server quits. On a remote environment, closing the desktop window does not stop the
+remote server. Turn automatic switching off explicitly when needed. It changes the
+login for subsequent requests; it does not replay a failed prompt, restart a terminal,
+or retry tool actions. Usage that is unavailable or stale is not shown as unused quota.
+
 ## Separate accounts or configurations
 
 Use a separate Claude config directory for each account. This also works for named

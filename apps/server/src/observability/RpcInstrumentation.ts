@@ -187,6 +187,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.vcsInit]: "vcs",
   [WS_METHODS.reviewGetDiffPreview]: "review",
   [WS_METHODS.reviewGetDiffFileContents]: "review",
+  [WS_METHODS.claudeAccountsSnapshot]: "provider",
+  [WS_METHODS.claudeAccountsCommand]: "provider",
   [WS_METHODS.responseVisualsFormat]: "responseVisuals",
   [WS_METHODS.terminalNativeReplies]: "terminal",
   [WS_METHODS.terminalOpen]: "terminal",

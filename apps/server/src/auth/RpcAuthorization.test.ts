@@ -632,3 +632,45 @@ it.effect("refuses reply generation to read-only clients before invoking the mod
     expect(requiredScopeForRpcMethod(WS_METHODS.terminalNativeReplies)).toBe(AuthTerminalReadScope);
   }).pipe(Effect.scoped),
 );
+
+it.effect.each([WS_METHODS.claudeAccountsSnapshot, WS_METHODS.claudeAccountsCommand] as const)(
+  "requires provider administration before %s touches account credentials",
+  (method) =>
+    Effect.gen(function* () {
+      const group = WsRpcGroup.omit(
+        ...[...WsRpcGroup.requests.keys()].filter(
+          (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof method> =>
+            tag !== WS_METHODS.claudeAccountsSnapshot && tag !== WS_METHODS.claudeAccountsCommand,
+        ),
+      );
+      let handled = false;
+      const handler = () =>
+        Effect.sync(() => {
+          handled = true;
+          return {
+            available: true,
+            accounts: [],
+            activeAccountNumber: null,
+            automatic: { enabled: false, threshold: 90, lastOutcome: null },
+            notice: null,
+          };
+        });
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.claudeAccountsSnapshot, handler),
+            group.toLayerHandler(WS_METHODS.claudeAccountsCommand, handler),
+            RpcAuthorization.layer([AuthOrchestrationReadScope, AuthOrchestrationOperateScope]),
+          ),
+        ),
+      );
+      const result =
+        method === WS_METHODS.claudeAccountsSnapshot
+          ? client[method]()
+          : client[method]({ action: "automatic", enabled: true, threshold: 90 });
+      expect(yield* result.pipe(Effect.flip)).toMatchObject({
+        requiredPermission: AuthProvidersManageScope,
+      });
+      expect(handled).toBe(false);
+    }).pipe(Effect.scoped),
+);

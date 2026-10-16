@@ -282,6 +282,11 @@ import {
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
+  ClaudeAccountsSnapshot,
+  ClaudeAccountsCommand,
+  ClaudeAccountsError,
+} from "./claudeAccounts.ts";
+import {
   ResponseVisualsInput,
   ResponseVisualsResult,
   ResponseVisualsError,
@@ -490,6 +495,8 @@ export const WS_METHODS = {
   reviewGetDiffFileContents: "review.getDiffFileContents",
 
   // Terminal methods
+  claudeAccountsSnapshot: "claudeAccounts.snapshot",
+  claudeAccountsCommand: "claudeAccounts.command",
   responseVisualsFormat: "responseVisuals.format",
   terminalNativeReplies: "terminal.nativeReplies",
   terminalOpen: "terminal.open",
@@ -1564,6 +1571,16 @@ const WsReviewGetDiffFileContentsRpc = Rpc.make(WS_METHODS.reviewGetDiffFileCont
   error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
 });
 
+const WsClaudeAccountsSnapshotRpc = Rpc.make(WS_METHODS.claudeAccountsSnapshot, {
+  success: ClaudeAccountsSnapshot,
+  error: Schema.Union([ClaudeAccountsError, EnvironmentAuthorizationError]),
+});
+const WsClaudeAccountsCommandRpc = Rpc.make(WS_METHODS.claudeAccountsCommand, {
+  payload: ClaudeAccountsCommand,
+  success: ClaudeAccountsSnapshot,
+  error: Schema.Union([ClaudeAccountsError, EnvironmentAuthorizationError]),
+});
+
 const WsResponseVisualsFormatRpc = Rpc.make(WS_METHODS.responseVisualsFormat, {
   payload: ResponseVisualsInput,
   success: ResponseVisualsResult,
@@ -2170,6 +2187,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsInitRpc,
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
+  WsClaudeAccountsSnapshotRpc,
+  WsClaudeAccountsCommandRpc,
   WsResponseVisualsFormatRpc,
   WsTerminalNativeRepliesRpc,
   WsTerminalOpenRpc,

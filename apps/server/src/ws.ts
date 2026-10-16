@@ -235,6 +235,7 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
+import * as ClaudeAccounts from "./provider/ClaudeAccounts.ts";
 import * as ResponseVisuals from "./textGeneration/ResponseVisuals.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -1209,6 +1210,8 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
 // one toLayer over the full group exceeds the compiler's instantiation limit.
 // Reuse the wrapped definitions so both authorization and instrumentation apply.
 const TERMINAL_RPC_METHODS = [
+  WS_METHODS.claudeAccountsSnapshot,
+  WS_METHODS.claudeAccountsCommand,
   WS_METHODS.responseVisualsFormat,
   WS_METHODS.terminalNativeReplies,
   WS_METHODS.terminalOpen,
@@ -1234,9 +1237,12 @@ const TerminalWsRpcGroup = RpcGroup.make(
 const CoreWsRpcGroup = ServerWsRpcGroup.omit(...TERMINAL_RPC_METHODS);
 const layerTerminalWsRpc = TerminalWsRpcGroup.toLayer(
   Effect.gen(function* () {
+    const claudeAccounts = yield* ClaudeAccounts.ClaudeAccounts;
     const responseVisuals = yield* ResponseVisuals.ResponseVisuals;
     const terminalManager = yield* TerminalManager.TerminalManager;
     return TerminalWsRpcGroup.of({
+      [WS_METHODS.claudeAccountsSnapshot]: () => claudeAccounts.snapshot,
+      [WS_METHODS.claudeAccountsCommand]: (input) => claudeAccounts.command(input),
       [WS_METHODS.responseVisualsFormat]: (input) => responseVisuals.format(input),
       [WS_METHODS.terminalNativeReplies]: (input) =>
         Stream.callback<ReadonlyArray<NativeAgentReply>, TerminalError>((queue) =>
@@ -3251,6 +3257,7 @@ export const layer = Layer.unwrap(
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const claudeAccounts = yield* ClaudeAccounts.ClaudeAccounts;
     const responseVisuals = yield* ResponseVisuals.ResponseVisuals;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const sql = yield* SqlClient.SqlClient;
@@ -3320,6 +3327,7 @@ export const layer = Layer.unwrap(
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(OtlpEndpointCheck.layer),
+              Layer.provide(Layer.succeed(ClaudeAccounts.ClaudeAccounts, claudeAccounts)),
               Layer.provide(Layer.succeed(ResponseVisuals.ResponseVisuals, responseVisuals)),
               // Shared like the pull request service, so concurrent generations single-flight.
               Layer.provide(

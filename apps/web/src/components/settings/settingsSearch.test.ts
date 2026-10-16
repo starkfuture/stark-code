@@ -45,6 +45,15 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it("finds shared Claude organizations only in an environment scope", () => {
+    for (const query of ["Claude organizations", "cswap", "Claude automatic quota"]) {
+      expect(searchSettings(query).map((item) => item.id)).toContain("claude-organizations");
+    }
+    const item = getSettingsSearchTargetScope("claude-organizations")!;
+    expect(isSettingsSearchScopeAvailable(item.scope, "all")).toBe(true);
+    expect(isSettingsSearchScopeAvailable(item.scope, "environment")).toBe(true);
+    expect(isSettingsSearchScopeAvailable(item.scope, "project")).toBe(false);
+  });
   it("finds saved permission rules and the MCP server screen", () => {
     expect(searchSettings("saved approval rules")[0]?.to).toBe("/settings/permissions");
     expect(searchSettings("MCP servers")[0]?.to).toBe("/settings/mcp-servers");

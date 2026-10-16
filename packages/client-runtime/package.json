@@ -415,6 +415,10 @@
       "types": "./src/pullRequestMarkdown.ts",
       "default": "./src/pullRequestMarkdown.ts"
     },
+    "./state/claude-accounts": {
+      "types": "./src/state/claudeAccounts.ts",
+      "default": "./src/state/claudeAccounts.ts"
+    },
     "./state/response-visuals": {
       "types": "./src/state/responseVisuals.ts",
       "default": "./src/state/responseVisuals.ts"

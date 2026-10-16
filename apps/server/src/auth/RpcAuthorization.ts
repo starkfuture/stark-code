@@ -191,6 +191,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.vcsListRefs]: AuthOrchestrationReadScope,
   [WS_METHODS.reviewGetDiffPreview]: AuthFilesystemReadScope,
   [WS_METHODS.reviewGetDiffFileContents]: AuthFilesystemReadScope,
+  [WS_METHODS.claudeAccountsSnapshot]: AuthProvidersManageScope,
+  [WS_METHODS.claudeAccountsCommand]: AuthProvidersManageScope,
   [WS_METHODS.responseVisualsFormat]: AuthOrchestrationOperateScope,
   [WS_METHODS.terminalNativeReplies]: AuthTerminalReadScope,
   [WS_METHODS.terminalOpen]: AuthTerminalOperateScope,

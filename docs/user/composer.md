@@ -266,29 +266,32 @@ server settings.
 
 ## View Stark Pages
 
-In the local Mac app, open **Pages** from a thread to view the project's Stark
-Pages beside the conversation. Stark Workbench is built in, and opening the panel
-starts the local preview automatically. No separate setup is needed. If Pages
-cannot start, use **Retry Pages**.
+In the local Mac app, open **Pages** from a thread. The chooser switches between
+**Company pages**, shared through Stark Pages, and **Folder pages**, created in
+the current folder. It remembers your choice and keeps your open page and reading
+position when you switch.
 
-In Claude native shell mode, **Publish** prepares its command in the terminal for
+Company Pages sign-in opens in your main browser and returns to Stark Code. The
+app keeps its own connection; it does not copy another browser's login. Find a
+project, open its home page or search for a page inside it. Related page links
+stay in the reader; other links open in your main browser.
+
+Folder Pages starts the built-in Stark Workbench preview automatically. No
+separate setup is needed. If the preview cannot start, use **Retry Pages**. In
+Claude native shell mode, **Publish** prepares its command in the terminal for
 you to review and submit. It does not submit the command automatically. Other
 modes keep publishing unavailable.
 
-Choose **Published** to connect to your company's Pages. Sign-in opens in your
-main browser and returns to Stark Code. The app keeps its own connection; it
-does not copy another browser's login. Find a project, open its home page or
-search for a page inside it. Related page links stay in the reader; other links
-open in your main browser. Use **Full view** to read workspace or published pages
-across the app, then **Side panel** to return without losing your place. You can
-also drag the panel's edge to resize it.
+Use **Expand Pages** to read across the app, then the restore control to show the
+page beside your chat without losing your place. You can also drag the panel's
+edge to resize it.
 
 Published pages include styles, images and fonts stored with the page. Viewing
-uses no model tokens. Recent pages are cached temporarily; **Refresh page** gets
-the latest version. This view is read-only and does not run page scripts or load
-resources from other websites. Use **Open in browser** for interactive pages or
-content that cannot be shown here. **Disconnect** removes the saved connection
-and clears cached pages.
+uses no model tokens. Recent pages are cached temporarily. The **Page actions**
+menu contains **Refresh page**, **Open in browser**, and **Disconnect Pages**.
+This view is read-only and does not run page scripts or load resources from other
+websites. Open interactive pages in your browser. Disconnecting removes the saved
+connection and clears cached pages.
 
 ## Goals
 

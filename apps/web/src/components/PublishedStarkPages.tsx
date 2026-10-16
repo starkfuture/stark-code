@@ -4,9 +4,17 @@ import type {
   StarkPublishedPagesStatus,
   StarkPublishedPagesTool,
 } from "@starkfuture/contracts";
-import { ArrowLeftIcon, ChevronRightIcon, FileTextIcon, FolderIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChevronRightIcon,
+  FileTextIcon,
+  FolderIcon,
+  MoreHorizontalIcon,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { PublishedPageContent } from "./PublishedPageContent";
 import { cn } from "~/lib/utils";
 import {
@@ -270,14 +278,14 @@ export function PublishedStarkPages({
       aria-label="Published Pages"
       className={cn(
         "min-h-0 min-w-0 flex-1 text-sm",
-        expanded && reader ? "flex flex-col overflow-hidden p-2" : "overflow-auto p-3",
+        reader ? "flex flex-col overflow-hidden p-2" : "overflow-auto p-3",
       )}
     >
       {!bridge ? (
         <p>Open Stark Code on your Mac to connect to published Pages.</p>
       ) : status?.state !== "connected" ? (
         <div className="space-y-3">
-          <h3 className="font-medium">Your published Pages</h3>
+          <h3 className="font-medium">Company pages</h3>
           <p className="text-muted-foreground">
             Sign in through your browser to read your company’s pages here.
           </p>
@@ -302,107 +310,107 @@ export function PublishedStarkPages({
           )}
         </div>
       ) : (
-        <div
-          className={cn(
-            "min-w-0",
-            expanded && reader ? "flex min-h-0 flex-1 flex-col gap-2" : "space-y-4",
-          )}
-        >
-          <div
-            className={cn(
-              "shrink-0 flex-wrap items-center justify-between gap-2",
-              expanded && reader ? "hidden" : "flex",
-            )}
-          >
-            <span className="text-xs text-muted-foreground">Pages connected</span>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void disconnect()}
-              disabled={connectionBusy}
-            >
-              Disconnect
-            </Button>
-          </div>
+        <div className={cn("min-w-0", reader ? "flex min-h-0 flex-1 flex-col gap-2" : "space-y-4")}>
+          <nav aria-label="Pages navigation" className="flex min-w-0 shrink-0 items-center gap-2">
+            {project ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={reader ? "Back to pages" : "Back to library"}
+                      onClick={reader ? backToPages : backToProjects}
+                    >
+                      <ArrowLeftIcon aria-hidden />
+                    </Button>
+                  }
+                />
+                <TooltipPopup positionMethod="fixed">
+                  {reader ? "Back to pages" : "Back to library"}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <div>
+                      {project && reader ? (
+                        <p className="truncate text-xs text-muted-foreground">{project.title}</p>
+                      ) : null}
+                      <h3 className="truncate font-medium">
+                        {reader?.page.title ?? project?.title ?? "Company pages"}
+                      </h3>
+                    </div>
+                  }
+                />
+                <TooltipPopup positionMethod="fixed">
+                  {project && reader
+                    ? `${project.title} / ${reader.page.title}`
+                    : (project?.title ?? "Company pages")}
+                </TooltipPopup>
+              </Tooltip>
+            </div>
+            <Menu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <MenuTrigger
+                      render={
+                        <Button size="icon-sm" variant="ghost" aria-label="Page actions">
+                          <MoreHorizontalIcon aria-hidden />
+                        </Button>
+                      }
+                    />
+                  }
+                />
+                <TooltipPopup positionMethod="fixed">Page actions</TooltipPopup>
+              </Tooltip>
+              <MenuPopup align="end" positionMethod="fixed">
+                {reader?.document ? (
+                  <MenuItem
+                    disabled={reader.loading}
+                    onClick={() => void openPage(reader.page, true)}
+                  >
+                    Refresh page
+                  </MenuItem>
+                ) : null}
+                {reader?.document?.publicUrl ? (
+                  <MenuItem
+                    onClick={() =>
+                      void window.desktopBridge?.openStarkPagesLink?.(reader.document!.publicUrl!)
+                    }
+                  >
+                    Open in browser
+                  </MenuItem>
+                ) : !reader && project?.url ? (
+                  <MenuItem
+                    onClick={() => void window.desktopBridge?.openStarkPagesLink?.(project.url!)}
+                  >
+                    Open project in browser
+                  </MenuItem>
+                ) : null}
+                {reader ? <MenuItem onClick={backToProjects}>All projects</MenuItem> : null}
+                {!project ? (
+                  <MenuItem disabled={busy} onClick={() => void loadProjects()}>
+                    Refresh projects
+                  </MenuItem>
+                ) : null}
+                <MenuSeparator />
+                <MenuItem disabled={connectionBusy} onClick={() => void disconnect()}>
+                  Disconnect Pages
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          </nav>
           {project ? (
             <>
-              <nav
-                aria-label="Pages breadcrumb"
-                className={cn(
-                  "flex min-w-0 shrink-0 items-center gap-1",
-                  expanded && reader ? "overflow-hidden" : "flex-wrap",
-                )}
-              >
-                <Button size="sm" variant="ghost" onClick={backToProjects}>
-                  Projects
-                </Button>
-                <ChevronRightIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-                {reader ? (
-                  <Button size="sm" variant="ghost" onClick={backToPages}>
-                    <span
-                      className={cn(
-                        "truncate",
-                        expanded ? "max-w-[min(12rem,30vw)]" : "max-w-[min(16rem,55vw)]",
-                      )}
-                    >
-                      {project.title}
-                    </span>
-                  </Button>
-                ) : (
-                  <span className="min-w-0 break-words font-medium">{project.title}</span>
-                )}
-                {expanded && reader ? (
-                  <>
-                    <ChevronRightIcon
-                      aria-hidden
-                      className="size-3 shrink-0 text-muted-foreground"
-                    />
-                    <span className="min-w-0 truncate font-medium">{reader.page.title}</span>
-                  </>
-                ) : null}
-              </nav>
               {reader ? (
                 <div
                   aria-label="Published page reader"
-                  className={cn(
-                    "min-w-0",
-                    expanded ? "flex min-h-0 flex-1 flex-col gap-2" : "space-y-3",
-                  )}
+                  className="flex min-h-0 min-w-0 flex-1 flex-col gap-2"
                 >
-                  <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-                    <Button size="sm" variant="ghost" onClick={backToPages}>
-                      <ArrowLeftIcon aria-hidden />
-                      Back to pages
-                    </Button>
-                    {reader.document ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={reader.loading}
-                        onClick={() => void openPage(reader.page, true)}
-                      >
-                        Refresh page
-                      </Button>
-                    ) : null}
-                    {reader.document?.publicUrl ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          void window.desktopBridge?.openStarkPagesLink?.(
-                            reader.document!.publicUrl!,
-                          )
-                        }
-                      >
-                        Open in browser
-                      </Button>
-                    ) : null}
-                  </div>
-                  <h3
-                    className={expanded ? "sr-only" : "shrink-0 break-words text-base font-medium"}
-                  >
-                    {reader.page.title}
-                  </h3>
                   {reader.loading ? (
                     <p role="status">{reader.document ? "Refreshing page…" : "Opening page…"}</p>
                   ) : null}
@@ -423,8 +431,8 @@ export function PublishedStarkPages({
                   {reader.document ? (
                     <PublishedPageContent
                       document={reader.document}
-                      expanded={expanded}
-                      onExitExpanded={onExitExpanded}
+                      expanded
+                      onExitExpanded={expanded ? onExitExpanded : undefined}
                       onNavigate={(path) =>
                         void openPage({ path, title: publishedPageTitle(path), excerpt: null })
                       }
@@ -433,20 +441,6 @@ export function PublishedStarkPages({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="font-medium">Pages</h3>
-                    {project.url ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() =>
-                          void window.desktopBridge?.openStarkPagesLink?.(project.url!)
-                        }
-                      >
-                        Open project in browser
-                      </Button>
-                    ) : null}
-                  </div>
                   <Button
                     size="sm"
                     variant="outline"
@@ -536,17 +530,6 @@ export function PublishedStarkPages({
             </>
           ) : (
             <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-base font-medium">Your projects</h3>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void loadProjects()}
-                  disabled={busy}
-                >
-                  Refresh
-                </Button>
-              </div>
               {projects.length ? (
                 <Input
                   aria-label="Find a project"

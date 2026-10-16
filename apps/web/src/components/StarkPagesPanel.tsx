@@ -1,5 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
-import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
+import { ChevronDownIcon, Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ComponentProps } from "react";
 import { usePreviewPanelInlineSize } from "~/hooks/usePreviewPanelInlineSize";
 import { cn } from "~/lib/utils";
@@ -7,14 +7,49 @@ import { isElectron } from "~/env";
 import { StarkPagesSidebar } from "./StarkPagesSidebar";
 import { PublishedStarkPages } from "./PublishedStarkPages";
 import { Button } from "./ui/button";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuRadioItemIndicator,
+  MenuTrigger,
+} from "./ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { RightPanelResizeHandle } from "./preview/RightPanelResizeHandle";
+
+type PagesSource = "local" | "published";
+const SOURCE_KEY = "starkcode:pages-source";
+function initialPagesSource(): PagesSource {
+  try {
+    return window.localStorage.getItem(SOURCE_KEY) === "local" ? "local" : "published";
+  } catch {
+    return "published";
+  }
+}
 
 /** One mounted viewer survives docking, expansion and window-size changes. */
 export function StarkPagesPanel({
   inline,
   ...props
 }: ComponentProps<typeof StarkPagesSidebar> & { readonly inline: boolean }) {
-  const [view, setView] = useState<"local" | "published">("local");
+  const [source, setSource] = useState(() => {
+    const view = initialPagesSource();
+    return { view, visited: new Set<PagesSource>([view]) };
+  });
+  const { view, visited } = source;
+  const chooseSource = (value: string) => {
+    if (value !== "local" && value !== "published") return;
+    setSource((current) => ({ view: value, visited: new Set([...current.visited, value]) }));
+    try {
+      window.localStorage.setItem(SOURCE_KEY, value);
+    } catch {
+      /* Remembering the choice is optional. */
+    }
+  };
+  const folderName = props.projectRoot.split(/[\\/]/).findLast(Boolean) ?? "this folder";
   const [expanded, setExpanded] = useState(false);
   const [portalHost, setPortalHost] = useState<HTMLDivElement | null>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -86,51 +121,101 @@ export function StarkPagesPanel({
                   "drag-region min-h-(--workspace-topbar-height) pl-(--workspace-controls-left) wco:pr-(--workspace-native-controls-inset)",
               )}
             >
-              <div className="flex flex-wrap gap-1" role="group" aria-label="Pages source">
-                <Button
-                  size="sm"
-                  variant={view === "local" ? "secondary" : "ghost"}
-                  aria-pressed={view === "local"}
-                  onClick={() => setView("local")}
-                >
-                  This workspace
-                </Button>
-                <Button
-                  size="sm"
-                  variant={view === "published" ? "secondary" : "ghost"}
-                  aria-pressed={view === "published"}
-                  onClick={() => setView("published")}
-                >
-                  Published
-                </Button>
+              <div className="min-w-0">
+                <Menu>
+                  <MenuTrigger
+                    render={<Button size="sm" variant="ghost" aria-label="Choose Pages source" />}
+                  >
+                    {view === "published" ? "Company pages" : "Folder pages"}
+                    <ChevronDownIcon aria-hidden />
+                  </MenuTrigger>
+                  <MenuPopup align="start" positionMethod="fixed">
+                    <MenuGroup>
+                      <MenuGroupLabel>Browse Pages</MenuGroupLabel>
+                      <MenuRadioGroup value={view} onValueChange={chooseSource}>
+                        <MenuRadioItem closeOnClick value="published" aria-label="Company pages">
+                          <span className="flex items-center gap-3">
+                            <span className="flex-1 py-1">
+                              <span className="block font-medium">Company pages</span>
+                              <span className="block text-xs text-muted-foreground">
+                                Shared through Stark Pages
+                              </span>
+                            </span>
+                            <MenuRadioItemIndicator />
+                          </span>
+                        </MenuRadioItem>
+                        <MenuRadioItem closeOnClick value="local" aria-label="Folder pages">
+                          <span className="flex items-center gap-3">
+                            <span className="min-w-0 flex-1 py-1">
+                              <span className="block font-medium">Folder pages</span>
+                              <span className="block max-w-64 break-words text-xs text-muted-foreground">
+                                Created in {folderName} on this Mac
+                              </span>
+                            </span>
+                            <MenuRadioItemIndicator />
+                          </span>
+                        </MenuRadioItem>
+                      </MenuRadioGroup>
+                    </MenuGroup>
+                  </MenuPopup>
+                </Menu>
               </div>
               <div className="flex items-center gap-1">
-                <Button
-                  ref={expandButton}
-                  size="sm"
-                  variant="ghost"
-                  aria-label={expanded ? "Return Pages to side panel" : "Expand Pages"}
-                  title={expanded ? "Return to side panel (Esc)" : "Expand Pages"}
-                  onClick={() => (expanded ? restorePanel() : setExpanded(true))}
-                >
-                  {expanded ? <Minimize2Icon aria-hidden /> : <Maximize2Icon aria-hidden />}
-                  {expanded ? "Side panel" : "Full view"}
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Close Pages"
-                  onClick={props.onClose}
-                >
-                  <XIcon aria-hidden />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        ref={expandButton}
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={expanded ? "Return Pages to side panel" : "Expand Pages"}
+                        onClick={() => (expanded ? restorePanel() : setExpanded(true))}
+                      >
+                        {expanded ? <Minimize2Icon aria-hidden /> : <Maximize2Icon aria-hidden />}
+                      </Button>
+                    }
+                  />
+                  <TooltipPopup side="bottom" positionMethod="fixed">
+                    {expanded ? "Show beside chat" : "Expand Pages"}
+                  </TooltipPopup>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label="Close Pages"
+                        onClick={props.onClose}
+                      >
+                        <XIcon aria-hidden />
+                      </Button>
+                    }
+                  />
+                  <TooltipPopup side="bottom" positionMethod="fixed">
+                    Close Pages
+                  </TooltipPopup>
+                </Tooltip>
               </div>
             </div>
-            {view === "local" ? (
-              <StarkPagesSidebar {...props} showHeader={false} />
-            ) : (
-              <PublishedStarkPages expanded={expanded} onExitExpanded={restorePanel} />
-            )}
+            {/* Retain visited viewers so switching the source does not discard a
+                page, its search results, or its reading position. */}
+            <div
+              hidden={view !== "local"}
+              inert={view !== "local"}
+              className={view === "local" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}
+            >
+              {visited.has("local") ? <StarkPagesSidebar {...props} showHeader={false} /> : null}
+            </div>
+            <div
+              hidden={view !== "published"}
+              inert={view !== "published"}
+              className={view === "published" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}
+            >
+              {visited.has("published") ? (
+                <PublishedStarkPages expanded={expanded} onExitExpanded={restorePanel} />
+              ) : null}
+            </div>
           </Dialog.Popup>
         </Dialog.Portal>
       ) : null}

@@ -73,12 +73,26 @@ const document: StarkPublishedPageDocument = {
 };
 const button = (label: string) => {
   const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-    (item) => item.textContent?.trim() === label,
+    (item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label,
   );
   if (!found) throw new Error(`Missing button: ${label}`);
   return found;
 };
 const click = (label: string) => act(() => button(label).click());
+const menuItem = (label: string) => {
+  const found = [...window.document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (item) => item.textContent?.trim() === label,
+  );
+  if (!found) throw new Error(`Missing menu item: ${label}`);
+  return found;
+};
+const openActions = async () => {
+  if (button("Page actions").getAttribute("aria-expanded") !== "true") await click("Page actions");
+};
+const chooseAction = async (label: string) => {
+  await openActions();
+  await act(() => menuItem(label).click());
+};
 const input = async (label: string, value: string) => {
   const element = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
   await act(() => {
@@ -128,12 +142,17 @@ beforeEach(() => {
     publishedPages: { status: async () => status, connect, disconnect, listTools, read, openPage },
     openStarkPagesLink: openLink,
   } as unknown as NonNullable<Window["desktopBridge"]>;
-  vi.spyOn(window, "setInterval").mockImplementation(((callback: () => void) => {
+  const setInterval = window.setInterval.bind(window);
+  const clearInterval = window.clearInterval.bind(window);
+  vi.spyOn(window, "setInterval").mockImplementation(((callback: () => void, delay: number) => {
+    if (delay !== 2000) return setInterval(callback, delay);
     ticks.add(callback);
     return callback;
   }) as unknown as typeof window.setInterval);
-  vi.spyOn(window, "clearInterval").mockImplementation(((callback: () => void) =>
-    ticks.delete(callback)) as unknown as typeof window.clearInterval);
+  vi.spyOn(window, "clearInterval").mockImplementation(((id: number | (() => void)) => {
+    if (typeof id === "function") ticks.delete(id);
+    else clearInterval(id);
+  }) as unknown as typeof window.clearInterval);
   container = window.document.createElement("div");
   window.document.body.append(container);
   root = createRoot(container);
@@ -163,7 +182,7 @@ it("opens browser sign-in only on a click, then presents searchable projects and
   expect(shown()).toContain("design");
   await input("Find a project", "absent");
   expect(shown()).toContain("No projects match");
-  await click("Disconnect");
+  await chooseAction("Disconnect Pages");
   expect(shown()).not.toContain("design");
   expect(shown()).toContain("Connect Pages");
 });
@@ -187,7 +206,7 @@ it("opens project home or scoped search results, follows page links and returns 
     refresh: false,
   });
   expect(shown()).toContain("A styled launch plan");
-  await click("Open in browser");
+  await chooseAction("Open in browser");
   expect(openLink).toHaveBeenCalledExactlyOnceWith(document.publicUrl);
   await click("Related page");
   expect(openPage).toHaveBeenLastCalledWith({
@@ -207,8 +226,27 @@ it("opens project home or scoped search results, follows page links and returns 
     path: "index.html",
     refresh: false,
   });
-  await click("Projects");
-  expect(shown()).toContain("Your projects");
+  await chooseAction("All projects");
+  expect(shown()).toContain("Company pages");
+});
+
+it("keeps the filtered library and its scroll position when returning through page actions", async () => {
+  status = { state: "connected", message: null };
+  await render();
+  await input("Find a project", "release");
+  const panel = container.querySelector<HTMLElement>('section[aria-label="Published Pages"]')!;
+  panel.scrollTop = 180;
+  await click("release notes12 published files");
+  await chooseAction("Open project in browser");
+  expect(openLink).toHaveBeenCalledExactlyOnceWith("https://pages.starkfuture.com/release-notes/");
+  await click("Open project home");
+  await chooseAction("All projects");
+  expect(panel.scrollTop).toBe(180);
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Find a project"]')?.value).toBe(
+    "release",
+  );
+  expect(shown()).toContain("release notes");
+  expect(shown()).not.toContain("design");
 });
 
 it("discards a late read after Back and a late search after selecting another project", async () => {
@@ -233,7 +271,7 @@ it("discards a late read after Back and a late search after selecting another pr
       }),
   );
   await searchPages();
-  await click("Projects");
+  await click("Back to library");
   await click("design4 published files");
   await act(() => finishSearch(searchResults));
   expect(shown()).not.toContain("Launch plan");
@@ -299,7 +337,7 @@ it("shows an empty account without exposing technical tool fields", async () => 
   expect(shown()).toContain("No published projects are available for this account yet.");
   expect(container.querySelector('[aria-label="Published Pages action"]')).toBeNull();
   expect(container.querySelector("form")).toBeNull();
-  await click("Refresh");
+  await chooseAction("Refresh projects");
   expect(shown()).toContain("release notes");
 });
 
@@ -313,7 +351,7 @@ it("refreshes a cached page without hiding it during loading or a failed refresh
         finish = resolve;
       }),
   );
-  await click("Refresh page");
+  await chooseAction("Refresh page");
   expect(openPage).toHaveBeenLastCalledWith({
     root: "team/release-notes",
     path: "index.html",
@@ -321,15 +359,17 @@ it("refreshes a cached page without hiding it during loading or a failed refresh
   });
   expect(shown()).toContain("A styled launch plan");
   expect(shown()).toContain("Refreshing page");
-  expect(button("Refresh page").disabled).toBe(true);
+  await openActions();
+  expect(menuItem("Refresh page").getAttribute("aria-disabled")).toBe("true");
   await act(() => finish({ ...document, source: "The refreshed plan" }));
   expect(shown()).toContain("The refreshed plan");
   expect(shown()).not.toContain("A styled launch plan");
   openPage.mockRejectedValueOnce(new Error("Refresh unavailable"));
-  await click("Refresh page");
+  await chooseAction("Refresh page");
   expect(shown()).toContain("Refresh unavailable");
   expect(shown()).toContain("The refreshed plan");
-  expect(button("Refresh page").disabled).toBe(false);
+  await openActions();
+  expect(menuItem("Refresh page").getAttribute("aria-disabled")).not.toBe("true");
 });
 
 it("keeps the selected page and search results when entering and leaving the full view", async () => {
@@ -337,12 +377,14 @@ it("keeps the selected page and search results when entering and leaving the ful
   await searchPages();
   await click("Launch planSchedule and ownerslaunch/index.html");
   const reads = read.mock.calls.length;
+  const content = button("Related page");
   await render(true);
   expect(shown()).toContain("A styled launch plan");
   await render(false);
   expect(shown()).toContain("A styled launch plan");
   expect(openPage).toHaveBeenCalledOnce();
   expect(read).toHaveBeenCalledTimes(reads);
+  expect(button("Related page")).toBe(content);
   await click("Back to pages");
   expect(shown()).toContain("2 results for “launch”");
 });

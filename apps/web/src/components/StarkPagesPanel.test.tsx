@@ -45,6 +45,12 @@ const button = (label: string) => {
   return element;
 };
 const click = (label: string) => act(() => button(label).click());
+const chooseSource = async (label: "Company pages" | "Folder pages") => {
+  await click("Choose Pages source");
+  const item = document.querySelector<HTMLElement>(`[role="menuitemradio"][aria-label="${label}"]`);
+  if (!item) throw new Error(`Missing source: ${label}`);
+  await act(() => item.click());
+};
 const escape = () =>
   act(() => {
     document.activeElement!.dispatchEvent(
@@ -58,6 +64,7 @@ beforeEach(() => {
   );
   vi.stubGlobal("cancelAnimationFrame", clearTimeout);
   close.mockReset();
+  window.localStorage.clear();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -70,7 +77,8 @@ afterEach(async () => {
 
 it("preserves the workspace iframe and scroll state through full view and responsive docking", async () => {
   await render();
-  const frame = container.querySelector("iframe")!;
+  await chooseSource("Folder pages");
+  const frame = container.querySelector('iframe[title="Workspace page"]')! as HTMLIFrameElement;
   const frameWindow = frame.contentWindow;
   frame.contentDocument!.body.innerHTML = '<main style="height:2000px">A workspace page</main>';
   frame.contentDocument!.documentElement.scrollTop = 280;
@@ -92,11 +100,10 @@ it("preserves the workspace iframe and scroll state through full view and respon
 
 it("keeps the published selection and restores the panel on Escape instead of closing Pages", async () => {
   await render();
-  await click("Published");
   await click("Read project home");
   const frame = container.querySelector("iframe")!;
   await click("Expand Pages");
-  button("Return Pages to side panel").focus();
+  await act(() => container.querySelector<HTMLElement>("[data-pages-expanded]")!.focus());
   await escape();
   expect(container.querySelector('[data-pages-expanded="true"]')).toBeNull();
   expect(close).not.toHaveBeenCalled();
@@ -104,6 +111,45 @@ it("keeps the published selection and restores the panel on Escape instead of cl
   expect(document.activeElement).toBe(button("Expand Pages"));
   await render(false);
   expect(container.querySelector('iframe[title="Selected published page"]')).toBe(frame);
+  await act(() => container.querySelector<HTMLElement>("[data-pages-expanded]")!.focus());
   await escape();
   expect(close).toHaveBeenCalledOnce();
+});
+
+it("keeps both visited sources and their reading positions, and remembers the selected source", async () => {
+  await render();
+  await click("Read project home");
+  const published = container.querySelector<HTMLIFrameElement>(
+    'iframe[title="Selected published page"]',
+  )!;
+  published.contentDocument!.documentElement.scrollTop = 180;
+  await chooseSource("Folder pages");
+  const local = container.querySelector<HTMLIFrameElement>('iframe[title="Workspace page"]')!;
+  local.contentDocument!.documentElement.scrollTop = 90;
+  expect(published.closest("[hidden]")).not.toBeNull();
+  await chooseSource("Company pages");
+  expect(container.querySelector('iframe[title="Selected published page"]')).toBe(published);
+  expect(published.contentDocument!.documentElement.scrollTop).toBe(180);
+  expect(published.closest("[hidden]")).toBeNull();
+  await chooseSource("Folder pages");
+  expect(container.querySelector('iframe[title="Workspace page"]')).toBe(local);
+  expect(local.contentDocument!.documentElement.scrollTop).toBe(90);
+  await act(() => root.render(null));
+  await render();
+  expect(button("Choose Pages source").textContent).toBe("Folder pages");
+  expect(container.querySelector('iframe[title="Workspace page"]')).not.toBeNull();
+  expect(container.querySelector('iframe[title="Selected published page"]')).toBeNull();
+});
+
+it("dismisses the source menu with Escape before leaving full view", async () => {
+  await render();
+  await click("Expand Pages");
+  await click("Choose Pages source");
+  await act(() => document.querySelector<HTMLElement>('[role="menuitemradio"]')!.focus());
+  await escape();
+  expect(container.querySelector('[data-pages-expanded="true"]')).not.toBeNull();
+  expect(close).not.toHaveBeenCalled();
+  await act(() => container.querySelector<HTMLElement>("[data-pages-expanded]")!.focus());
+  await escape();
+  expect(container.querySelector('[data-pages-expanded="true"]')).toBeNull();
 });

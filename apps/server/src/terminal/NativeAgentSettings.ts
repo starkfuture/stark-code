@@ -4,6 +4,7 @@ import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
 import { expandHomePath } from "@starkfuture/provider-core/server/pathExpansion";
+import { parse as parseToml, type TomlValue } from "smol-toml";
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -25,6 +26,61 @@ export function mergeNativeSettings(
   next: Record<string, unknown>,
 ): Record<string, unknown> {
   return mergeSettingsObjects(base, next, []);
+}
+
+function inlineToml(value: TomlValue): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "boolean" || typeof value === "number" || typeof value === "bigint")
+    return String(value);
+  if (Array.isArray(value)) return `[${value.map(inlineToml).join(", ")}]`;
+  if (value instanceof Date) throw new Error("Dates are not supported in hook settings.");
+  return `{ ${Object.entries(value)
+    .map(([key, entry]) => `${JSON.stringify(key)} = ${inlineToml(entry)}`)
+    .join(", ")} }`;
+}
+
+/** Session hook layers add to config-file hooks; never use or replace `notify`. */
+export function prepareNativeCodexCaptureArgs(args: readonly string[], command: string): string[] {
+  const kept: string[] = [];
+  let configured: Record<string, unknown> = {};
+  let prompt: readonly string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    if (arg === "--") {
+      prompt = args.slice(index);
+      break;
+    }
+    const separate = arg === "-c" || arg === "--config";
+    const attached = arg.startsWith("--config=")
+      ? arg.slice(9)
+      : arg.startsWith("-c") && arg.length > 2
+        ? arg.slice(2).replace(/^=/, "")
+        : null;
+    const value = separate ? args[++index] : attached;
+    if (value === undefined) throw new Error("Codex config requires a value.");
+    if (value !== null) {
+      const key = value
+        .slice(0, value.indexOf("="))
+        .trim()
+        .split(".")
+        .map((part) => part.trim().replaceAll('"', "").replaceAll("'", ""))
+        .join(".");
+      if (key === "hooks" || key.startsWith("hooks.")) {
+        const decoded = parseToml(value);
+        if (!isObject(decoded.hooks)) throw new Error("Codex hooks must contain a TOML table.");
+        if (decoded.hooks.Stop !== undefined && !Array.isArray(decoded.hooks.Stop))
+          throw new Error("Codex Stop hooks must contain an array of matcher groups.");
+        configured = mergeNativeSettings(configured, { hooks: decoded.hooks });
+        continue;
+      }
+    }
+    kept.push(arg);
+    if (separate) kept.push(value!);
+  }
+  configured = mergeNativeSettings(configured, {
+    hooks: { Stop: [{ hooks: [{ type: "command", command, async: true, timeout: 5 }] }] },
+  });
+  return [...kept, "-c", `hooks=${inlineToml(configured.hooks as TomlValue)}`, ...prompt];
 }
 
 function mergeSettingsObjects(

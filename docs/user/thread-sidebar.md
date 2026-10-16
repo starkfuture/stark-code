@@ -51,14 +51,16 @@ excerpt of recent conversation text and starts in Plan with Manual permissions.
 It shares the current folder; it does not create a separate worktree. Terminal
 history is never copied, so paste any terminal context you want it to use.
 
-Use **Workspace → Format** to have a separate agent turn a completed answer into
-an HTML/CSS response. Review the source text, add any formatting instructions and
-start it. Its answer and tool approvals appear in the panel. Nothing is added to
-the main conversation or published as a Stark Page.
+Open **Workspace → Make visual** to read a completed reply alongside your conversation.
+Select the reply, then choose **Make visual** for an optional summary, small table,
+or flowchart above the original answer. It uses one bounded Sonnet request with
+only that reply; it does not receive your conversation, tools, plugins or files.
+Reading alone uses no tokens. Repeat requests reuse the saved result. Very long
+replies need a shorter pasted excerpt, and failed requests are not retried automatically.
 
-Both kinds of side work are saved as ordinary chats. The panel remembers their
-association on this device; they also remain available in the chat sidebar.
-Open a side chat to answer structured questions or use its full controls.
+Side chats are saved as ordinary chats. Earlier formatting chats remain available
+from **Make visual → Earlier formatting chats** and the chat sidebar. Open a side
+chat to answer structured questions or use its full controls.
 
 **Workspace → Agents** groups the current folder's chats by worktree, shows
 running agents, pending approvals and active terminals, and lets you open chats

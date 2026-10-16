@@ -10,6 +10,7 @@ import { tokenizeCliArgs } from "@starkfuture/shared/cliArgs";
 import { expandHomePath } from "@starkfuture/provider-core/server/pathExpansion";
 import * as Schema from "effect/Schema";
 import { supervisedNativeCodexArgs } from "@starkfuture/shared/nativeCodexLaunch";
+import { prepareNativeCodexCaptureArgs } from "./NativeAgentSettings.ts";
 export { NativeAgentLaunchRefused } from "@starkfuture/shared/nativeCodexLaunch";
 
 const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
@@ -35,6 +36,7 @@ export function nativeAgentLaunch(input: {
   readonly platform?: NodeJS.Platform;
   readonly nodeExecutable?: string;
   readonly workbenchRoot?: string;
+  readonly replyCaptureCommand?: string;
 }): { shell: string; args: string[] } {
   const settings =
     input.driver === "codex"
@@ -93,6 +95,22 @@ export function nativeAgentLaunch(input: {
       JSON.stringify({
         disableAllHooks: false,
         hooks: {
+          ...(input.replyCaptureCommand
+            ? {
+                Stop: [
+                  {
+                    hooks: [
+                      {
+                        type: "command",
+                        command: input.replyCaptureCommand,
+                        async: true,
+                        timeout: 5,
+                      },
+                    ],
+                  },
+                ],
+              }
+            : {}),
           PreToolUse: [
             {
               // Custom agent definitions can override a safe parent's mode.
@@ -125,6 +143,9 @@ export function nativeAgentLaunch(input: {
   }
   if (input.driver === "codex") args.push(...CODEX_PRIVACY_ARGS);
   if (input.driver !== "codex" || !BRAND.requireApprovalsByDefault) args.push(...promptArgs);
+  if (input.driver === "codex" && input.replyCaptureCommand) {
+    args = prepareNativeCodexCaptureArgs(args, input.replyCaptureCommand);
+  }
   return {
     shell: expandHomePath(settings.binaryPath, input.home),
     args,

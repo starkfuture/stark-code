@@ -37,6 +37,10 @@ export function createTerminalEnvironmentAtoms<R, E>(
   }) => JSON.stringify([environmentId, input.threadId, input.terminalId ?? null]);
   const lifecycleConcurrency = { mode: "serial" as const, key: terminalThreadKey };
   return {
+    nativeReplies: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:terminal:native-replies",
+      tag: WS_METHODS.terminalNativeReplies,
+    }),
     observe: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:terminal:observe",
       subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.terminalObserve>) =>

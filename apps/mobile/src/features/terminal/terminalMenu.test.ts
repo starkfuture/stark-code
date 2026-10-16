@@ -58,6 +58,7 @@ function makeKnownSession(input: {
             updatedAt: input.updatedAt ?? "2026-04-15T20:00:00.000Z",
           }
         : null,
+      nativeReplies: [],
       output: EMPTY_TERMINAL_BUFFER_STATE.output,
       status: input.status,
       error: null,

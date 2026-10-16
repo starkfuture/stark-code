@@ -4,6 +4,7 @@ import {
   DEFAULT_TERMINAL_ID,
   type TerminalAttachStreamEvent,
   type TerminalEvent,
+  type NativeAgentReply,
   type TerminalMetadataStreamEvent,
   type TerminalOpenInput,
   type TerminalRestartInput,
@@ -16,6 +17,7 @@ import {
 import * as HostProcess from "@starkfuture/shared/HostProcess";
 import * as Data from "effect/Data";
 import * as Clock from "effect/Clock";
+import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -265,7 +267,7 @@ const createManager = (
 ): Effect.Effect<
   ManagerFixture,
   PlatformError.PlatformError,
-  FileSystem.FileSystem | Path.Path | Scope.Scope | ProcessRunner.ProcessRunner
+  FileSystem.FileSystem | Path.Path | Scope.Scope | ProcessRunner.ProcessRunner | Crypto.Crypto
 > =>
   Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
     Effect.gen(function* () {
@@ -323,6 +325,50 @@ const createManager = (
       };
     }),
   );
+
+const createNativeReplyManager = () =>
+  Effect.gen(function* () {
+    const providerInstanceId = ProviderInstanceId.make("claude_stream_capture");
+    const fixture = yield* createManager(5, {
+      resolveProviderInstanceEnvironment: () => Effect.succeed({}),
+      resolveAgentShellLaunch: (_id, _cwd, capture) =>
+        Effect.gen(function* () {
+          const binding = yield* capture!
+            .bind("claude")
+            .pipe(
+              Effect.mapError(
+                (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
+              ),
+            );
+          return { shell: "/installed/claude", args: [], captureEnv: binding.env };
+        }),
+    });
+    const input = openInput({ providerInstanceId, agentShell: true });
+    yield* fixture.manager.open(input);
+    const post = (number: number, text: string) =>
+      Effect.promise(async () => {
+        const env = fixture.ptyAdapter.spawnInputs.at(-1)!.env;
+        // @effect-diagnostics-next-line globalFetchInEffect:off -- Deliver a real local Stop hook into the manager's authenticated endpoint.
+        const response = await fetch(env.STARK_NATIVE_REPLY_ENDPOINT!, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${env.STARK_NATIVE_REPLY_TOKEN}`,
+            "content-type": "application/json",
+          },
+          body: encodeUnknownJson({
+            deliveryId: `11111111-1111-4111-8111-${String(number).padStart(12, "0")}`,
+            hook_event_name: "Stop",
+            session_id: "claude-stream-session",
+            turn_id: null,
+            last_assistant_message: text,
+            stop_hook_active: false,
+          }),
+        });
+        await response.text();
+        return response.status;
+      });
+    return { ...fixture, input, post };
+  });
 
 const layerWithHostPlatform = (platform: NodeJS.Platform) =>
   Layer.succeed(HostProcess.Platform, platform);
@@ -2428,6 +2474,252 @@ it.layer(
         providerInstanceId: "codex_unknown",
       });
     }).pipe(Effect.provide(ServerSettings.ServerSettingsService.layerTest())),
+  );
+
+  it.effect("publishes native replies in terminal snapshots and restores them when reopening", () =>
+    Effect.gen(function* () {
+      const providerInstanceId = ProviderInstanceId.make("claude_capture");
+      const { manager, ptyAdapter, getEvents } = yield* createManager(5, {
+        resolveProviderInstanceEnvironment: () => Effect.succeed({}),
+        resolveAgentShellLaunch: (id, _cwd, capture) =>
+          Effect.gen(function* () {
+            const binding = yield* capture!.bind("claude").pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TerminalProviderEnvironmentError({
+                    providerInstanceId: ProviderInstanceId.make(id),
+                    cause,
+                  }),
+              ),
+            );
+            return { shell: "/installed/claude", args: [], captureEnv: binding.env };
+          }),
+      });
+      const input = openInput({ providerInstanceId, agentShell: true });
+      yield* manager.open(input);
+      const env = ptyAdapter.spawnInputs[0]!.env;
+      const result = yield* Effect.promise(async () => {
+        // @effect-diagnostics-next-line globalFetchInEffect:off -- Exercise the real local hook delivery through the manager's owned endpoint.
+        const response = await fetch(env.STARK_NATIVE_REPLY_ENDPOINT!, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${env.STARK_NATIVE_REPLY_TOKEN}`,
+            "content-type": "application/json",
+          },
+          body: encodeUnknownJson({
+            deliveryId: "11111111-1111-4111-8111-111111111111",
+            hook_event_name: "Stop",
+            session_id: "claude-session",
+            turn_id: null,
+            last_assistant_message: "Native completed reply",
+            stop_hook_active: false,
+          }),
+        });
+        await response.text();
+        return response.status;
+      });
+      expect(result).toBe(200);
+      const event = (yield* getEvents).find((event) => event.type === "nativeReply");
+      expect(event).toMatchObject({
+        type: "nativeReply",
+        threadId: input.threadId,
+        terminalId: input.terminalId,
+        reply: { text: "Native completed reply", provider: "claude" },
+      });
+      const same = yield* manager.open(input);
+      expect(same.nativeReplies).toHaveLength(1);
+      yield* manager.close({ threadId: input.threadId, terminalId: input.terminalId });
+      expect(yield* manager.listNativeReplies({ threadId: input.threadId })).toHaveLength(1);
+      const reopened = yield* manager.open(input);
+      expect(reopened.nativeReplies?.[0]?.text).toBe("Native completed reply");
+      yield* manager.close({ threadId: input.threadId, deleteHistory: true });
+      expect(yield* manager.listNativeReplies({ threadId: input.threadId })).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "streams complete native reply windows across initialization, live updates and unsubscribe",
+    () =>
+      Effect.gen(function* () {
+        const { manager, input, post } = yield* createNativeReplyManager();
+        expect(yield* post(1, "Before opening the reader")).toBe(200);
+        const initialSeen = yield* Deferred.make<void>();
+        const releaseInitial = yield* Deferred.make<void>();
+        const snapshots: string[][] = [];
+        const observer = yield* manager
+          .observeNativeReplies(
+            { threadId: input.threadId, terminalId: input.terminalId },
+            (rows) =>
+              Effect.gen(function* () {
+                snapshots.push(rows.map((reply) => reply.text));
+                if (snapshots.length === 1) {
+                  yield* Deferred.succeed(initialSeen, undefined);
+                  yield* Deferred.await(releaseInitial);
+                }
+              }),
+          )
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(initialSeen);
+        // Both completions arrive while the initial snapshot is still being sent.
+        // The server coalesces them into the latest complete, bounded window.
+        expect(yield* post(2, "During the initial snapshot")).toBe(200);
+        expect(yield* post(3, "Another completion during initialization")).toBe(200);
+        yield* Deferred.succeed(releaseInitial, undefined);
+        const unsubscribe = yield* Fiber.join(observer);
+        yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+        expect(snapshots).toEqual([
+          ["Before opening the reader"],
+          [
+            "Before opening the reader",
+            "During the initial snapshot",
+            "Another completion during initialization",
+          ],
+        ]);
+        expect(yield* post(3, "Another completion during initialization")).toBe(200);
+        expect(snapshots).toHaveLength(2);
+        expect(yield* post(4, "Live completion")).toBe(200);
+        expect(snapshots.at(-1)).toHaveLength(4);
+        unsubscribe();
+        expect(yield* post(5, "After unsubscribe")).toBe(200);
+        expect(snapshots).toHaveLength(3);
+        yield* manager.close({ threadId: input.threadId, terminalId: input.terminalId });
+        const reopened: string[][] = [];
+        const stop = yield* manager.observeNativeReplies({ threadId: input.threadId }, (rows) =>
+          Effect.sync(() => reopened.push(rows.map((reply) => reply.text))),
+        );
+        stop();
+        expect(reopened).toHaveLength(1);
+        expect(reopened[0]).toHaveLength(5);
+        expect(reopened[0]?.at(-1)).toBe("After unsubscribe");
+        const afterReset: string[][] = [];
+        const stopReset = yield* manager.observeNativeReplies(
+          { threadId: input.threadId },
+          (rows) => Effect.sync(() => afterReset.push(rows.map((reply) => reply.text))),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(stopReset));
+        yield* manager.close({ threadId: input.threadId, deleteHistory: true });
+        yield* manager.open(input);
+        expect(yield* post(6, "After deleting history")).toBe(200);
+        expect(afterReset.at(-1)).toEqual(["After deleting history"]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("native reply subscriptions retain the same bounded window as persisted history", () =>
+    Effect.gen(function* () {
+      const { manager, input, post } = yield* createNativeReplyManager();
+      const snapshots: ReadonlyArray<NativeAgentReply>[] = [];
+      const stop = yield* manager.observeNativeReplies({ threadId: input.threadId }, (rows) =>
+        Effect.sync(() => snapshots.push(rows)),
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(stop));
+      expect(snapshots).toEqual([[]]);
+      for (let index = 1; index <= 18; index++) {
+        expect(yield* post(index, `${index}:` + "x".repeat(130_000))).toBe(200);
+      }
+      const current = snapshots.at(-1)!;
+      expect(current.length).toBeLessThan(18);
+      expect(current.at(-1)?.text.startsWith("18:")).toBe(true);
+      expect(Buffer.byteLength(encodeUnknownJson(current))).toBeLessThanOrEqual(2_097_152);
+      expect(current).toEqual(yield* manager.listNativeReplies({ threadId: input.threadId }));
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("failed native reply initialization removes its listener before a later capture", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { manager, input, post, logsDir } = yield* createNativeReplyManager();
+      expect(yield* post(1, "Before a read failure")).toBe(200);
+      const directory = path.join(logsDir, "native-replies");
+      const file = (yield* fs.readDirectory(directory)).find((name) => name.endsWith(".json"))!;
+      const filename = path.join(directory, file);
+      const original = yield* fs.readFileString(filename);
+      yield* fs.writeFileString(filename, "{broken");
+      let calls = 0;
+      const error = yield* manager
+        .observeNativeReplies({ threadId: input.threadId }, () =>
+          Effect.sync(() => {
+            calls += 1;
+          }),
+        )
+        .pipe(Effect.flip);
+      expect(error._tag).toBe("TerminalHistoryError");
+      yield* fs.writeFileString(filename, original);
+      expect(yield* post(2, "After repairing local history")).toBe(200);
+      expect(calls).toBe(0);
+      expect(yield* manager.listNativeReplies({ threadId: input.threadId })).toHaveLength(2);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("expires capture credentials after failed launch and allows a fresh launch", () =>
+    Effect.gen(function* () {
+      const providerInstanceId = ProviderInstanceId.make("claude_failed_capture");
+      let first = true;
+      const clock = yield* Clock.Clock;
+      let captureTime = yield* Clock.currentTimeMillis;
+      let endpoint = "",
+        token = "";
+      const { manager } = yield* createManager(5, {
+        resolveProviderInstanceEnvironment: () => Effect.succeed({}),
+        resolveAgentShellLaunch: (_id, _cwd, capture) =>
+          Effect.gen(function* () {
+            const binding = yield* capture!
+              .bind("claude")
+              .pipe(
+                Effect.mapError(
+                  (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
+                ),
+              );
+            if (first) {
+              endpoint = binding.env.STARK_NATIVE_REPLY_ENDPOINT!;
+              token = binding.env.STARK_NATIVE_REPLY_TOKEN!;
+              first = false;
+              return yield* new TerminalProviderEnvironmentError({
+                providerInstanceId,
+                cause: new Error("Invalid launch settings"),
+              });
+            }
+            return { shell: "/installed/claude", args: [], captureEnv: binding.env };
+          }),
+      }).pipe(
+        Effect.provideService(Clock.Clock, {
+          ...clock,
+          currentTimeMillis: Effect.sync(() => captureTime),
+          currentTimeMillisUnsafe: () => captureTime,
+          currentTimeNanos: clock.currentTimeNanos,
+          currentTimeNanosUnsafe: () => clock.currentTimeNanosUnsafe(),
+          monotonicTimeNanos: clock.monotonicTimeNanos,
+          monotonicTimeNanosUnsafe: () => clock.monotonicTimeNanosUnsafe(),
+          sleep: (duration) => clock.sleep(duration),
+        }),
+      );
+      const input = openInput({ providerInstanceId, agentShell: true });
+      expect((yield* manager.open(input)).status).toBe("error");
+      captureTime += 61_000;
+      const status = yield* Effect.promise(async () => {
+        // @effect-diagnostics-next-line globalFetchInEffect:off -- Verify failed-launch credentials expire on the actual endpoint.
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          body: encodeUnknownJson({
+            deliveryId: "11111111-1111-4111-8111-111111111111",
+            hook_event_name: "Stop",
+            session_id: "failed-session",
+            turn_id: null,
+            last_assistant_message: "Late",
+            stop_hook_active: false,
+          }),
+        });
+        await response.text();
+        return response.status;
+      });
+      expect(status).toBe(403);
+      expect((yield* manager.open(input)).status).toBe("running");
+      expect(yield* manager.listNativeReplies({ threadId: input.threadId })).toEqual([]);
+    }).pipe(Effect.scoped),
   );
 
   it.effect(

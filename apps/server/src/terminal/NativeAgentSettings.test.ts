@@ -4,9 +4,89 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { mergeNativeSettings, prepareNativeClaudeSettings } from "./NativeAgentSettings.ts";
+import {
+  mergeNativeSettings,
+  prepareNativeClaudeSettings,
+  prepareNativeCodexCaptureArgs,
+} from "./NativeAgentSettings.ts";
+import { parse as parseToml } from "smol-toml";
+
+describe("native Codex capture settings", () => {
+  it("preserves notify and other CLI config while combining inline Stop hooks", () => {
+    const notify = 'notify=["node", "computer-use.js"]';
+    const result = prepareNativeCodexCaptureArgs(
+      [
+        "-c",
+        notify,
+        "--config",
+        'hooks={ Stop=[{ hooks=[{ type="command", command="existing" }] }], PreToolUse=[{ matcher="Bash", hooks=[{type="command",command="guard"}] }] }',
+        "--config=hooks.Stop=[{ hooks=[{type='command',command='second'}] }]",
+        "--config",
+        'model_reasoning_effort="high"',
+      ],
+      "ELECTRON_RUN_AS_NODE=1 '/Applications/Stark Code' '/private/capture.cjs'",
+    );
+    expect(result.slice(0, 4)).toEqual(["-c", notify, "--config", 'model_reasoning_effort="high"']);
+    const settings = parseToml(result.at(-1)!);
+    expect(settings).toMatchObject({
+      hooks: {
+        Stop: [
+          { hooks: [{ command: "existing" }] },
+          { hooks: [{ command: "second" }] },
+          { hooks: [{ type: "command", async: true, timeout: 5 }] },
+        ],
+        PreToolUse: [{ hooks: [{ command: "guard" }] }],
+      },
+    });
+    expect(result).not.toContain("--dangerously-bypass-hook-trust");
+  });
+
+  it("recognizes quoted TOML hook keys and leaves prompt-shaped options untouched", () => {
+    const prompt = ["--", "--config", "hooks.Stop=not a setting"];
+    const result = prepareNativeCodexCaptureArgs(
+      ["-c", '"hooks"."Stop"=[{hooks=[{type="command",command="kept"}]}]', ...prompt],
+      "capture",
+    );
+    expect(result.slice(-3)).toEqual(prompt);
+    expect(parseToml(result[1]!)).toMatchObject({
+      hooks: { Stop: [{ hooks: [{ command: "kept" }] }, { hooks: [{ command: "capture" }] }] },
+    });
+  });
+
+  it("refuses malformed custom hooks rather than silently replacing them", () => {
+    expect(() => prepareNativeCodexCaptureArgs(["-c", "hooks=broken"], "capture")).toThrow();
+  });
+});
 
 describe("native Claude settings", () => {
+  it("keeps a user's Stop and publishing hooks alongside asynchronous reply capture", () => {
+    const launch = nativeAgentLaunch({
+      driver: "claudeAgent",
+      config: {},
+      home: "/tmp",
+      replyCaptureCommand: "capture",
+    });
+    const app = JSON.parse(launch.args.at(-1)!);
+    const merged = mergeNativeSettings(
+      {
+        hooks: {
+          Stop: [{ hooks: [{ type: "command", command: "existing-stop" }] }],
+          PreToolUse: [
+            { matcher: "pages_upload", hooks: [{ type: "command", command: "publish-guard" }] },
+          ],
+        },
+      },
+      app,
+    );
+    expect(merged.hooks).toMatchObject({
+      Stop: [
+        { hooks: [{ command: "existing-stop" }] },
+        { hooks: [{ command: "capture", async: true }] },
+      ],
+      PreToolUse: [{ matcher: "pages_upload" }, { matcher: "*" }],
+    });
+    expect(app.permissions.disableBypassPermissionsMode).toBe("disable");
+  });
   it("keeps configured hooks and permission rules while locking bypass mode", () => {
     const hooks = {
       PreToolUse: [

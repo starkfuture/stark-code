@@ -12,6 +12,13 @@ becomes an attachment when inserting it would exceed the message limit. On a
 hardware keyboard, use `Cmd+Shift+V` on Apple devices or `Ctrl+Shift+V` elsewhere
 to keep a large paste editable in the composer instead.
 
+## Reading replies
+
+Assistant replies use a readable column with clearer headings and spacing. Adjust
+text size in **Settings → Appearance**. Long replies with at least three headings
+or standalone bold section labels gain a contents list after they finish.
+Code, tables and diagrams keep the space they need.
+
 ## Formatting
 
 The composer writes Markdown and shows it styled as you type. Markers such as

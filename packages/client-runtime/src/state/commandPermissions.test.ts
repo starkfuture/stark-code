@@ -59,6 +59,25 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("requires a destination agent grant before spending tokens on reply visuals", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const visuals = createCommandPermissions(runtime, WS_METHODS.responseVisualsFormat);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(visuals.permissionAtom(env))).toBe(false);
+        expect((yield* visuals.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(visuals.permissionAtom(env))).toBe(true);
+        yield* visuals.authorize(registry, env);
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(visuals.permissionAtom(other))).toBe(false);
+      }),
+    ),
+  );
+
   it.effect("requires the destination settings grant to run storage cleanup", () =>
     Effect.scoped(
       Effect.gen(function* () {

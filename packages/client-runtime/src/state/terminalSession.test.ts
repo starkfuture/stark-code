@@ -36,6 +36,72 @@ const BASE_SNAPSHOT: TerminalSessionSnapshot = {
 };
 
 describe("terminal session reducers", () => {
+  it("keeps captured replies across output clear and duplicate delivery without changing terminal bytes", () => {
+    const reply = {
+      id: "reply-1",
+      threadId: TARGET.threadId,
+      terminalId: TARGET.terminalId,
+      provider: "claude" as const,
+      sessionId: "session-1",
+      turnId: null,
+      text: "Original **answer**",
+      capturedAt: "2026-10-16T00:00:00.000Z",
+      sequence: 1,
+    };
+    const snapshot = applyTerminalAttachStreamEvent(EMPTY_TERMINAL_BUFFER_STATE, {
+      type: "snapshot",
+      snapshot: BASE_SNAPSHOT,
+    });
+    const event = {
+      type: "nativeReply" as const,
+      threadId: TARGET.threadId,
+      terminalId: TARGET.terminalId,
+      reply,
+    };
+    const first = applyTerminalAttachStreamEvent(snapshot, event);
+    const duplicate = applyTerminalAttachStreamEvent(first, event);
+    const cleared = applyTerminalAttachStreamEvent(duplicate, {
+      type: "cleared",
+      threadId: TARGET.threadId,
+      terminalId: TARGET.terminalId,
+    });
+    expect(terminalOutputText(first.output)).toBe("hello");
+    expect(cleared.nativeReplies).toEqual([reply]);
+    expect(combineTerminalSessionState(null, cleared).nativeReplies).toEqual([reply]);
+    const restored = applyTerminalAttachStreamEvent(EMPTY_TERMINAL_BUFFER_STATE, {
+      type: "snapshot",
+      snapshot: { ...BASE_SNAPSHOT, nativeReplies: [reply] },
+    });
+    expect(restored.nativeReplies).toEqual([reply]);
+  });
+
+  it("bounds live completed replies by bytes as well as count", () => {
+    let state = EMPTY_TERMINAL_BUFFER_STATE;
+    for (let index = 0; index < 30; index++) {
+      state = applyTerminalAttachStreamEvent(state, {
+        type: "nativeReply",
+        threadId: TARGET.threadId,
+        terminalId: TARGET.terminalId,
+        reply: {
+          id: `reply-${index}`,
+          threadId: TARGET.threadId,
+          terminalId: TARGET.terminalId,
+          provider: "codex",
+          sessionId: "session",
+          turnId: `turn-${index}`,
+          text: "x".repeat(120_000),
+          capturedAt: "2026-10-16T00:00:00.000Z",
+          sequence: index + 1,
+        },
+      });
+    }
+    expect(new TextEncoder().encode(JSON.stringify(state.nativeReplies)).byteLength).toBeLessThan(
+      2 * 1024 * 1024,
+    );
+    expect(state.nativeReplies.at(-1)?.id).toBe("reply-29");
+    expect(state.nativeReplies.length).toBeLessThan(30);
+  });
+
   it("prefers live attach status over stale metadata after the attach stream starts", () => {
     const summary = applyTerminalMetadataStreamEvent([], {
       type: "snapshot",

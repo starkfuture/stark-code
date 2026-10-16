@@ -106,6 +106,27 @@ export type TerminalCloseInput = typeof TerminalCloseInput.Type;
 export const TerminalSessionStatus = Schema.Literals(["starting", "running", "exited", "error"]);
 export type TerminalSessionStatus = typeof TerminalSessionStatus.Type;
 
+/** A completed native CLI reply, captured by its Stop hook (not streamed output). */
+export const NativeAgentReply = Schema.Struct({
+  id: Schema.String.check(Schema.isNonEmpty()),
+  threadId: TrimmedNonEmptyStringSchema,
+  terminalId: TerminalIdSchema,
+  provider: Schema.Literals(["claude", "codex"]),
+  sessionId: Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(256)),
+  turnId: Schema.NullOr(Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(256))),
+  text: Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(131_072)),
+  capturedAt: Schema.String,
+  /** Durable capture order. Async hooks can arrive out of provider turn order. */
+  sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+});
+export type NativeAgentReply = typeof NativeAgentReply.Type;
+
+export const TerminalNativeRepliesInput = Schema.Struct({
+  ...TerminalThreadInput.fields,
+  terminalId: Schema.optional(TerminalIdSchema),
+});
+export type TerminalNativeRepliesInput = typeof TerminalNativeRepliesInput.Type;
+
 export const TerminalSessionSnapshot = Schema.Struct({
   threadId: Schema.String.check(Schema.isNonEmpty()),
   terminalId: Schema.String.check(Schema.isNonEmpty()),
@@ -119,6 +140,7 @@ export const TerminalSessionSnapshot = Schema.Struct({
   /** Server-computed display title (idle shell vs subprocess command). */
   label: Schema.String.check(Schema.isMaxLength(128)),
   agentShell: Schema.optional(Schema.Boolean),
+  nativeReplies: Schema.optional(Schema.Array(NativeAgentReply)),
   updatedAt: Schema.String,
   sequence: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 });
@@ -182,6 +204,12 @@ const TerminalOutputEvent = Schema.Struct({
   data: Schema.String,
 });
 
+const TerminalNativeReplyEvent = Schema.Struct({
+  ...TerminalEventBaseSchema.fields,
+  type: Schema.Literal("nativeReply"),
+  reply: NativeAgentReply,
+});
+
 const TerminalExitedEvent = Schema.Struct({
   ...TerminalEventBaseSchema.fields,
   type: Schema.Literal("exited"),
@@ -219,6 +247,7 @@ const TerminalActivityEvent = Schema.Struct({
 });
 
 export const TerminalEvent = Schema.Union([
+  TerminalNativeReplyEvent,
   TerminalStartedEvent,
   TerminalOutputEvent,
   TerminalExitedEvent,
@@ -236,6 +265,7 @@ const TerminalAttachSnapshotEvent = Schema.Struct({
 });
 
 export const TerminalAttachStreamEvent = Schema.Union([
+  TerminalNativeReplyEvent,
   TerminalAttachSnapshotEvent,
   TerminalOutputEvent,
   TerminalExitedEvent,

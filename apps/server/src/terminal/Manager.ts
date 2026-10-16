@@ -12,6 +12,7 @@ import {
   type ShellCandidate,
 } from "./shellCandidates.ts";
 import { prepareNativeClaudeSettings } from "./NativeAgentSettings.ts";
+import * as NativeReplyCapture from "./NativeReplyCapture.ts";
 import {
   claimAgentWorkspace,
   releaseAgentWorkspace,
@@ -56,6 +57,8 @@ import {
   type TerminalSessionStatus,
   type TerminalSummary,
   type TerminalWriteInput,
+  type NativeAgentReply,
+  type TerminalNativeRepliesInput,
   ClaudeSettings,
   CodexSettings,
   ProviderInstanceId,
@@ -197,6 +200,15 @@ export class TerminalManager extends Context.Service<
       listener: (event: TerminalAttachStreamEvent) => Effect.Effect<void>,
     ) => Effect.Effect<() => void, TerminalError>;
 
+    readonly listNativeReplies: (
+      input: TerminalNativeRepliesInput,
+    ) => Effect.Effect<ReadonlyArray<NativeAgentReply>, TerminalHistoryError>;
+
+    readonly observeNativeReplies: (
+      input: TerminalNativeRepliesInput,
+      listener: (replies: ReadonlyArray<NativeAgentReply>) => Effect.Effect<void>,
+    ) => Effect.Effect<() => void, TerminalHistoryError>;
+
     /**
      * Write input bytes to a terminal session.
      */
@@ -323,6 +335,7 @@ interface TerminalSessionState {
   childCommandLabel: string | null;
   runtimeEnv: Record<string, string> | null;
   agentShell: boolean;
+  nativeReplies: ReadonlyArray<NativeAgentReply>;
   readonly workspaceOwnerToken: symbol;
 }
 
@@ -407,6 +420,7 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     exitSignal: session.exitSignal,
     label: terminalWireLabel(session),
     ...(session.agentShell ? { agentShell: true } : {}),
+    nativeReplies: session.nativeReplies,
     updatedAt: session.updatedAt,
     sequence: session.eventSequence,
   };
@@ -440,6 +454,7 @@ function shouldPublishTerminalMetadataEvent(event: TerminalEvent): boolean {
     case "activity":
       return true;
     case "output":
+    case "nativeReply":
     case "cleared":
       return false;
   }
@@ -453,6 +468,7 @@ function terminalEventToAttachEvent(event: TerminalEvent): TerminalAttachStreamE
         snapshot: event.snapshot,
       };
     case "output":
+    case "nativeReply":
     case "exited":
     case "closed":
     case "error":
@@ -1192,8 +1208,16 @@ interface TerminalManagerOptions {
   resolveAgentShellLaunch?: (
     providerInstanceId: string,
     cwd?: string,
+    capture?: {
+      readonly bind: (
+        provider: "claude" | "codex",
+      ) => Effect.Effect<
+        NativeReplyCapture.NativeReplyLaunch,
+        NativeReplyCapture.NativeReplyCaptureError
+      >;
+    },
   ) => Effect.Effect<
-    ShellCandidate,
+    ShellCandidate & { readonly captureEnv?: Readonly<Record<string, string>> },
     | TerminalProviderInstanceNotFoundError
     | TerminalProviderEnvironmentError
     | TerminalNativeLaunchRefusedError
@@ -1282,7 +1306,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
     registerTerminalProcesses: portDiscovery.registerTerminalProcesses,
     unregisterTerminal: portDiscovery.unregisterTerminal,
     resolveProviderInstanceEnvironment,
-    resolveAgentShellLaunch: (rawId, cwd) =>
+    resolveAgentShellLaunch: (rawId, cwd, capture) =>
       Effect.gen(function* () {
         const providerInstanceId = ProviderInstanceId.make(rawId);
         const settings = yield* serverSettings.getSettings.pipe(
@@ -1309,6 +1333,16 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
         const nodeExecutable =
           hostEnvironment[STARK_WORKBENCH_NODE_ENV] ??
           ((yield* HostProcess.IsExecutable) ? "node" : yield* HostProcess.ExecutablePath);
+        const captureLaunch =
+          capture && (instance.driver === "claudeAgent" || instance.driver === "codex")
+            ? yield* capture
+                .bind(instance.driver === "claudeAgent" ? "claude" : "codex")
+                .pipe(
+                  Effect.mapError(
+                    (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
+                  ),
+                )
+            : undefined;
         const launch = yield* Effect.try({
           try: () =>
             nativeAgentLaunch({
@@ -1318,6 +1352,9 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
               platform: nativePlatform,
               nodeExecutable,
               ...(workbenchRoot === undefined ? {} : { workbenchRoot }),
+              ...(captureLaunch === undefined
+                ? {}
+                : { replyCaptureCommand: captureLaunch.command }),
             }),
           catch: (cause) =>
             cause instanceof NativeAgentLaunchRefused
@@ -1328,7 +1365,8 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
                 })
               : new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
         });
-        if (instance.driver !== "claudeAgent") return launch;
+        if (instance.driver !== "claudeAgent")
+          return { ...launch, ...(captureLaunch ? { captureEnv: captureLaunch.env } : {}) };
         const args = yield* prepareNativeClaudeSettings({
           args: launch.args,
           cwd: cwd ?? home,
@@ -1342,7 +1380,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
             (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
           ),
         );
-        return { ...launch, args };
+        return { ...launch, args, ...(captureLaunch ? { captureEnv: captureLaunch.env } : {}) };
       }),
   });
 });
@@ -1460,6 +1498,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
   const threadLocks = yield* KeyedLock.make<string>();
   const terminalEventListeners = new Set<(event: TerminalEvent) => Effect.Effect<void>>();
+  const nativeReplyListeners = new Set<
+    (reply: NativeAgentReply, retained: ReadonlyArray<NativeAgentReply>) => Effect.Effect<void>
+  >();
   const workerScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(workerScope, Exit.void));
 
@@ -1469,6 +1510,51 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         yield* listener(event).pipe(Effect.ignoreCause({ log: true }));
       }
     });
+
+  const hostEnvironment = yield* HostProcess.Environment;
+  const replyCapture = yield* NativeReplyCapture.make({
+    directory: path.join(logsDir, "native-replies"),
+    platform,
+    nodeExecutable:
+      hostEnvironment[STARK_WORKBENCH_NODE_ENV] ??
+      ((yield* HostProcess.IsExecutable) ? "node" : yield* HostProcess.ExecutablePath),
+    onReply: (reply, retained) =>
+      Effect.gen(function* () {
+        const state = yield* SynchronizedRef.get(managerStateRef);
+        const session = state.sessions.get(toSessionKey(reply.threadId, reply.terminalId));
+        for (const current of state.sessions.values()) {
+          if (current.threadId === reply.threadId) {
+            current.nativeReplies = retained.filter(
+              (item) => item.terminalId === current.terminalId,
+            );
+          }
+        }
+        yield* publishEvent({
+          type: "nativeReply",
+          threadId: reply.threadId,
+          terminalId: reply.terminalId,
+          reply,
+          ...(session ? { sequence: advanceEventSequence(session).sequence } : {}),
+        });
+        // Capture still owns the history lock here. Deliver its committed window
+        // directly: reading history again from this callback would deadlock.
+        for (const listener of nativeReplyListeners) {
+          yield* listener(reply, retained).pipe(Effect.ignoreCause({ log: true }));
+        }
+      }),
+  }).pipe(Effect.orDie);
+  const listNativeReplies: TerminalManager["Service"]["listNativeReplies"] = (input) =>
+    replyCapture.list(input).pipe(
+      Effect.mapError(
+        (cause) =>
+          new TerminalHistoryError({
+            operation: "read",
+            threadId: input.threadId,
+            terminalId: input.terminalId ?? DEFAULT_TERMINAL_ID,
+            cause,
+          }),
+      ),
+    );
 
   const historyPath = (threadId: string, terminalId: string) => {
     const threadPart = toSafeThreadId(threadId);
@@ -1986,6 +2072,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       }
 
       yield* clearKillFiber(action.process);
+      yield* replyCapture.retire({ threadId: action.threadId, terminalId: action.terminalId });
       yield* unregisterTerminal({
         threadId: action.threadId,
         terminalId: action.terminalId,
@@ -2004,6 +2091,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
 
   const stopProcess = Effect.fn("terminal.stopProcess")(function* (session: TerminalSessionState) {
+    yield* replyCapture.retire({ threadId: session.threadId, terminalId: session.terminalId });
     const process = session.process;
     if (!process) return;
 
@@ -2132,7 +2220,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            let shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
+            let shellCandidates: Array<
+              ShellCandidate & { readonly captureEnv?: Readonly<Record<string, string>> }
+            > = resolveShellCandidates(shellResolver, platform, baseEnv);
             if (input.agentShell === true) {
               if (
                 input.providerInstanceId === undefined ||
@@ -2183,6 +2273,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
                 yield* options.resolveAgentShellLaunch(
                   input.providerInstanceId,
                   input.worktreePath ?? input.cwd,
+                  {
+                    bind: (provider) =>
+                      replyCapture.bind({
+                        threadId: session.threadId,
+                        terminalId: session.terminalId,
+                        provider,
+                      }),
+                  },
                 ),
               ];
             }
@@ -2194,6 +2292,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             );
             if (input.agentShell === true) {
               Object.assign(terminalEnv, PROVIDER_PRIVACY_ENV, STARK_PAGES_ENV);
+              Object.assign(terminalEnv, shellCandidates[0]?.captureEnv);
               delete terminalEnv.CLAUDECODE;
               delete terminalEnv.CLAUDE_CODE_ENTRYPOINT;
             }
@@ -2284,6 +2383,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
     {
       const error = startResult.failure;
+      yield* replyCapture.retire({ threadId: session.threadId, terminalId: session.terminalId });
       if (ptyProcess) {
         yield* startKillEscalation(ptyProcess, session.threadId, session.terminalId);
       }
@@ -2340,6 +2440,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       yield* persistHistory(threadId, terminalId, session.value.history);
     }
 
+    yield* replyCapture.retire({ threadId, terminalId });
+
     yield* flushPersist(threadId, terminalId);
 
     const removed = yield* modifyManagerState((state) => {
@@ -2362,6 +2464,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
     if (deleteHistoryOnClose) {
       yield* deleteHistory(threadId, terminalId);
+      yield* replyCapture
+        .remove({ threadId, terminalId })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new TerminalHistoryError({ operation: "truncate", threadId, terminalId, cause }),
+          ),
+        );
     }
   });
 
@@ -2566,6 +2676,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         childCommandLabel: null,
         runtimeEnv: normalizedRuntimeEnv(input.env),
         agentShell: input.agentShell === true,
+        nativeReplies: yield* listNativeReplies({ threadId: input.threadId, terminalId }),
         workspaceOwnerToken: Symbol("native workspace owner"),
       };
 
@@ -2756,6 +2867,68 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         terminalEventListeners.delete(listener);
       };
     });
+
+  const observeNativeReplies: TerminalManager["Service"]["observeNativeReplies"] = (
+    input,
+    listener,
+  ) => {
+    const buffered: Array<{
+      readonly sequence: number;
+      readonly replies: ReadonlyArray<NativeAgentReply>;
+    }> = [];
+    let active = true;
+    let deliverLive = false;
+    let deliveredSequence = -1;
+    let deliveredIds: ReadonlyArray<string> | undefined;
+    const deliver = (update: (typeof buffered)[number]) =>
+      Effect.suspend(() => {
+        if (!active || (!deliverLive && update.sequence <= deliveredSequence)) return Effect.void;
+        deliveredSequence = update.sequence;
+        const replies = update.replies.filter(
+          (reply) => input.terminalId === undefined || reply.terminalId === input.terminalId,
+        );
+        const ids = replies.map((reply) => reply.id);
+        if (
+          deliveredIds?.length === ids.length &&
+          ids.every((id, index) => id === deliveredIds?.[index])
+        )
+          return Effect.void;
+        deliveredIds = ids;
+        return listener(replies);
+      });
+    const observe = (reply: NativeAgentReply, retained: ReadonlyArray<NativeAgentReply>) => {
+      if (!active || reply.threadId !== input.threadId) return Effect.void;
+      const update = { sequence: reply.sequence, replies: retained };
+      if (deliverLive) return deliver(update);
+      // Only the newest complete window matters while the initial read/queue
+      // delivery is pending. Coalescing also bounds memory for slow consumers.
+      buffered[0] = update;
+      return Effect.void;
+    };
+    const unsubscribe = () => {
+      active = false;
+      buffered.length = 0;
+      nativeReplyListeners.delete(observe);
+    };
+    return Effect.gen(function* () {
+      nativeReplyListeners.add(observe);
+      // Subscribe before reading. Use the full thread window's sequence even
+      // for one terminal, since another terminal can prune its older replies.
+      const initial = yield* listNativeReplies({ threadId: input.threadId });
+      yield* deliver({ sequence: initial.at(-1)?.sequence ?? 0, replies: initial });
+      let pending = buffered.pop();
+      while (pending) {
+        yield* deliver(pending);
+        pending = buffered.pop();
+      }
+      deliverLive = true;
+      return unsubscribe;
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.sync(unsubscribe).pipe(Effect.andThen(Effect.failCause(cause))),
+      ),
+    );
+  };
 
   const streamSession = (
     input: TerminalObserveInput,
@@ -3016,6 +3189,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           childCommandLabel: null,
           runtimeEnv: normalizedRuntimeEnv(input.env),
           agentShell: input.agentShell === true,
+          nativeReplies: yield* listNativeReplies({ threadId: input.threadId, terminalId }),
           workspaceOwnerToken: Symbol("native workspace owner"),
         };
         const createdSession = session;
@@ -3092,6 +3266,17 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
         if (input.deleteHistory) {
           yield* deleteAllHistoryForThread(input.threadId);
+          yield* replyCapture.remove({ threadId: input.threadId }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TerminalHistoryError({
+                  operation: "truncate",
+                  threadId: input.threadId,
+                  terminalId: DEFAULT_TERMINAL_ID,
+                  cause,
+                }),
+            ),
+          );
         }
       }),
     );
@@ -3147,6 +3332,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     open,
     attachStream,
     observeStream,
+    listNativeReplies,
+    observeNativeReplies,
     write,
     resize,
     clear,

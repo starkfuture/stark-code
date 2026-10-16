@@ -5,6 +5,8 @@ import type {
 } from "@starkfuture/contracts";
 import * as Schema from "effect/Schema";
 import { useState } from "react";
+import { useNativeReplies } from "../state/nativeReplies";
+import { ResponseVisualPanel } from "./chat/ResponseVisualPanel";
 import { TerminalViewport } from "./ThreadTerminalDrawer";
 import { Button } from "./ui/button";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -28,6 +30,7 @@ export function NativeAgentShell(props: {
   readonly onBackToChat: () => void;
 }) {
   const [ended, setEnded] = useState(false);
+  const [view, setView] = useState<"terminal" | "reader">("terminal");
   const [advancedTypography] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,
     false,
@@ -35,6 +38,7 @@ export function NativeAgentShell(props: {
   );
   const restart = useAtomCommand(terminalEnvironment.restart, "restart native agent shell");
   const terminalId = nativeAgentTerminalId(props.providerInstanceId);
+  const replies = useNativeReplies(props.threadRef, view === "reader", terminalId);
   const label = props.driver === "codex" ? "Codex" : "Claude";
   return (
     <section
@@ -56,7 +60,51 @@ export function NativeAgentShell(props: {
           Back to chat
         </Button>
       </div>
-      <div className="min-h-0 flex-1" data-thread-terminal-drawer>
+      <div
+        className="flex shrink-0 flex-wrap gap-1 border-b px-3 py-2"
+        aria-label="Native shell view"
+      >
+        <Button
+          variant={view === "terminal" ? "secondary" : "ghost"}
+          size="sm"
+          aria-pressed={view === "terminal"}
+          onClick={() => setView("terminal")}
+        >
+          Terminal
+        </Button>
+        <Button
+          variant={view === "reader" ? "secondary" : "ghost"}
+          size="sm"
+          aria-pressed={view === "reader"}
+          onClick={() => setView("reader")}
+        >
+          Reader
+        </Button>
+      </div>
+      {view === "reader" ? (
+        <>
+          {replies.error ? (
+            <p role="alert" className="px-4 py-2 text-sm text-destructive">
+              {replies.error}
+            </p>
+          ) : null}
+          <ResponseVisualPanel
+            environmentId={props.threadRef.environmentId}
+            threadRef={props.threadRef}
+            cwd={props.worktreePath ?? props.cwd}
+            answers={(replies.data ?? []).map((reply) => ({
+              id: reply.id,
+              text: reply.text,
+              label: `${reply.provider === "claude" ? "Claude" : "Codex"} · ${reply.text.replace(/\s+/g, " ").slice(0, 90)}`,
+            }))}
+            emptyMessage="Completed replies from new native sessions appear here. Restart a session opened before Reader was added. For Codex, review and approve the capture hook in its terminal when prompted. Interrupted replies may not be captured."
+          />
+        </>
+      ) : null}
+      <div
+        className={view === "terminal" ? "min-h-0 flex-1" : "hidden"}
+        data-thread-terminal-drawer
+      >
         <TerminalViewport
           advancedTypography={advancedTypography}
           threadRef={props.threadRef}
@@ -70,7 +118,7 @@ export function NativeAgentShell(props: {
           onSessionExited={() => setEnded(true)}
           focusRequestId={props.focusRequestId ?? 1}
           autoFocus
-          visible
+          visible={view === "terminal"}
           resizeEpoch={0}
           drawerHeight={0}
           keybindings={props.keybindings}

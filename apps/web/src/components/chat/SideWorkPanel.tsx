@@ -19,6 +19,8 @@ import { useEnvironmentScope } from "../../state/session";
 import { useThreadRunningTerminalIds } from "../../state/terminalSessions";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { useNativeReplies } from "../../state/nativeReplies";
+import { ResponseVisualPanel } from "./ResponseVisualPanel";
 import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
@@ -27,7 +29,6 @@ import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import {
   groupWorkspaceThreads,
-  latestSideWorkResponse,
   readSideWorkRecords,
   sideWorkContext,
   sideWorkPrompt,
@@ -68,7 +69,6 @@ export function SideWorkPanel(props: {
   const [selected, setSelected] = useState<SideWorkRecord | null>(null);
   const [tab, setTab] = useState<SideWorkTab>("question");
   const [request, setRequest] = useState("");
-  const [source, setSource] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sending = useRef(false);
@@ -93,9 +93,23 @@ export function SideWorkPanel(props: {
     [shells, parent, props.workspaceRoot],
   );
   const isRunning = threadRuntimeIsActive(selectedShell?.runtime);
-  const response =
-    source ??
-    (props.nativeShellMode ? "" : latestSideWorkResponse(props.projection?.messages ?? []));
+  const parentRef = scopeThreadRef(parent.environmentId, parent.id);
+  const nativeReplies = useNativeReplies(parentRef, tab === "format" && props.nativeShellMode);
+  const readerAnswers = props.nativeShellMode
+    ? (nativeReplies.data ?? []).map((reply) => ({
+        id: reply.id,
+        text: reply.text,
+        label: `${reply.provider} · ${reply.text.replace(/\s+/g, " ").slice(0, 90)}`,
+      }))
+    : (props.projection?.messages ?? [])
+        .filter(
+          (message) => message.role === "assistant" && !message.streaming && message.text.trim(),
+        )
+        .map((message, index) => ({
+          id: message.id,
+          text: message.text,
+          label: `${index + 1}. ${message.text.replace(/\s+/g, " ").slice(0, 90)}`,
+        }));
   const approval = selectedProjection
     ? derivePendingApprovals(derivePendingThreadRequests(selectedProjection).approvals)[0]
     : undefined;
@@ -129,7 +143,7 @@ export function SideWorkPanel(props: {
   }
 
   async function send() {
-    if (sending.current || !canOperate || tab === "agents" || isRunning) return;
+    if (sending.current || !canOperate || tab !== "question" || isRunning) return;
     sending.current = true;
     setBusy(true);
     setError(null);
@@ -141,7 +155,7 @@ export function SideWorkPanel(props: {
             kind,
             request,
             context: props.nativeShellMode ? [] : sideWorkContext(props.projection?.messages ?? []),
-            response,
+            response: "",
           });
       if (!prompt) throw new Error("Write a follow-up first.");
       const threadId = selected?.threadId ?? newThreadId();
@@ -195,7 +209,7 @@ export function SideWorkPanel(props: {
         {(
           [
             ["question", "Side chat"],
-            ["format", "Format"],
+            ["format", "Make visual"],
             ["agents", "Agents"],
           ] as const
         ).map(([value, label]) => (
@@ -211,7 +225,45 @@ export function SideWorkPanel(props: {
           </Button>
         ))}
       </div>
-      {tab === "agents" ? (
+      {tab === "format" ? (
+        <>
+          {records.some((record) => record.kind === "format") ? (
+            <details className="shrink-0 border-b p-3 text-xs">
+              <summary className="cursor-pointer">Earlier formatting chats</summary>
+              <div className="mt-2 flex flex-col items-start gap-1">
+                {records
+                  .filter((record) => record.kind === "format")
+                  .map((record) => (
+                    <Button
+                      key={record.threadId}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => props.onOpenThread(record.threadId)}
+                    >
+                      {record.title.slice(0, 65)} <ArrowUpRightIcon />
+                    </Button>
+                  ))}
+              </div>
+            </details>
+          ) : null}
+          {nativeReplies.error ? (
+            <p role="alert" className="px-3 py-2 text-sm text-destructive">
+              {nativeReplies.error}
+            </p>
+          ) : null}
+          <ResponseVisualPanel
+            environmentId={parent.environmentId}
+            threadRef={parentRef}
+            cwd={parent.worktreePath ?? props.workspaceRoot}
+            answers={readerAnswers}
+            emptyMessage={
+              props.nativeShellMode
+                ? "Completed native replies appear here after a new shell session starts. Codex may ask you to approve the capture hook first. You can also paste a reply."
+                : undefined
+            }
+          />
+        </>
+      ) : tab === "agents" ? (
         <div className="min-h-0 flex-1 overflow-auto p-3">
           <p className="mb-3 text-xs text-muted-foreground">
             {groups.length} workspace {groups.length === 1 ? "folder" : "folders"} ·{" "}
@@ -248,9 +300,8 @@ export function SideWorkPanel(props: {
         <>
           <div className="shrink-0 space-y-2 border-b border-border p-3">
             <p className="text-xs text-muted-foreground">
-              {tab === "question"
-                ? "Ask alongside the main conversation. Each side chat has its own history and starts in Plan with Manual permissions."
-                : "A separate agent formats a response as HTML/CSS. Its work and approvals stay in its own chat."}
+              Ask alongside the main conversation. Each side chat has its own history and starts in
+              Plan with Manual permissions.
             </p>
             {props.nativeShellMode ? (
               <p className="text-xs text-muted-foreground">
@@ -258,7 +309,7 @@ export function SideWorkPanel(props: {
               </p>
             ) : null}
             <label className="block text-xs">
-              Saved {tab === "question" ? "side chats" : "visual responses"}
+              Saved side chats
               <select
                 className="mt-1 block w-full rounded-md border border-input bg-background p-2 text-sm"
                 value={selected?.threadId ?? ""}
@@ -271,7 +322,7 @@ export function SideWorkPanel(props: {
                   setError(null);
                 }}
               >
-                <option value="">New {tab === "question" ? "side chat" : "visual response"}</option>
+                <option value="">New side chat</option>
                 {records
                   .filter((record) => record.kind === tab)
                   .map((record) => (
@@ -332,6 +383,7 @@ export function SideWorkPanel(props: {
                 ) : (
                   <ChatMarkdown
                     key={message.id}
+                    reader
                     text={message.text}
                     cwd={selectedShell?.worktreePath ?? props.workspaceRoot}
                     threadRef={selectedRef ?? undefined}
@@ -360,17 +412,6 @@ export function SideWorkPanel(props: {
               >
                 Answer the agent in its chat
               </Button>
-            ) : null}
-            {selected === null && tab === "format" ? (
-              <label className="block space-y-2 text-xs">
-                Response to format
-                <Textarea
-                  aria-label="Response to format"
-                  value={response}
-                  onChange={(event) => setSource(event.target.value)}
-                  rows={8}
-                />
-              </label>
             ) : null}
             {selected === null && tab === "question" ? (
               <p className="text-xs text-muted-foreground">
@@ -414,20 +455,8 @@ export function SideWorkPanel(props: {
             }}
           >
             <Textarea
-              aria-label={
-                selected
-                  ? "Side chat follow-up"
-                  : tab === "question"
-                    ? "Side question"
-                    : "Formatting instructions"
-              }
-              placeholder={
-                selected
-                  ? "Follow up…"
-                  : tab === "question"
-                    ? "Ask a side question…"
-                    : "Optional formatting instructions…"
-              }
+              aria-label={selected ? "Side chat follow-up" : "Side question"}
+              placeholder={selected ? "Follow up…" : "Ask a side question…"}
               value={request}
               onChange={(event) => setRequest(event.target.value)}
               disabled={!canOperate || busy}
@@ -439,17 +468,11 @@ export function SideWorkPanel(props: {
                 !canOperate ||
                 busy ||
                 isRunning ||
-                (tab === "question" && !request.trim()) ||
+                !request.trim() ||
                 (selected !== null && !request.trim())
               }
             >
-              {busy
-                ? "Starting…"
-                : selected
-                  ? "Send follow-up"
-                  : tab === "question"
-                    ? "Ask in side chat"
-                    : "Format in separate chat"}
+              {busy ? "Starting…" : selected ? "Send follow-up" : "Ask in side chat"}
             </Button>
           </form>
         </>

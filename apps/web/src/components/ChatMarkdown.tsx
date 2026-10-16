@@ -1,4 +1,5 @@
 import { MarkdownFindContext, useFindRevealRef } from "./chat/markdownFindContext";
+import { AssistantReader } from "./reader/AssistantReader";
 import {
   buildFileLinkParentSuffixByPath,
   fileLinkLabel,
@@ -215,6 +216,8 @@ import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 
 interface ChatMarkdownProps {
   text: string;
+  /** Readable assistant prose and a measured contents list for long, completed replies. */
+  reader?: boolean;
   cwd: string | undefined;
   threadRef?: ScopedThreadRef | undefined;
   /** Panel that receives pull request links, including the standalone PR view. */
@@ -3414,6 +3417,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
 
 function ChatMarkdown({
   text,
+  reader = false,
   className,
   lineBreaks = false,
   parseRawHtml = true,
@@ -3444,7 +3448,7 @@ function ChatMarkdown({
   // react-markdown converts unparsed HTML nodes to text when skipHtml is false.
   // Keep that behavior explicit because literal mode depends on escaping the
   // complete source token instead of dropping it from the rendered message.
-  return (
+  const rendered = (
     <div
       ref={markdownRef}
       className={cn(
@@ -3477,6 +3481,13 @@ function ChatMarkdown({
         />
       ) : null}
     </div>
+  );
+  return reader ? (
+    <AssistantReader contentKey={text} isStreaming={props.isStreaming === true}>
+      {rendered}
+    </AssistantReader>
+  ) : (
+    rendered
   );
 }
 

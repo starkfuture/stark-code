@@ -3049,6 +3049,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             listRef={ctx.listRef}
           >
             <ChatMarkdown
+              reader
               text={messageText}
               cwd={ctx.markdownCwd}
               threadRef={ctx.threadRef ?? undefined}

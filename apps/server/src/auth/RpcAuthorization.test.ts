@@ -586,3 +586,42 @@ describe("human shell command authorization", () => {
     }).pipe(Effect.scoped),
   );
 });
+
+it.effect("refuses reply generation to read-only clients before invoking the model service", () =>
+  Effect.gen(function* () {
+    const method = WS_METHODS.responseVisualsFormat;
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof method> => tag !== method,
+      ),
+    );
+    let handled = false;
+    const client = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          group.toLayerHandler(method, () =>
+            Effect.sync(() => {
+              handled = true;
+              return {
+                summary: null,
+                table: null,
+                mermaid: null,
+                reason: "Nothing to add.",
+                model: "claude-sonnet-5-5" as const,
+                formatterVersion: "2" as const,
+                cacheHit: false,
+                generationUsage: null,
+              };
+            }),
+          ),
+          RpcAuthorization.layer([AuthOrchestrationReadScope]),
+        ),
+      ),
+    );
+    expect(yield* client[method]({ answer: "Private answer" }).pipe(Effect.flip)).toMatchObject({
+      requiredPermission: AuthOrchestrationOperateScope,
+    });
+    expect(handled).toBe(false);
+    expect(requiredScopeForRpcMethod(WS_METHODS.terminalNativeReplies)).toBe(AuthTerminalReadScope);
+  }).pipe(Effect.scoped),
+);

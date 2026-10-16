@@ -1767,6 +1767,58 @@ code {
 
 /* Chat markdown rendering */
 
+/* Assistant Reader leaves wide code, diagrams, tables and media on the existing
+   full-width surface. rem sizes follow Appearance's Interface font-size setting. */
+.assistant-reader .chat-markdown {
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.assistant-reader .chat-markdown :is(p, h1, h2, h3, h4, h5, h6),
+.assistant-reader .chat-markdown > :is(ul, ol, blockquote) {
+  max-inline-size: 70ch;
+}
+
+.assistant-reader
+  .chat-markdown
+  :is(p, ul, ol, blockquote):has(
+    img,
+    video,
+    audio,
+    iframe,
+    canvas,
+    pre,
+    .chat-markdown-table-container,
+    [data-markdown-copy^="!["]
+  ) {
+  max-inline-size: none;
+}
+
+.assistant-reader .chat-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin-block: 1.6em 0.6em;
+  line-height: 1.25;
+  text-wrap: pretty;
+}
+
+.assistant-reader .chat-markdown h1 {
+  font-size: 1.5rem;
+}
+.assistant-reader .chat-markdown h2 {
+  font-size: 1.25rem;
+}
+.assistant-reader .chat-markdown h3 {
+  font-size: 1.125rem;
+}
+.assistant-reader .chat-markdown :is(h4, h5, h6) {
+  font-size: 1rem;
+}
+.assistant-reader .chat-markdown :is(h1, h2, h3, h4, h5, h6, strong) {
+  scroll-margin-block-start: 1rem;
+}
+.assistant-reader .chat-markdown > :first-child {
+  margin-top: 0;
+}
+
 .chat-markdown > :first-child {
   margin-top: 0;
 }

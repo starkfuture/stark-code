@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
+import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -95,6 +96,7 @@ import {
   type ProviderDriverKind,
   type ProviderInstanceId,
   ThreadId,
+  type NativeAgentReply,
   type TerminalAttachStreamEvent,
   type TerminalError,
   type TerminalEvent,
@@ -233,6 +235,7 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
+import * as ResponseVisuals from "./textGeneration/ResponseVisuals.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
@@ -1202,6 +1205,86 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
   },
 );
 
+// Bound the RPC handler type expansion: terminal payloads are deep enough that
+// one toLayer over the full group exceeds the compiler's instantiation limit.
+// Reuse the wrapped definitions so both authorization and instrumentation apply.
+const TERMINAL_RPC_METHODS = [
+  WS_METHODS.responseVisualsFormat,
+  WS_METHODS.terminalNativeReplies,
+  WS_METHODS.terminalOpen,
+  WS_METHODS.terminalAttach,
+  WS_METHODS.terminalWrite,
+  WS_METHODS.terminalResize,
+  WS_METHODS.terminalClear,
+  WS_METHODS.terminalRestart,
+  WS_METHODS.terminalClose,
+  WS_METHODS.terminalObserve,
+  WS_METHODS.subscribeTerminalEvents,
+  WS_METHODS.subscribeTerminalMetadata,
+] as const;
+type TerminalRpc = Extract<
+  RpcGroup.Rpcs<typeof ServerWsRpcGroup>,
+  { readonly _tag: (typeof TERMINAL_RPC_METHODS)[number] }
+>;
+const TerminalWsRpcGroup = RpcGroup.make(
+  ...Array.from(ServerWsRpcGroup.requests.values()).filter((rpc): rpc is TerminalRpc =>
+    TERMINAL_RPC_METHODS.some((tag) => tag === rpc._tag),
+  ),
+);
+const CoreWsRpcGroup = ServerWsRpcGroup.omit(...TERMINAL_RPC_METHODS);
+const layerTerminalWsRpc = TerminalWsRpcGroup.toLayer(
+  Effect.gen(function* () {
+    const responseVisuals = yield* ResponseVisuals.ResponseVisuals;
+    const terminalManager = yield* TerminalManager.TerminalManager;
+    return TerminalWsRpcGroup.of({
+      [WS_METHODS.responseVisualsFormat]: (input) => responseVisuals.format(input),
+      [WS_METHODS.terminalNativeReplies]: (input) =>
+        Stream.callback<ReadonlyArray<NativeAgentReply>, TerminalError>((queue) =>
+          Effect.acquireRelease(
+            terminalManager.observeNativeReplies(input, (replies) =>
+              Queue.offer(queue, replies).pipe(Effect.asVoid),
+            ),
+            (unsubscribe) => Effect.sync(unsubscribe),
+          ).pipe(Effect.catchCause((cause) => Queue.failCause(queue, cause))),
+        ),
+      [WS_METHODS.terminalOpen]: (input) => terminalManager.open(input),
+      [WS_METHODS.terminalAttach]: (input) =>
+        Stream.callback<TerminalAttachStreamEvent, TerminalError>((queue) =>
+          Effect.acquireRelease(
+            terminalManager.attachStream(input, (event) => Queue.offer(queue, event)),
+            (unsubscribe) => Effect.sync(unsubscribe),
+          ).pipe(Effect.catchCause((cause) => Queue.failCause(queue, cause))),
+        ),
+      [WS_METHODS.terminalWrite]: (input) => terminalManager.write(input),
+      [WS_METHODS.terminalResize]: (input) => terminalManager.resize(input),
+      [WS_METHODS.terminalClear]: (input) => terminalManager.clear(input),
+      [WS_METHODS.terminalRestart]: (input) => terminalManager.restart(input),
+      [WS_METHODS.terminalClose]: (input) => terminalManager.close(input),
+      [WS_METHODS.terminalObserve]: (input) =>
+        Stream.callback<TerminalAttachStreamEvent, TerminalError>((queue) =>
+          Effect.acquireRelease(
+            terminalManager.observeStream(input, (event) => Queue.offer(queue, event)),
+            (unsubscribe) => Effect.sync(unsubscribe),
+          ).pipe(Effect.catchCause((cause) => Queue.failCause(queue, cause))),
+        ),
+      [WS_METHODS.subscribeTerminalEvents]: (_input) =>
+        Stream.callback<TerminalEvent>((queue) =>
+          Effect.acquireRelease(
+            terminalManager.subscribe((event) => Queue.offer(queue, event)),
+            (unsubscribe) => Effect.sync(unsubscribe),
+          ),
+        ),
+      [WS_METHODS.subscribeTerminalMetadata]: (_input) =>
+        Stream.callback<TerminalMetadataStreamEvent>((queue) =>
+          Effect.acquireRelease(
+            terminalManager.subscribeMetadata((event) => Queue.offer(queue, event)),
+            (unsubscribe) => Effect.sync(unsubscribe),
+          ),
+        ),
+    });
+  }),
+);
+
 const layerWsRpc = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientOrigin: OrchestrationClientOrigin,
@@ -1209,7 +1292,7 @@ const layerWsRpc = (
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
 ) =>
-  ServerWsRpcGroup.toLayer(
+  CoreWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
@@ -1295,7 +1378,6 @@ const layerWsRpc = (
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
-      const terminalManager = yield* TerminalManager.TerminalManager;
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
@@ -1845,7 +1927,7 @@ const layerWsRpc = (
         return result;
       });
 
-      const handlers = ServerWsRpcGroup.of({
+      const handlers = CoreWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,
@@ -2928,40 +3010,6 @@ const layerWsRpc = (
           vcsProvisioning.initRepository(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.reviewGetDiffPreview]: (input) => review.getDiffPreview(input),
         [WS_METHODS.reviewGetDiffFileContents]: (input) => review.getDiffFileContents(input),
-        [WS_METHODS.terminalOpen]: (input) => terminalManager.open(input),
-        [WS_METHODS.terminalAttach]: (input) =>
-          Stream.callback<TerminalAttachStreamEvent, TerminalError>((queue) =>
-            Effect.acquireRelease(
-              terminalManager.attachStream(input, (event) => Queue.offer(queue, event)),
-              (unsubscribe) => Effect.sync(unsubscribe),
-            ).pipe(Effect.catchCause((cause) => Queue.failCause(queue, cause))),
-          ),
-        [WS_METHODS.terminalWrite]: (input) => terminalManager.write(input),
-        [WS_METHODS.terminalResize]: (input) => terminalManager.resize(input),
-        [WS_METHODS.terminalClear]: (input) => terminalManager.clear(input),
-        [WS_METHODS.terminalRestart]: (input) => terminalManager.restart(input),
-        [WS_METHODS.terminalClose]: (input) => terminalManager.close(input),
-        [WS_METHODS.terminalObserve]: (input) =>
-          Stream.callback<TerminalAttachStreamEvent, TerminalError>((queue) =>
-            Effect.acquireRelease(
-              terminalManager.observeStream(input, (event) => Queue.offer(queue, event)),
-              (unsubscribe) => Effect.sync(unsubscribe),
-            ).pipe(Effect.catchCause((cause) => Queue.failCause(queue, cause))),
-          ),
-        [WS_METHODS.subscribeTerminalEvents]: (_input) =>
-          Stream.callback<TerminalEvent>((queue) =>
-            Effect.acquireRelease(
-              terminalManager.subscribe((event) => Queue.offer(queue, event)),
-              (unsubscribe) => Effect.sync(unsubscribe),
-            ),
-          ),
-        [WS_METHODS.subscribeTerminalMetadata]: (_input) =>
-          Stream.callback<TerminalMetadataStreamEvent>((queue) =>
-            Effect.acquireRelease(
-              terminalManager.subscribeMetadata((event) => Queue.offer(queue, event)),
-              (unsubscribe) => Effect.sync(unsubscribe),
-            ),
-          ),
         [WS_METHODS.previewOpen]: (input) => previewManager.open(input),
         [WS_METHODS.previewNavigate]: (input) => previewManager.navigate(input),
         [WS_METHODS.previewResize]: (input) => previewManager.resize(input),
@@ -3187,7 +3235,7 @@ const layerWsRpc = (
       });
       return handlers;
     }),
-  );
+  ).pipe(Layer.merge(layerTerminalWsRpc));
 
 // A defect in a handler's effect fails only its own request. RpcServer's default
 // sends a socket-level Defect frame instead, and the client ends every pending
@@ -3203,6 +3251,7 @@ export const layer = Layer.unwrap(
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const responseVisuals = yield* ResponseVisuals.ResponseVisuals;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
@@ -3271,6 +3320,7 @@ export const layer = Layer.unwrap(
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(OtlpEndpointCheck.layer),
+              Layer.provide(Layer.succeed(ResponseVisuals.ResponseVisuals, responseVisuals)),
               // Shared like the pull request service, so concurrent generations single-flight.
               Layer.provide(
                 Layer.succeed(

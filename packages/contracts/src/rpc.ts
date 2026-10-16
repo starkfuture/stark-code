@@ -265,6 +265,8 @@ import {
   ProjectWriteFileResult,
 } from "./project.ts";
 import {
+  NativeAgentReply,
+  TerminalNativeRepliesInput,
   TerminalAttachInput,
   TerminalObserveInput,
   TerminalAttachStreamEvent,
@@ -279,6 +281,11 @@ import {
   TerminalSessionSnapshot,
   TerminalWriteInput,
 } from "./terminal.ts";
+import {
+  ResponseVisualsInput,
+  ResponseVisualsResult,
+  ResponseVisualsError,
+} from "./responseVisuals.ts";
 import {
   DiscoveredLocalServerList,
   ConfiguredLocalServerUrls,
@@ -483,6 +490,8 @@ export const WS_METHODS = {
   reviewGetDiffFileContents: "review.getDiffFileContents",
 
   // Terminal methods
+  responseVisualsFormat: "responseVisuals.format",
+  terminalNativeReplies: "terminal.nativeReplies",
   terminalOpen: "terminal.open",
   terminalAttach: "terminal.attach",
   terminalObserve: "terminal.observe",
@@ -1555,6 +1564,19 @@ const WsReviewGetDiffFileContentsRpc = Rpc.make(WS_METHODS.reviewGetDiffFileCont
   error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
 });
 
+const WsResponseVisualsFormatRpc = Rpc.make(WS_METHODS.responseVisualsFormat, {
+  payload: ResponseVisualsInput,
+  success: ResponseVisualsResult,
+  error: Schema.Union([ResponseVisualsError, EnvironmentAuthorizationError]),
+});
+
+const WsTerminalNativeRepliesRpc = Rpc.make(WS_METHODS.terminalNativeReplies, {
+  payload: TerminalNativeRepliesInput,
+  success: Schema.Array(NativeAgentReply),
+  error: Schema.Union([TerminalError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
 const WsTerminalOpenRpc = Rpc.make(WS_METHODS.terminalOpen, {
   payload: TerminalOpenInput,
   success: TerminalSessionSnapshot,
@@ -2148,6 +2170,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsInitRpc,
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
+  WsResponseVisualsFormatRpc,
+  WsTerminalNativeRepliesRpc,
   WsTerminalOpenRpc,
   WsTerminalAttachRpc,
   WsTerminalObserveRpc,

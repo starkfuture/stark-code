@@ -16,6 +16,18 @@ On macOS, **Settings → General → Native shell** controls extra non-secret lo
 shell variables imported when the app starts. `AGENT_WORKSPACE` is included by
 default. Restart Stark Code after changing this list.
 
+### Read completed native replies
+
+Choose **Reader** above a native Claude or Codex terminal to read completed replies
+with the same typography as chat. **Make visual** can add an optional overview of
+one reply. The terminal retains the original conversation and CLI controls.
+
+Start a new native session after updating to enable capture. Codex may ask you to
+review and approve Stark Code's local Stop hook first; its existing hooks and
+Computer Use notification stay in place. Only completed replies are captured:
+streaming and interrupted replies may be absent, and asynchronous replies can
+arrive late. Capture does not copy terminal history or add anything to the chat.
+
 ## Terminal history
 
 Each terminal keeps up to 5,000 lines and 8 MiB of scrollback on its environment

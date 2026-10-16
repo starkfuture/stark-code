@@ -8,6 +8,7 @@ import { ArrowLeftIcon, ChevronRightIcon, FileTextIcon, FolderIcon } from "lucid
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { PublishedPageContent } from "./PublishedPageContent";
+import { cn } from "~/lib/utils";
 import {
   publishedPageTitle,
   publishedProjectCatalog,
@@ -29,7 +30,13 @@ function readError(failure: unknown, fallback: string): string {
     : fallback;
 }
 
-export function PublishedStarkPages() {
+export function PublishedStarkPages({
+  expanded = false,
+  onExitExpanded,
+}: {
+  expanded?: boolean;
+  onExitExpanded?: (() => void) | undefined;
+} = {}) {
   const bridge = window.desktopBridge?.publishedPages;
   const [status, setStatus] = useState<StarkPublishedPagesStatus | null>(null);
   const [tools, setTools] = useState<readonly StarkPublishedPagesTool[]>([]);
@@ -261,7 +268,10 @@ export function PublishedStarkPages() {
     <section
       ref={section}
       aria-label="Published Pages"
-      className="min-h-0 min-w-0 flex-1 overflow-auto p-3 text-sm"
+      className={cn(
+        "min-h-0 min-w-0 flex-1 text-sm",
+        expanded && reader ? "flex flex-col overflow-hidden p-2" : "overflow-auto p-3",
+      )}
     >
       {!bridge ? (
         <p>Open Stark Code on your Mac to connect to published Pages.</p>
@@ -292,8 +302,18 @@ export function PublishedStarkPages() {
           )}
         </div>
       ) : (
-        <div className="min-w-0 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+        <div
+          className={cn(
+            "min-w-0",
+            expanded && reader ? "flex min-h-0 flex-1 flex-col gap-2" : "space-y-4",
+          )}
+        >
+          <div
+            className={cn(
+              "shrink-0 flex-wrap items-center justify-between gap-2",
+              expanded && reader ? "hidden" : "flex",
+            )}
+          >
             <span className="text-xs text-muted-foreground">Pages connected</span>
             <Button
               size="sm"
@@ -308,7 +328,10 @@ export function PublishedStarkPages() {
             <>
               <nav
                 aria-label="Pages breadcrumb"
-                className="flex min-w-0 flex-wrap items-center gap-1"
+                className={cn(
+                  "flex min-w-0 shrink-0 items-center gap-1",
+                  expanded && reader ? "overflow-hidden" : "flex-wrap",
+                )}
               >
                 <Button size="sm" variant="ghost" onClick={backToProjects}>
                   Projects
@@ -316,15 +339,37 @@ export function PublishedStarkPages() {
                 <ChevronRightIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
                 {reader ? (
                   <Button size="sm" variant="ghost" onClick={backToPages}>
-                    <span className="max-w-[min(16rem,55vw)] truncate">{project.title}</span>
+                    <span
+                      className={cn(
+                        "truncate",
+                        expanded ? "max-w-[min(12rem,30vw)]" : "max-w-[min(16rem,55vw)]",
+                      )}
+                    >
+                      {project.title}
+                    </span>
                   </Button>
                 ) : (
                   <span className="min-w-0 break-words font-medium">{project.title}</span>
                 )}
+                {expanded && reader ? (
+                  <>
+                    <ChevronRightIcon
+                      aria-hidden
+                      className="size-3 shrink-0 text-muted-foreground"
+                    />
+                    <span className="min-w-0 truncate font-medium">{reader.page.title}</span>
+                  </>
+                ) : null}
               </nav>
               {reader ? (
-                <div aria-label="Published page reader" className="min-w-0 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+                <div
+                  aria-label="Published page reader"
+                  className={cn(
+                    "min-w-0",
+                    expanded ? "flex min-h-0 flex-1 flex-col gap-2" : "space-y-3",
+                  )}
+                >
+                  <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
                     <Button size="sm" variant="ghost" onClick={backToPages}>
                       <ArrowLeftIcon aria-hidden />
                       Back to pages
@@ -353,7 +398,11 @@ export function PublishedStarkPages() {
                       </Button>
                     ) : null}
                   </div>
-                  <h3 className="break-words text-base font-medium">{reader.page.title}</h3>
+                  <h3
+                    className={expanded ? "sr-only" : "shrink-0 break-words text-base font-medium"}
+                  >
+                    {reader.page.title}
+                  </h3>
                   {reader.loading ? (
                     <p role="status">{reader.document ? "Refreshing page…" : "Opening page…"}</p>
                   ) : null}
@@ -374,6 +423,8 @@ export function PublishedStarkPages() {
                   {reader.document ? (
                     <PublishedPageContent
                       document={reader.document}
+                      expanded={expanded}
+                      onExitExpanded={onExitExpanded}
                       onNavigate={(path) =>
                         void openPage({ path, title: publishedPageTitle(path), excerpt: null })
                       }

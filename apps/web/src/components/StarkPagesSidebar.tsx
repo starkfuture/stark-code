@@ -16,6 +16,7 @@ export function StarkPagesSidebar(props: {
   readonly canPublish: boolean;
   readonly onPublishRequest: (slug: string, title: string) => void;
   readonly onClose: () => void;
+  readonly showHeader?: boolean;
 }) {
   const { projectRoot, agent, canPublish, onPublishRequest, onClose } = props;
   const publishingEnabled = canPublish && agent === "claude";
@@ -194,12 +195,14 @@ export function StarkPagesSidebar(props: {
       aria-label="Stark Pages"
       className="flex h-full min-h-0 w-full flex-col border-l border-border bg-background"
     >
-      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-sm font-medium">Pages</span>
-        <Button size="sm" variant="ghost" onClick={onClose}>
-          Close
-        </Button>
-      </div>
+      {props.showHeader !== false ? (
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+          <span className="text-sm font-medium">Pages</span>
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      ) : null}
       {activeNotice ? (
         <div className="space-y-2 border-b border-border px-3 py-2 text-sm text-muted-foreground">
           <p role="status">{activeNotice}</p>

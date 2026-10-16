@@ -279,7 +279,9 @@ Choose **Published** to connect to your company's Pages. Sign-in opens in your
 main browser and returns to Stark Code. The app keeps its own connection; it
 does not copy another browser's login. Find a project, open its home page or
 search for a page inside it. Related page links stay in the reader; other links
-open in your main browser. Drag the panel's edge to give a page more room.
+open in your main browser. Use **Full view** to read workspace or published pages
+across the app, then **Side panel** to return without losing your place. You can
+also drag the panel's edge to resize it.
 
 Published pages include styles, images and fonts stored with the page. Viewing
 uses no model tokens. Recent pages are cached temporarily; **Refresh page** gets

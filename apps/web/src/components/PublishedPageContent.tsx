@@ -6,6 +6,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isOpenableStarkPageLink } from "@starkfuture/shared/starkPages";
 import { pageFieldLabel, pageRecord, decodePublishedPageText } from "./publishedPagesFields";
+import { cn } from "~/lib/utils";
 
 function openLink(url: string) {
   if (isOpenableStarkPageLink(url)) void window.desktopBridge?.openStarkPagesLink?.(url);
@@ -25,10 +26,14 @@ function PublishedHtml({
   html,
   bundle,
   onNavigate,
+  expanded = false,
+  onExitExpanded,
 }: {
   html: string;
   bundle?: StarkPublishedPageDocument;
   onNavigate?: ((path: string) => void) | undefined;
+  expanded?: boolean;
+  onExitExpanded?: (() => void) | undefined;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const document = useMemo(() => preparePublishedHtml(html, bundle), [html, bundle]);
@@ -36,14 +41,19 @@ function PublishedHtml({
     const onMessage = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== "null") return;
       const data = pageRecord(event.data);
-      if (data?.source !== "stark-published-page" || typeof data.url !== "string") return;
+      if (data?.source !== "stark-published-page") return;
+      if (data.type === "exit-expanded") {
+        if (expanded) onExitExpanded?.();
+        return;
+      }
+      if (data.type !== "open-link" || typeof data.url !== "string") return;
       const link = publishedPageLink(data.url, bundle);
       if (link?.kind === "page") onNavigate?.(link.path);
       else if (link?.kind === "external") openLink(link.url);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [bundle, onNavigate]);
+  }, [bundle, onNavigate, expanded, onExitExpanded]);
   return (
     <>
       <iframe
@@ -52,13 +62,21 @@ function PublishedHtml({
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
         srcDoc={document.html}
-        className="h-[65vh] min-h-96 w-full rounded-lg border border-border bg-white"
+        className={cn(
+          "w-full rounded-lg border border-border bg-white",
+          expanded ? "min-h-0 flex-1" : "h-[65vh] min-h-96",
+        )}
       />
-      {document.warnings.map((warning) => (
-        <p key={warning} className="text-xs text-muted-foreground">
-          {warning}
-        </p>
-      ))}
+      {document.warnings.length > 0 ? (
+        <details className="max-h-28 shrink-0 overflow-auto text-xs text-muted-foreground">
+          <summary>Some page resources are unavailable ({document.warnings.length})</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-4">
+            {document.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </>
   );
 }
@@ -68,23 +86,40 @@ export function PublishedPageContent({
   value,
   document,
   onNavigate,
+  expanded = false,
+  onExitExpanded,
   depth = 0,
 }: {
   value?: unknown;
   document?: StarkPublishedPageDocument;
   onNavigate?: (path: string) => void;
+  expanded?: boolean;
+  onExitExpanded?: (() => void) | undefined;
   depth?: number;
 }) {
   if (document)
     return (
-      <div className="min-w-0 space-y-3">
+      <div
+        className={cn(
+          "min-w-0",
+          expanded ? "flex min-h-0 flex-1 flex-col gap-3 overflow-hidden" : "space-y-3",
+        )}
+      >
         {document.mimeType === "text/html" ? (
-          <PublishedHtml html={document.source} bundle={document} onNavigate={onNavigate} />
+          <PublishedHtml
+            html={document.source}
+            bundle={document}
+            onNavigate={onNavigate}
+            expanded={expanded}
+            onExitExpanded={onExitExpanded}
+          />
         ) : (
-          <PublishedPageContent value={document.source} />
+          <div className={expanded ? "min-h-0 flex-1 overflow-auto" : undefined}>
+            <PublishedPageContent value={document.source} />
+          </div>
         )}
         {document.warnings.length > 0 ? (
-          <details className="text-xs text-muted-foreground">
+          <details className="max-h-28 shrink-0 overflow-auto text-xs text-muted-foreground">
             <summary>Some page content is unavailable ({document.warnings.length})</summary>
             <ul className="mt-2 list-disc space-y-1 pl-4">
               {document.warnings.map((warning, index) => (

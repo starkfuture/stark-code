@@ -91,7 +91,8 @@ const tick = () =>
   act(async () => {
     for (const callback of ticks) callback();
   });
-const render = () => act(() => root.render(<PublishedStarkPages />));
+const render = (expanded = false) =>
+  act(() => root.render(<PublishedStarkPages expanded={expanded} />));
 async function selectProject() {
   status = { state: "connected", message: null };
   await render();
@@ -329,4 +330,19 @@ it("refreshes a cached page without hiding it during loading or a failed refresh
   expect(shown()).toContain("Refresh unavailable");
   expect(shown()).toContain("The refreshed plan");
   expect(button("Refresh page").disabled).toBe(false);
+});
+
+it("keeps the selected page and search results when entering and leaving the full view", async () => {
+  await selectProject();
+  await searchPages();
+  await click("Launch planSchedule and ownerslaunch/index.html");
+  const reads = read.mock.calls.length;
+  await render(true);
+  expect(shown()).toContain("A styled launch plan");
+  await render(false);
+  expect(shown()).toContain("A styled launch plan");
+  expect(openPage).toHaveBeenCalledOnce();
+  expect(read).toHaveBeenCalledTimes(reads);
+  await click("Back to pages");
+  expect(shown()).toContain("2 results for “launch”");
 });

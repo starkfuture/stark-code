@@ -8161,6 +8161,9 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
+      // The Pages modal owns input, including Escape. Do not interrupt an agent
+      // or redirect typing into the covered composer while reading a page.
+      if (document.querySelector('[data-pages-overlay="true"]')) return;
       if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
         event.stopPropagation();
         return;
@@ -12791,7 +12794,9 @@ export default function ChatView(props: ChatViewProps) {
       {rightPanelPresent && shouldUsePlanSidebarSheet && activeThreadRef ? (
         <RightPanelSheet
           animationDurationMs={panelAnimationsActive ? panelAnimationDurationMs : 0}
-          open={rightPanelOpen}
+          // Pages owns the modal while open. Keep the tools mounted, but do not
+          // let its responsive sheet hide Pages from keyboard/screen-reader use.
+          open={rightPanelOpen && !pagesOpen}
           onClose={closePreviewPanel}
         >
           <RightPanelTabs

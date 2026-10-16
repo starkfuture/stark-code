@@ -242,7 +242,7 @@ export function preparePublishedHtml(html: string, bundle?: StarkPublishedPageDo
   // Only this bridge runs. The host checks the frame's opaque origin and validates the link again.
   const bridge = output.createElement("script");
   bridge.setAttribute("nonce", nonce);
-  bridge.textContent = `function open(e){const a=e.target.closest?.('a[data-stark-link]');if(!a)return;e.preventDefault();const u=a.getAttribute('data-stark-link');if(u?.startsWith('#')){try{document.getElementById(decodeURIComponent(u.slice(1)))?.scrollIntoView();}catch{}return;}parent.postMessage({source:'stark-published-page',url:u},${JSON.stringify(window.location.origin)});}document.addEventListener('click',open);document.addEventListener('keydown',e=>{if(e.key==='Enter')open(e);});`;
+  bridge.textContent = `function send(message){parent.postMessage({source:'stark-published-page',...message},${JSON.stringify(window.location.origin)});}function open(e){const a=e.target.closest?.('a[data-stark-link]');if(!a)return;e.preventDefault();const u=a.getAttribute('data-stark-link');if(u?.startsWith('#')){try{document.getElementById(decodeURIComponent(u.slice(1)))?.scrollIntoView();}catch{}return;}send({type:'open-link',url:u});}document.addEventListener('click',open);document.addEventListener('keydown',e=>{if(e.key==='Enter')open(e);if(e.key==='Escape'&&!e.defaultPrevented&&!e.isComposing&&!e.repeat&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey)send({type:'exit-expanded'});});`;
   const csp = output.createElement("meta");
   csp.httpEquiv = "Content-Security-Policy";
   csp.content = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'`;

@@ -70,6 +70,30 @@ function parseCommands(value: unknown): Command[] {
       : [];
   });
 }
+const parsePlugins = (value: unknown): Plugin[] =>
+  values(value).flatMap((raw) => {
+    const plugin = record(raw);
+    const name = catalogText(plugin?.name);
+    return name && typeof plugin?.path === "string" ? [{ name, path: plugin.path }] : [];
+  });
+const parseMcpServers = (value: unknown): ServerProviderSessionCatalog["mcpServers"] =>
+  values(value).flatMap((raw) => {
+    const server = record(raw);
+    const name = catalogText(server?.name);
+    const status = catalogText(server?.status);
+    const source = server?.source;
+    return name && status
+      ? [
+          {
+            name,
+            status,
+            ...(typeof source === "string" && SOURCES.has(source)
+              ? { source: source as ServerProviderMcpSource }
+              : {}),
+          },
+        ]
+      : [];
+  });
 
 /** Reads descriptions only under roots the live CLI reported as loaded. */
 const scanPluginSkills = Effect.fn("ClaudeSessionCatalog.scanPluginSkills")(function* (
@@ -283,34 +307,14 @@ export const makeClaudeSessionCatalog = Effect.fn("makeClaudeSessionCatalog")(fu
       }
       if (item.subtype !== "init") return;
       live = true;
-      plugins = values(item.plugins).flatMap((raw) => {
-        const plugin = record(raw);
-        const name = catalogText(plugin?.name);
-        return name && typeof plugin?.path === "string" ? [{ name, path: plugin.path }] : [];
-      });
+      plugins = parsePlugins(item.plugins);
       liveSkills = values(item.skills).map(commandName).filter(Boolean);
       terminal = new Set(
         values(item.terminal_slash_commands)
           .map(commandName)
           .map((name) => name.toLowerCase()),
       );
-      mcpServers = values(item.mcp_servers).flatMap((raw) => {
-        const server = record(raw);
-        const name = catalogText(server?.name);
-        const status = catalogText(server?.status);
-        const source = server?.source;
-        return name && status
-          ? [
-              {
-                name,
-                status,
-                ...(typeof source === "string" && SOURCES.has(source)
-                  ? { source: source as ServerProviderMcpSource }
-                  : {}),
-              },
-            ]
-          : [];
-      });
+      mcpServers = parseMcpServers(item.mcp_servers);
       const names = parseCommands(item.slash_commands);
       const key = [...new Set(names.map((command) => command.name.toLowerCase()))]
         .sort()
@@ -324,6 +328,24 @@ export const makeClaudeSessionCatalog = Effect.fn("makeClaudeSessionCatalog")(fu
     });
   return {
     onMessage,
+    /** A successful native reload replaces metadata without resetting terminal-only commands. */
+    onReload: (reloaded: {
+      readonly commands: readonly unknown[];
+      readonly plugins: readonly unknown[];
+      readonly mcpServers: readonly unknown[];
+    }) =>
+      Effect.gen(function* () {
+        live = true;
+        commands = parseCommands(reloaded.commands);
+        nameSetKey = [...new Set(commands.map((command) => command.name.toLowerCase()))]
+          .sort()
+          .join("\n");
+        plugins = parsePlugins(reloaded.plugins);
+        mcpServers = parseMcpServers(reloaded.mcpServers);
+        const names = new Set(commands.map((command) => command.name.toLowerCase()));
+        liveSkills = liveSkills.filter((name) => names.has(name.toLowerCase()));
+        yield* refreshDescriptions;
+      }),
     read: Effect.sync(catalog),
     userInvocableSkillNames: Effect.sync(
       (): ReadonlySet<string> => new Set(catalog().skills.map((skill) => skill.name)),

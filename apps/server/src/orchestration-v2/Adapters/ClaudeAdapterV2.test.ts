@@ -12,6 +12,7 @@ import type {
   SDKUserMessage,
   SpawnedProcess,
   SpawnOptions,
+  McpServerStatus,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
   AskUserQuestionInput,
@@ -2673,6 +2674,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         ClaudeAdapterV2.ClaudeAgentSdkQuerySession,
         | "supportedCommands"
         | "mcpServerStatus"
+        | "reloadPlugins"
         | "getContextUsage"
         | "rewindFiles"
         | "reconnectMcpServer"
@@ -3201,6 +3203,145 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
       provideDeterministicTestRuntime,
     ),
+  );
+
+  it.effect(
+    "holds a cache-impacting MCP reload, then refreshes metadata and reconnects only eligible servers",
+    () =>
+      Effect.gen(function* () {
+        const calls: unknown[] = [];
+        const before: McpServerStatus[] = [
+          { name: "stark-code", status: "connected", source: "dynamic" },
+          { name: "docs", status: "connected", source: "project" },
+          { name: "broken", status: "failed", source: "project" },
+          { name: "disabled", status: "disabled", source: "plugin" },
+          { name: "auth", status: "needs-auth", source: "plugin" },
+          { name: "removed", status: "connected", source: "plugin" },
+          { name: "now-disabled", status: "connected", source: "plugin" },
+        ];
+        let current = before;
+        const refreshed: McpServerStatus[] = [
+          ...before
+            .filter((server) => server.name !== "removed")
+            .map((server) => ({
+              ...server,
+              status:
+                server.name === "disabled"
+                  ? ("connected" as const)
+                  : server.name === "now-disabled"
+                    ? ("disabled" as const)
+                    : server.status,
+            })),
+          { name: "new-failed", status: "failed", source: "plugin" },
+        ];
+        const harness = yield* makeWakeHarnessWithOptions({
+          queryMethods: {
+            supportedCommands: () =>
+              Effect.succeed([
+                { name: "old-command", description: "Old command", argumentHint: "" },
+              ]),
+            mcpServerStatus: () => Effect.succeed(current),
+            reloadPlugins: ({ holdOnCacheImpact }) =>
+              Effect.sync(() => {
+                calls.push(["reload", holdOnCacheImpact]);
+                if (!holdOnCacheImpact) current = refreshed;
+                return {
+                  held: holdOnCacheImpact,
+                  commands: [
+                    { name: "new-command", description: "New command", argumentHint: "" },
+                    { name: "terminal-only", description: "Must stay hidden", argumentHint: "" },
+                  ],
+                  plugins: [],
+                  agents: [],
+                  mcpServers: current,
+                  error_count: 1,
+                };
+              }),
+            reconnectMcpServer: (name) =>
+              Effect.gen(function* () {
+                calls.push(["reconnect", name]);
+                if (name === "broken")
+                  return yield* new ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError({
+                    method: "reconnect",
+                    cause: "private access_token=secret",
+                  });
+              }),
+            toggleMcpServer: (name, enabled) =>
+              Effect.sync(() => {
+                calls.push(["toggle", name, enabled]);
+                current = current.map((server) =>
+                  server.name === name
+                    ? { ...server, status: enabled ? "connected" : "disabled" }
+                    : server,
+                );
+              }),
+          },
+        });
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("reload-controls"),
+            text: "inspect",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "init",
+            uuid: "reload-init",
+            session_id: WAKE_NATIVE_SESSION,
+            slash_commands: ["old-command"],
+            terminal_slash_commands: ["terminal-only"],
+            mcp_servers: before,
+            plugins: [],
+          }),
+        );
+        yield* harness.offerAndWait(makeResultFrame({ uuid: "reload-result", result: "done" }));
+        const mcp = harness.runtime.mcpServers!;
+        assert.deepEqual(yield* mcp.reload!({ force: false }), {
+          status: "confirmation-required",
+          failedServers: [],
+        });
+        assert.deepEqual(calls, [["reload", true]]);
+        assert.deepEqual(
+          (yield* harness.runtime.readSessionCatalog!()).commands.map((command) => command.name),
+          ["old-command"],
+        );
+        const result = yield* mcp.reload!({ force: true });
+        assert.deepEqual(result, {
+          status: "reloaded",
+          failedServers: ["broken", "new-failed"],
+          pluginErrors: 1,
+        });
+        assert.deepEqual(calls, [
+          ["reload", true],
+          ["reload", false],
+          ["reconnect", "docs"],
+          ["reconnect", "broken"],
+          ["toggle", "disabled", false],
+        ]);
+        assert.equal(current.find((server) => server.name === "disabled")?.status, "disabled");
+        const catalog = yield* harness.runtime.readSessionCatalog!();
+        assert.deepEqual(
+          catalog.commands.map((command) => command.name),
+          ["new-command"],
+        );
+        assert.isFalse(catalog.mcpServers.some((server) => server.name === "removed"));
+        assert.equal(
+          catalog.mcpServers.find((server) => server.name === "disabled")?.status,
+          "disabled",
+        );
+        assert.equal(harness.offeredMessages.length, 1);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+        provideDeterministicTestRuntime,
+      ),
   );
 
   it.effect("user shell reply offers bash blocks once and stays on the shell root turn", () =>

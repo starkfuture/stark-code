@@ -11826,7 +11826,7 @@ export default function ChatView(props: ChatViewProps) {
   const panelToggleControls = (
     <WorkspaceToolsMenu
       connections={
-        isServerThread && activeThreadRef ? (
+        !nativeShellMode && isServerThread && activeThreadRef ? (
           <McpServersChip threadRef={activeThreadRef} />
         ) : undefined
       }

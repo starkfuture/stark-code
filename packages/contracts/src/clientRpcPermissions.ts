@@ -17,6 +17,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.claudeAccountsCommand]: AuthProvidersManageScope,
   [WS_METHODS.responseVisualsFormat]: AuthOrchestrationOperateScope,
   [WS_METHODS.mcpServerReconnect]: AuthOrchestrationOperateScope,
+  [WS_METHODS.mcpServersReload]: AuthOrchestrationOperateScope,
   [WS_METHODS.mcpServerSetEnabled]: AuthProvidersManageScope,
   [WS_METHODS.mcpServerSignIn]: AuthProvidersManageScope,
   [WS_METHODS.mcpServerSubmitCallback]: AuthProvidersManageScope,

@@ -3258,6 +3258,71 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
+  it.effect.each([
+    { force: false, fails: false },
+    { force: true, fails: false },
+    { force: false, fails: true },
+  ])(
+    "reloads Codex MCP configuration once without a model turn, force=$force fails=$fails",
+    (scenario) =>
+      Effect.gen(function* () {
+        const entries: CodexReplay.CodexAppServerReplayEntry[] = [
+          ...codexReplayPreamble({
+            nativeThreadId: "mcp-reload-thread",
+            nativeTurnId: "unused",
+            prompt: "unused",
+          }).slice(0, 5),
+          { type: "expect_outbound", frame: { id: 3, method: "config/mcpServer/reload" } },
+          {
+            type: "emit_inbound",
+            frame: scenario.fails
+              ? { id: 3, error: { code: -32603, message: "Private MCP connection detail" } }
+              : { id: 3, result: {} },
+          },
+        ];
+        const requested: string[] = [];
+        const harness = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({ scenario: "mcp-reload", entries }),
+          undefined,
+          (method) =>
+            Effect.sync(() => {
+              requested.push(method);
+            }),
+        );
+        const result = yield* harness.runtime.mcpServers!.reload!({ force: scenario.force }).pipe(
+          Effect.result,
+        );
+        if (scenario.fails) {
+          assert.equal(result._tag, "Failure");
+          if (result._tag === "Failure") {
+            assert.equal(result.failure._tag, "ProviderAdapterProtocolError");
+            assert.include(
+              result.failure.message,
+              "Could not reload the MCP server. Check the provider's MCP configuration and retry.",
+            );
+            assert.notInclude(result.failure.message, "Private MCP connection detail");
+          }
+        } else {
+          assert.equal(result._tag, "Success");
+          if (result._tag === "Success")
+            assert.deepEqual(result.success, { status: "reloaded", failedServers: [] });
+        }
+        assert.equal(requested.filter((method) => method === "config/mcpServer/reload").length, 1);
+        assert.notInclude(requested, "config/value/write");
+        assert.notInclude(requested, "mcpServerStatus/list");
+        assert.notInclude(requested, "turn/start");
+        assert.equal(
+          harness.events.filter((event) => event.type === "provider_turn.updated").length,
+          0,
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+
   it.effect("pages MCP status and applies quoted config keys without sending a model turn", () =>
     Effect.gen(function* () {
       const nativeThreadId = "mcp-status-thread";

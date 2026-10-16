@@ -1,24 +1,38 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ThreadId, type McpServerStatusEntry } from "@starkfuture/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type McpServerStatusEntry,
+} from "@starkfuture/contracts";
 const state = vi.hoisted(() => ({
   query: {
-    data: { servers: [] as McpServerStatusEntry[], live: true },
+    data: {
+      servers: [] as McpServerStatusEntry[],
+      live: true,
+      canReload: true as boolean | undefined,
+    },
     error: null,
     isPending: false,
     refresh: vi.fn(),
   },
   reconnect: vi.fn(),
+  reload: vi.fn(),
   toggle: vi.fn(),
   signIn: vi.fn(),
   signOut: vi.fn(),
   submit: vi.fn(),
   open: vi.fn(),
+  canOperate: true,
+  localHost: true,
 }));
 vi.mock("../../state/server", () => ({
   serverEnvironment: {
     mcpServers: () => ({}),
     reconnectMcpServer: state.reconnect,
+    reloadMcpServers: state.reload,
     setMcpServerEnabled: state.toggle,
     signInMcpServer: state.signIn,
     signOutMcpServer: state.signOut,
@@ -27,11 +41,19 @@ vi.mock("../../state/server", () => ({
 }));
 vi.mock("../../state/query", () => ({ useEnvironmentQuery: () => state.query }));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: (command: unknown) => command }));
-vi.mock("../../state/session", () => ({ useEnvironmentScope: () => true }));
+vi.mock("../../state/session", () => ({
+  useEnvironmentScope: (_environmentId: unknown, scope: string) =>
+    scope === "orchestration:operate" ? state.canOperate : true,
+}));
 vi.mock("../../state/presentation", () => ({
   useEnvironmentPresentation: () => ({
     presentation: {
-      entry: { target: { _tag: "PrimaryConnectionTarget", httpBaseUrl: "http://localhost:5733" } },
+      entry: {
+        target: {
+          _tag: "PrimaryConnectionTarget",
+          httpBaseUrl: state.localHost ? "http://localhost:5733" : "https://remote.example.test",
+        },
+      },
     },
   }),
 }));
@@ -74,7 +96,13 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers();
   vi.stubGlobal("window", { setInterval, clearInterval, setTimeout, clearTimeout });
-  state.query.data = { servers: [server()], live: true };
+  state.query.data = { servers: [server()], live: true, canReload: true };
+  state.canOperate = true;
+  state.localHost = true;
+  state.query.refresh.mockReset();
+  state.reload
+    .mockReset()
+    .mockResolvedValue({ _tag: "Success", value: { status: "reloaded", failedServers: [] } });
   for (const fn of [state.reconnect, state.toggle, state.signIn, state.signOut, state.submit])
     fn.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   state.open.mockReset().mockResolvedValue(undefined);
@@ -168,7 +196,200 @@ it("shows the authorization host before opening the system browser and validates
       url: "http://localhost:3333/callback?code=private&state=expected",
     },
   });
-  state.query.data = { servers: [server({ status: "connected" })], live: true };
+  state.query.data = { servers: [server({ status: "connected" })], live: true, canReload: true };
   await act(async () => renderer!.update(panel()));
   expect(renderer!.root.findAllByType("input")).toHaveLength(0);
+});
+
+const panel = (threadId = "thread") => (
+  <McpServersPanel
+    environmentId={EnvironmentId.make("env")}
+    target={{ threadId: ThreadId.make(threadId) }}
+  />
+);
+const button = (text: string) => {
+  const found = renderer!.root
+    .findAllByType("button")
+    .find((entry) => entry.children.join("") === text);
+  if (!found) throw new Error(`Missing button: ${text}`);
+  return found;
+};
+const paragraphs = () =>
+  renderer!.root
+    .findAllByType("p")
+    .map((entry) => entry.children.join(""))
+    .join("\n");
+
+it("only reloads after an explicit click; refreshing and polling remain status-only", async () => {
+  await act(async () => {
+    renderer = create(panel());
+  });
+  await act(async () => {
+    vi.advanceTimersByTime(4_000);
+  });
+  await act(async () => button("Refresh status").props.onClick());
+  expect(state.query.refresh).toHaveBeenCalledTimes(4);
+  expect(state.reload).not.toHaveBeenCalled();
+  expect(state.reconnect).not.toHaveBeenCalled();
+  await act(async () => button("Reload MCPs").props.onClick());
+  expect(state.reload).toHaveBeenCalledExactlyOnceWith({
+    environmentId: "env",
+    input: { threadId: "thread" },
+  });
+  expect(paragraphs()).toContain("MCP reload requested. Connection status updates below.");
+  expect(state.query.refresh).toHaveBeenCalledTimes(5);
+  expect(state.toggle).not.toHaveBeenCalled();
+  expect(state.signIn).not.toHaveBeenCalled();
+});
+
+it.each(["read-only", "remote", "no session", "unsupported", "older server"])(
+  "disables reload for %s",
+  async (reason) => {
+    if (reason === "read-only") state.canOperate = false;
+    if (reason === "remote") state.localHost = false;
+    if (reason === "no session") state.query.data.live = false;
+    if (reason === "unsupported") state.query.data.canReload = false;
+    if (reason === "older server") state.query.data.canReload = undefined;
+    await act(async () => {
+      renderer = create(panel());
+    });
+    expect(button("Reload MCPs").props.disabled).toBe(true);
+    await act(async () => button("Reload MCPs").props.onClick());
+    expect(state.reload).not.toHaveBeenCalled();
+  },
+);
+
+it("keeps Settings reload disabled even if the server advertises support for the inspection target", async () => {
+  state.query.data.canReload = true;
+  await act(async () => {
+    renderer = create(
+      <McpServersPanel
+        environmentId={EnvironmentId.make("env")}
+        target={{
+          projectId: ProjectId.make("project"),
+          providerInstanceId: ProviderInstanceId.make("claude"),
+        }}
+      />,
+    );
+  });
+  expect(button("Reload MCPs").props.disabled).toBe(true);
+  expect(paragraphs()).toContain("Open the conversation's Tools → MCP panel");
+  await act(async () => button("Reload MCPs").props.onClick());
+  expect(state.reload).not.toHaveBeenCalled();
+});
+
+it("reports partial failure and plugin errors without claiming a successful reload", async () => {
+  state.reload.mockResolvedValue({
+    _tag: "Success",
+    value: { status: "reloaded", failedServers: ["Drive", "Tickets"], pluginErrors: 2 },
+  });
+  await act(async () => {
+    renderer = create(panel());
+  });
+  await act(async () => button("Reload MCPs").props.onClick());
+  expect(paragraphs()).toContain("MCP reload reported issues.");
+  expect(paragraphs()).toContain("Failed servers: Drive, Tickets.");
+  expect(paragraphs()).toContain("2 plugin errors reported.");
+  expect(paragraphs()).not.toContain("MCP reload requested.");
+  expect(state.query.refresh).toHaveBeenCalledTimes(2);
+});
+
+it("waits for explicit cache-cost confirmation and cancellation never retries", async () => {
+  state.reload.mockResolvedValue({
+    _tag: "Success",
+    value: { status: "confirmation-required", failedServers: [] },
+  });
+  await act(async () => {
+    renderer = create(panel());
+  });
+  await act(async () => button("Reload MCPs").props.onClick());
+  expect(paragraphs()).toContain("increase token usage");
+  expect(button("Reload MCPs").props.disabled).toBe(true);
+  await act(async () => {
+    vi.advanceTimersByTime(4_000);
+  });
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  await act(async () => button("Cancel").props.onClick());
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  expect(paragraphs()).not.toContain("increase token usage");
+  await act(async () => button("Reload MCPs").props.onClick());
+  state.reload.mockResolvedValueOnce({
+    _tag: "Success",
+    value: { status: "reloaded", failedServers: [] },
+  });
+  await act(async () => button("Reload anyway").props.onClick());
+  expect(state.reload).toHaveBeenNthCalledWith(3, {
+    environmentId: "env",
+    input: { threadId: "thread", force: true },
+  });
+  expect(paragraphs()).toContain("MCP reload requested. Connection status updates below.");
+});
+
+it("blocks duplicate same-tick clicks and other actions while reload is held", async () => {
+  let finish!: (value: unknown) => void;
+  state.reload.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => {
+    renderer = create(panel());
+  });
+  const reloadButton = button("Reload MCPs");
+  await act(async () => {
+    reloadButton.props.onClick();
+    reloadButton.props.onClick();
+    button("Sign in").props.onClick();
+  });
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  expect(state.signIn).not.toHaveBeenCalled();
+  expect(button("Reload MCPs").props.disabled).toBe(true);
+  expect(button("Refresh status").props.disabled).toBe(true);
+  await act(async () =>
+    finish({ _tag: "Success", value: { status: "reloaded", failedServers: [] } }),
+  );
+  expect(button("Reload MCPs").props.disabled).toBe(false);
+});
+
+it("clears confirmation on target changes and ignores a late result from a previous target", async () => {
+  state.reload.mockResolvedValueOnce({
+    _tag: "Success",
+    value: { status: "confirmation-required", failedServers: [] },
+  });
+  await act(async () => {
+    renderer = create(panel());
+  });
+  await act(async () => button("Reload MCPs").props.onClick());
+  expect(paragraphs()).toContain("increase token usage");
+  await act(async () => renderer!.update(panel("next")));
+  expect(paragraphs()).not.toContain("increase token usage");
+  let finish!: (value: unknown) => void;
+  state.reload.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => button("Reload MCPs").props.onClick());
+  await act(async () => renderer!.update(panel("last")));
+  expect(button("Reload MCPs").props.disabled).toBe(false);
+  await act(async () =>
+    finish({ _tag: "Success", value: { status: "reloaded", failedServers: ["Old target"] } }),
+  );
+  expect(paragraphs()).not.toContain("Old target");
+  expect(paragraphs()).not.toContain("MCP reload requested.");
+  expect(state.reload).toHaveBeenCalledTimes(2);
+});
+
+it("reports failed reloads and never retries automatically", async () => {
+  state.reload.mockResolvedValueOnce({ _tag: "Failure" });
+  await act(async () => {
+    renderer = create(panel());
+  });
+  await act(async () => button("Reload MCPs").props.onClick());
+  await act(async () => {
+    vi.advanceTimersByTime(6_000);
+  });
+  expect(paragraphs()).toContain("Could not reload MCP servers.");
+  expect(state.reload).toHaveBeenCalledTimes(1);
+  expect(button("Reload MCPs").props.disabled).toBe(false);
 });

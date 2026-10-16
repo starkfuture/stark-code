@@ -76,6 +76,19 @@ reported accounts, refresh provider status, and confirm the second instance has
 its own shadow path and login. A shadow-home conflict usually means the directory
 contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 
+## Reload MCP connections
+
+In a live conversation in the local desktop app, open **Tools → MCP** and
+choose **Reload MCPs**. This asks the selected Codex chat connection to reload its
+MCP configuration; watch the server list for connection results. **Refresh status**
+only rereads that list. No model turn is started.
+**Settings → MCP servers** can inspect connections, but cannot reload existing
+conversations.
+
+The native Codex terminal has separate connections and no live MCP reload command.
+Its **MCPs** menu provides `/mcp` for inspection. Restart Codex and resume the
+session to load changed configuration.
+
 ## Answer questions while Codex works
 
 Codex can ask a question and keep working. Answer it in the thread's question

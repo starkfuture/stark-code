@@ -16,6 +16,18 @@ On macOS, **Settings → General → Native shell** controls extra non-secret lo
 shell variables imported when the app starts. `AGENT_WORKSPACE` is included by
 default. Restart Stark Code after changing this list.
 
+### Reload MCPs and plugins
+
+Claude's **Reload MCPs** menu offers `/reload-plugins` to apply plugin changes,
+`/mcp reconnect all` to retry failed connections, and `/mcp` to manage individual
+servers. The commands are copied for you to paste at an empty CLI prompt and run.
+They do not clear your input, submit a prompt, or restart the terminal. Claude may
+ask before applying plugin changes that increase the next turn's token cost.
+
+Codex's **MCPs** menu offers `/mcp` for inspection. Its terminal does not support
+a live reload command; restart and resume Codex to pick up changed configuration.
+The MCP reload control in chat mode affects the chat connection, not this terminal.
+
 ### Read completed native replies
 
 Choose **Reader** above a native Claude or Codex terminal to read completed replies

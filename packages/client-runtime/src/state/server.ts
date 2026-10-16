@@ -1079,6 +1079,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:mcp-reconnect",
       tag: WS_METHODS.mcpServerReconnect,
     }),
+    reloadMcpServers: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-reload",
+      tag: WS_METHODS.mcpServersReload,
+    }),
     setMcpServerEnabled: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:mcp-set-enabled",
       tag: WS_METHODS.mcpServerSetEnabled,

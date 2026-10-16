@@ -180,6 +180,8 @@ import {
   McpServerSubmitCallbackInput,
   McpServersListInput,
   McpServersListResult,
+  McpServersReloadInput,
+  McpServersReloadResult,
   McpServerSignInStart,
   McpServerRequestError,
 } from "./mcpServers.ts";
@@ -444,6 +446,7 @@ export const WS_METHODS = {
   mcpAppsReadResource: "mcpApps.readResource",
   mcpAppsUpdateModelContext: "mcpApps.updateModelContext",
   mcpServersList: "mcp.servers.list",
+  mcpServersReload: "mcp.servers.reload",
   mcpServerReconnect: "mcp.server.reconnect",
   mcpServerSetEnabled: "mcp.server.setEnabled",
   mcpServerSignIn: "mcp.server.signIn",
@@ -1414,6 +1417,11 @@ const WsMcpServerReconnectRpc = Rpc.make(WS_METHODS.mcpServerReconnect, {
   payload: McpServerActionInput,
   error: McpServerRpcError,
 });
+const WsMcpServersReloadRpc = Rpc.make(WS_METHODS.mcpServersReload, {
+  payload: McpServersReloadInput,
+  success: McpServersReloadResult,
+  error: McpServerRpcError,
+});
 const WsMcpServerSetEnabledRpc = Rpc.make(WS_METHODS.mcpServerSetEnabled, {
   payload: McpServerSetEnabledInput,
   error: McpServerRpcError,
@@ -2160,6 +2168,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderUploadFeedbackRpc,
   WsMcpServersListRpc,
   WsMcpServerReconnectRpc,
+  WsMcpServersReloadRpc,
   WsMcpServerSetEnabledRpc,
   WsMcpServerSignInRpc,
   WsMcpServerSubmitCallbackRpc,

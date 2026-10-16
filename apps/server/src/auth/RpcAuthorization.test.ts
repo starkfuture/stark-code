@@ -133,6 +133,9 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.mcpServerReconnect)).toBe(
       AuthOrchestrationOperateScope,
     );
+    expect(requiredScopeForRpcMethod(WS_METHODS.mcpServersReload)).toBe(
+      AuthOrchestrationOperateScope,
+    );
     for (const method of [
       WS_METHODS.mcpServerSetEnabled,
       WS_METHODS.mcpServerSignIn,

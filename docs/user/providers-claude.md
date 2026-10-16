@@ -132,6 +132,17 @@ Claude supports the action. **Settings → MCP servers** also works without an o
 thread. Remote clients can view cached status but cannot start a cold inspection
 session or change server connections.
 
+In the conversation's **Tools → MCP** panel, choose **Reload MCPs** to pick up plugin changes and reconnect enabled external
+servers in the selected chat session. Disabled servers stay disabled. If Claude
+reports that a plugin change affects its prompt cache, choose whether to apply it;
+applying it can increase input-token usage on the next turn. The reload itself
+does not send a message to the model. **Refresh status** only rereads the list.
+Reload is available from a live conversation; Settings only inspects its own
+separate connection and cannot reload existing conversations.
+
+Native shells have separate connections. Their **Reload MCPs** menu provides
+Claude's own commands; paste one at an empty terminal prompt and press Enter.
+
 ## Context details
 
 Open **Details** from the context meter for Claude's context breakdown. The summary

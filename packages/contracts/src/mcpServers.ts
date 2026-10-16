@@ -59,8 +59,22 @@ export type McpServersListInput = typeof McpServersListInput.Type;
 export const McpServersListResult = Schema.Struct({
   servers: Schema.Array(McpServerStatusEntry),
   live: Schema.Boolean,
+  canReload: Schema.optional(Schema.Boolean),
 });
 export type McpServersListResult = typeof McpServersListResult.Type;
+export const McpServersReloadInput = Schema.Struct({
+  ...TargetFields,
+  force: Schema.optional(Schema.Boolean),
+}).check(target);
+export type McpServersReloadInput = typeof McpServersReloadInput.Type;
+export const McpServersReloadResult = Schema.Struct({
+  status: Schema.Literals(["reloaded", "confirmation-required"]),
+  failedServers: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(256))).check(
+    Schema.isMaxLength(2048),
+  ),
+  pluginErrors: Schema.optional(NonNegativeInt),
+});
+export type McpServersReloadResult = typeof McpServersReloadResult.Type;
 export const McpServerActionInput = Schema.Struct({
   ...TargetFields,
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),

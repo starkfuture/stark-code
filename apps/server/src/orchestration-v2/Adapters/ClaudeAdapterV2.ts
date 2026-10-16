@@ -18,7 +18,10 @@ import {
   makeClaudeHookEventMapper,
   type HookRunDisplay,
 } from "../../provider/Drivers/ClaudeHookEvents.ts";
-import { makeClaudeSessionCatalog } from "../../provider/Drivers/ClaudeSessionCatalog.ts";
+import {
+  catalogText,
+  makeClaudeSessionCatalog,
+} from "../../provider/Drivers/ClaudeSessionCatalog.ts";
 import {
   claudeContextBreakdown,
   unavailableContextBreakdown,
@@ -71,6 +74,7 @@ import {
   type SlashCommand,
   type McpServerStatus,
   type SDKControlReloadSkillsResponse,
+  type SDKControlReloadPluginsResponse,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   UserShellCommandRunner,
@@ -464,6 +468,9 @@ export interface ClaudeAgentSdkQuerySession {
     SDKControlReloadSkillsResponse,
     ClaudeAgentSdkQueryRunnerError
   >;
+  readonly reloadPlugins?: (options: {
+    readonly holdOnCacheImpact: boolean;
+  }) => Effect.Effect<SDKControlReloadPluginsResponse, ClaudeAgentSdkQueryRunnerError>;
   readonly getContextUsage?: (input: {
     detail: "summary" | "full";
   }) => Effect.Effect<SDKControlGetContextUsageResponse, ClaudeAgentSdkQueryRunnerError>;
@@ -935,6 +942,11 @@ export const layerQueryRunner: Layer.Layer<
             Effect.tryPromise({
               try: () => queryRuntime.reloadSkills(),
               catch: (cause) => queryRunnerError(cause, "reloadSkills"),
+            }),
+          reloadPlugins: (options) =>
+            Effect.tryPromise({
+              try: () => queryRuntime.reloadPlugins(options),
+              catch: (cause) => queryRunnerError(cause, "reloadPlugins"),
             }),
           getContextUsage: (input) =>
             Effect.tryPromise({
@@ -3632,6 +3644,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     getQuery: Effect.Effect<ClaudeAgentSdkQuerySession, ProviderAdapter.ProviderAdapterV2Error>,
     cwd: string | null,
     onListFailure: Effect.Effect<void> = Effect.void,
+    onReload: (result: SDKControlReloadPluginsResponse) => Effect.Effect<void> = () => Effect.void,
   ): ProviderAdapter.ProviderAdapterV2McpServers => {
     const action = <A>(
       name: string,
@@ -3668,6 +3681,61 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           Effect.mapError(() => mcpControlError("claudeAgent", "list")),
           Effect.tapError(() => onListFailure),
         ),
+      reload: ({ force }) =>
+        Effect.gen(function* () {
+          const query = yield* getQuery;
+          if (query.reloadPlugins === undefined || query.mcpServerStatus === undefined)
+            return yield* mcpControlError("claudeAgent", "reload");
+          const before = yield* query.mcpServerStatus();
+          const reloaded = yield* query.reloadPlugins({ holdOnCacheImpact: !force });
+          if (reloaded.held === true)
+            return { status: "confirmation-required" as const, failedServers: [] };
+          const failed = new Set<string>();
+          const after = new Map(reloaded.mcpServers.map((server) => [server.name, server]));
+          for (const server of before) {
+            if (catalogText(server.name, 256).toLowerCase() === "stark-code") continue;
+            const current = after.get(server.name);
+            if (!current) continue;
+            // Reloading plugin metadata must not silently re-enable a disabled connection.
+            if (server.status === "disabled") {
+              if (current.status !== "disabled") {
+                const restored =
+                  query.toggleMcpServer === undefined
+                    ? undefined
+                    : yield* query.toggleMcpServer(server.name, false).pipe(Effect.result);
+                if (restored?._tag !== "Success") failed.add(server.name);
+              }
+              continue;
+            }
+            if (
+              server.status === "needs-auth" ||
+              current.status === "needs-auth" ||
+              current.status === "disabled"
+            )
+              continue;
+            const connected =
+              query.reconnectMcpServer === undefined
+                ? undefined
+                : yield* query.reconnectMcpServer(server.name).pipe(Effect.result);
+            if (connected?._tag !== "Success") failed.add(server.name);
+          }
+          // Refreshing status is best-effort once the reload has already applied.
+          const refreshed = yield* query
+            .mcpServerStatus()
+            .pipe(Effect.orElseSucceed(() => reloaded.mcpServers));
+          for (const server of refreshed)
+            if (
+              server.status === "failed" &&
+              catalogText(server.name, 256).toLowerCase() !== "stark-code"
+            )
+              failed.add(server.name);
+          yield* onReload({ ...reloaded, mcpServers: [...refreshed] });
+          return {
+            status: "reloaded" as const,
+            failedServers: [...failed],
+            pluginErrors: reloaded.error_count,
+          };
+        }).pipe(Effect.mapError(() => mcpControlError("claudeAgent", "reload"))),
       reconnect: (name) =>
         action(
           name,
@@ -10073,6 +10141,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ),
             ),
             input.runtimePolicy.cwd,
+            Effect.void,
+            catalog.onReload,
           ),
           readContextUsage: ({ detail }) =>
             Effect.gen(function* () {

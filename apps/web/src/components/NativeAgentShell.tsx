@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import { useRef, useState } from "react";
 import { useNativeReplies } from "../state/nativeReplies";
 import { ResponseVisualPanel } from "./chat/ResponseVisualPanel";
+import { NativeMcpReloadControl } from "./NativeMcpReloadControl";
 import { TerminalViewport } from "./ThreadTerminalDrawer";
 import { Button } from "./ui/button";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -40,6 +41,7 @@ export function NativeAgentShell(props: {
   const [portalHost, setPortalHost] = useState<HTMLDivElement | null>(null);
   const expandButton = useRef<HTMLButtonElement>(null);
   const [resizeEpoch, setResizeEpoch] = useState(0);
+  const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
   const chooseView = (next: typeof view) => {
     setView(next);
     if (next !== "terminal") setReaderVisited(true);
@@ -109,6 +111,13 @@ export function NativeAgentShell(props: {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                <NativeMcpReloadControl
+                  driver={props.driver}
+                  onShowTerminal={() => {
+                    if (view === "reader") chooseView("terminal");
+                    setTerminalFocusRequest((request) => request + 1);
+                  }}
+                />
                 <Button
                   ref={expandButton}
                   variant="ghost"
@@ -177,7 +186,7 @@ export function NativeAgentShell(props: {
                   providerInstanceId={props.providerInstanceId}
                   agentShell
                   onSessionExited={() => setEnded(true)}
-                  focusRequestId={props.focusRequestId ?? 1}
+                  focusRequestId={(props.focusRequestId ?? 1) + terminalFocusRequest}
                   autoFocus
                   visible={view !== "reader"}
                   resizeEpoch={resizeEpoch}

@@ -2390,6 +2390,7 @@ const layerWsRpc = (
         [WS_METHODS.mcpServersList]: (input) => mcpServerRequests.list(input, mcpControlClient),
         [WS_METHODS.mcpServerReconnect]: (input) =>
           mcpServerRequests.reconnect(input, mcpControlClient),
+        [WS_METHODS.mcpServersReload]: (input) => mcpServerRequests.reload(input, mcpControlClient),
         [WS_METHODS.mcpServerSetEnabled]: (input) =>
           mcpServerRequests.setEnabled(input, mcpControlClient),
         [WS_METHODS.mcpServerSignIn]: (input) => mcpServerRequests.signIn(input, mcpControlClient),

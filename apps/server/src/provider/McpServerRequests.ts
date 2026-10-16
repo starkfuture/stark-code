@@ -4,6 +4,8 @@ import {
   mcpAuthorizationHost,
   type McpServersListInput,
   type McpServersListResult,
+  type McpServersReloadInput,
+  type McpServersReloadResult,
   type McpServerActionInput,
   type McpServerSetEnabledInput,
   type McpServerSubmitCallbackInput,
@@ -52,6 +54,10 @@ export class McpServerRequests extends Context.Service<
       input: McpServerActionInput,
       client: Client,
     ) => Effect.Effect<void, McpServerRequestError>;
+    readonly reload: (
+      input: McpServersReloadInput,
+      client: Client,
+    ) => Effect.Effect<McpServersReloadResult, McpServerRequestError>;
     readonly setEnabled: (
       input: McpServerSetEnabledInput,
       client: Client,
@@ -107,15 +113,22 @@ export function makeForResolver(
 ) {
   const pending = new Map<string, { start: McpServerSignInStart; expiresAt: number }>();
   const control = Effect.fn("McpServerRequests.control")(function* (
-    input: McpServerActionInput,
+    input: McpServersListInput & { readonly name?: string },
     client: Client,
+    threadOnly = false,
   ): Effect.fn.Return<ProviderAdapterV2McpServers, McpServerRequestError> {
     if (!client.desktopHost)
       return yield* new McpServerRequestError({
         reason: "desktop_required",
         message: "MCP controls are available only in the desktop app on this host.",
       });
-    if (isLocked(input.name))
+    if (threadOnly && input.threadId === undefined)
+      return yield* new McpServerRequestError({
+        reason: "unavailable",
+        message:
+          "Open a live conversation to reload its MCP servers. Settings only inspects project connections.",
+      });
+    if (input.name !== undefined && isLocked(input.name))
       return yield* new McpServerRequestError({
         reason: "locked",
         message: "The app's stark-code MCP server is required and cannot be changed.",
@@ -133,6 +146,10 @@ export function makeForResolver(
         const servers = yield* api.list().pipe(Effect.mapError(safeFailure));
         return {
           live: true,
+          canReload:
+            input.threadId !== undefined &&
+            client?.desktopHost === true &&
+            api.reload !== undefined,
           servers: servers
             .slice(0, 2048)
             .map((server): McpServerStatusEntry => ({
@@ -147,6 +164,28 @@ export function makeForResolver(
               })),
             }))
             .filter((server) => server.name.length > 0),
+        };
+      }),
+    reload: (input, client) =>
+      Effect.gen(function* () {
+        const api = yield* control(input, client, true);
+        if (api.reload === undefined) return yield* unavailable();
+        const result = yield* api
+          .reload({ force: input.force === true })
+          .pipe(Effect.mapError(safeFailure));
+        return {
+          status: result.status,
+          failedServers: [
+            ...new Set(
+              result.failedServers
+                .slice(0, 2048)
+                .map((name) => safeError(name).slice(0, 256))
+                .filter(Boolean),
+            ),
+          ],
+          ...(result.pluginErrors !== undefined && Number.isFinite(result.pluginErrors)
+            ? { pluginErrors: Math.max(0, Math.trunc(result.pluginErrors)) }
+            : {}),
         };
       }),
     reconnect: (input, client) =>

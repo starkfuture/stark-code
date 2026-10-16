@@ -3,6 +3,7 @@ import {
   isExpectedMcpCallback,
   type EnvironmentId,
   type McpServersListInput,
+  type McpServersReloadResult,
   type McpServerStatusEntry,
   type McpServerSignInStart,
   type ScopedThreadRef,
@@ -163,14 +164,26 @@ export function McpServerRows({
   );
 }
 
-export function McpServersPanel({
-  environmentId,
-  target,
-}: {
+type McpServersPanelProps = {
   environmentId: EnvironmentId;
   target: McpServersListInput;
-}) {
+};
+
+export function McpServersPanel(props: McpServersPanelProps) {
+  // A held confirmation and OAuth callback belong to exactly one target. A late
+  // action from the previous target must never populate the newly selected panel.
+  const targetKey = JSON.stringify([
+    props.environmentId,
+    props.target.threadId,
+    props.target.providerInstanceId,
+    props.target.projectId,
+  ]);
+  return <McpServersPanelTarget key={targetKey} {...props} />;
+}
+
+function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) {
   const query = useEnvironmentQuery(serverEnvironment.mcpServers({ environmentId, input: target }));
+  const reload = useAtomCommand(serverEnvironment.reloadMcpServers, { reportFailure: false });
   const reconnect = useAtomCommand(serverEnvironment.reconnectMcpServer, { reportFailure: false });
   const toggle = useAtomCommand(serverEnvironment.setMcpServerEnabled, { reportFailure: false });
   const signIn = useAtomCommand(serverEnvironment.signInMcpServer, { reportFailure: false });
@@ -183,9 +196,16 @@ export function McpServersPanel({
     ? isLocalMcpDesktopTarget(isElectron, presentation.entry.target)
     : false;
   const canReconnect = useEnvironmentScope(environmentId, "orchestration:operate") && desktopHost;
+  const canReload =
+    target.threadId !== undefined &&
+    canReconnect &&
+    query.data?.live === true &&
+    query.data.canReload === true;
   const canManage = useEnvironmentScope(environmentId, "providers:manage") && desktopHost;
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [reloadResult, setReloadResult] = useState<McpServersReloadResult | null>(null);
   const [pending, setPending] = useState<{
     name: string;
     flow: McpServerSignInStart;
@@ -222,9 +242,11 @@ export function McpServersPanel({
     return () => window.clearTimeout(timer);
   }, [pending, query.data]);
   const run = async (operation: () => Promise<{ readonly _tag: string }>) => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
+    setReloadResult(null);
     try {
       const result = await operation();
       if (result._tag === "Failure") setError("The MCP action failed. Refresh and try again.");
@@ -232,7 +254,38 @@ export function McpServersPanel({
     } catch {
       setError("The MCP action failed. Refresh and try again.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
+    }
+  };
+  const reloadServers = async (force = false) => {
+    if (
+      !canReload ||
+      busyRef.current ||
+      (!force && reloadResult?.status === "confirmation-required") ||
+      (force && reloadResult?.status !== "confirmation-required")
+    )
+      return;
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    setReloadResult(null);
+    try {
+      const result = await reload({
+        environmentId,
+        input: { ...target, ...(force ? { force: true } : {}) },
+      });
+      if (result._tag === "Failure") {
+        setError("Could not reload MCP servers. Refresh status and try again.");
+      } else {
+        setReloadResult(result.value);
+      }
+    } catch {
+      setError("Could not reload MCP servers. Refresh status and try again.");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      refresh.current();
     }
   };
   const action = (server: McpServerStatusEntry, kind: ServerAction) => {
@@ -279,21 +332,80 @@ export function McpServersPanel({
     pending?.opened && pending.flow.callbackExpected && waitingServer?.canSubmitCallback === true;
   return (
     <section className="space-y-4 text-sm" aria-label="MCP servers">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-medium">MCP servers</h3>
-        <Button size="xs" variant="outline" disabled={busy} onClick={() => refresh.current()}>
-          Refresh
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="xs" variant="outline" disabled={busy} onClick={() => refresh.current()}>
+            Refresh status
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={!canReload || busy || reloadResult?.status === "confirmation-required"}
+            onClick={() => void reloadServers()}
+          >
+            Reload MCPs
+          </Button>
+        </div>
       </div>
       {!desktopHost ? (
         <p className="text-xs text-muted-foreground">
           Status only. Manage MCP servers from the desktop host.
         </p>
       ) : null}
+      {target.threadId === undefined ? (
+        <p className="text-xs text-muted-foreground">
+          Settings inspects project connections. Open the conversation's Tools → MCP panel to reload
+          its connections.
+        </p>
+      ) : null}
       {error || query.error ? (
         <p role="alert" className="text-xs text-destructive">
           {error ?? "Could not read MCP status. Refresh and try again."}
         </p>
+      ) : null}
+      {reloadResult?.status === "confirmation-required" ? (
+        <div className="space-y-3 rounded-xl border p-3 text-xs" role="status">
+          <p>
+            Reloading may invalidate the agent's prompt cache and increase token usage on the next
+            turn. No servers have been reloaded yet.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={!canReload || busy}
+              onClick={() => void reloadServers(true)}
+            >
+              Reload anyway
+            </Button>
+            <Button size="xs" variant="ghost" disabled={busy} onClick={() => setReloadResult(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : reloadResult?.status === "reloaded" ? (
+        <div className="space-y-1 text-xs text-muted-foreground" role="status">
+          {reloadResult.failedServers.length > 0 || (reloadResult.pluginErrors ?? 0) > 0 ? (
+            <>
+              <p>MCP reload reported issues.</p>
+              {reloadResult.failedServers.length > 0 ? (
+                <p>
+                  Failed servers:{" "}
+                  {reloadResult.failedServers.map((name) => mcpDisplayText(name, 256)).join(", ")}.
+                </p>
+              ) : null}
+              {(reloadResult.pluginErrors ?? 0) > 0 ? (
+                <p>
+                  {reloadResult.pluginErrors} plugin{" "}
+                  {reloadResult.pluginErrors === 1 ? "error" : "errors"} reported.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p>MCP reload requested. Connection status updates below.</p>
+          )}
+        </div>
       ) : null}
       {pending ? (
         <div className="space-y-3 rounded-xl border p-3 text-xs">

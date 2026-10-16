@@ -34,6 +34,7 @@ import {
   ServerProviderSessionCatalog,
   McpServerStatusEntry,
   McpServerSignInStart,
+  McpServersReloadResult,
   ProviderContextBreakdown,
   ThreadId,
 } from "@starkfuture/contracts";
@@ -545,6 +546,9 @@ export type ProviderAdapterV2SubagentOutcome = {
 
 export interface ProviderAdapterV2McpServers {
   readonly list: () => Effect.Effect<readonly McpServerStatusEntry[], ProviderAdapterV2Error>;
+  readonly reload?: (options: {
+    readonly force: boolean;
+  }) => Effect.Effect<McpServersReloadResult, ProviderAdapterV2Error>;
   readonly reconnect: (name: string) => Effect.Effect<void, ProviderAdapterV2Error>;
   readonly setEnabled: (
     name: string,

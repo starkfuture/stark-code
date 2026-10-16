@@ -60,6 +60,27 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("requires the destination's operate grant to reload MCP servers", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const reload = createCommandPermissions(runtime, WS_METHODS.mcpServersReload);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(reload.permissionAtom(env))).toBe(false);
+        expect((yield* reload.authorize(registry, env).pipe(Effect.flip)).requiredScope).toBe(
+          AuthOrchestrationOperateScope,
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        yield* reload.authorize(registry, env);
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(reload.permissionAtom(other))).toBe(false);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect((yield* reload.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+      }),
+    ),
+  );
   it.effect("requires a destination agent grant before spending tokens on reply visuals", () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -15,10 +15,15 @@ const target = { threadId: ThreadId.make("thread") };
 const desktop = { desktopHost: true };
 const remote = { desktopHost: false };
 const setup = (
-  input: { signIn?: McpServerSignInStart; servers?: readonly McpServerStatusEntry[] } = {},
+  input: {
+    signIn?: McpServerSignInStart;
+    servers?: readonly McpServerStatusEntry[];
+    reload?: ProviderAdapterV2McpServers["reload"];
+  } = {},
 ) => {
   const calls: string[] = [];
   const api: ProviderAdapterV2McpServers = {
+    ...(input.reload ? { reload: input.reload } : {}),
     list: () => Effect.succeed(input.servers ?? []),
     reconnect: (name) =>
       Effect.sync(() => {
@@ -47,7 +52,7 @@ const setup = (
         calls.push(`signOut:${name}`);
       }),
   };
-  return { calls, service: makeForResolver(() => Effect.succeed(api)) };
+  return { calls, api, service: makeForResolver(() => Effect.succeed(api)) };
 };
 
 it.effect("returns no live data without starting a missing runtime", () =>
@@ -141,6 +146,114 @@ it.effect("rejects untrusted browser metadata and supports an already completed 
       completed: true,
       callbackExpected: false,
     });
+  }),
+);
+
+it.effect("requires a local desktop before resolving either reload target", () =>
+  Effect.gen(function* () {
+    let resolutions = 0;
+    const service = makeForResolver(() =>
+      Effect.sync(() => {
+        resolutions++;
+        return undefined;
+      }),
+    );
+    for (const input of [
+      target,
+      {
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        projectId: ProjectId.make("project"),
+        force: true,
+      },
+    ]) {
+      const denied = yield* service.reload(input, remote).pipe(Effect.flip);
+      assert.equal(denied.reason, "desktop_required");
+    }
+    assert.equal(resolutions, 0);
+  }),
+);
+
+it.effect("advertises reload support and requires an explicit force after a held reload", () =>
+  Effect.gen(function* () {
+    const requests: boolean[] = [];
+    const { service } = setup({
+      reload: ({ force }) =>
+        Effect.sync(() => {
+          requests.push(force);
+          return force
+            ? {
+                status: "reloaded" as const,
+                failedServers: [
+                  "\u001b[31mdocs\u001b[0m",
+                  "docs",
+                  "Authorization: token https://auth.test?code=secret",
+                ],
+                pluginErrors: 2,
+              }
+            : { status: "confirmation-required" as const, failedServers: [] };
+        }),
+    });
+    assert.isTrue((yield* service.list(target, desktop)).canReload);
+    assert.isFalse((yield* service.list(target, remote)).canReload);
+    assert.deepEqual(yield* service.reload(target, desktop), {
+      status: "confirmation-required",
+      failedServers: [],
+    });
+    assert.deepEqual(requests, [false]);
+    const applied = yield* service.reload({ ...target, force: true }, desktop);
+    assert.equal(applied.status, "reloaded");
+    assert.equal(applied.pluginErrors, 2);
+    assert.deepEqual(applied.failedServers, [
+      "docs",
+      "[redacted] https://auth.test?code=[redacted]",
+    ]);
+    assert.deepEqual(requests, [false, true]);
+  }),
+);
+
+it.effect("does not emulate reload for a provider without native reload support", () =>
+  Effect.gen(function* () {
+    const { service, calls } = setup();
+    assert.isFalse((yield* service.list(target, desktop)).canReload);
+    assert.equal((yield* service.reload(target, desktop).pipe(Effect.flip)).reason, "unavailable");
+    assert.deepEqual(calls, []);
+  }),
+);
+
+it.effect("never reloads or creates a Settings inspection session for a project-only target", () =>
+  Effect.gen(function* () {
+    let resolutions = 0;
+    let reloads = 0;
+    const { api } = setup({
+      reload: () =>
+        Effect.sync(() => {
+          reloads++;
+          return { status: "reloaded" as const, failedServers: [] };
+        }),
+    });
+    const service = makeForResolver(() =>
+      Effect.sync(() => {
+        resolutions++;
+        return api;
+      }),
+    );
+    const project = {
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      projectId: ProjectId.make("project"),
+    };
+    for (const force of [false, true]) {
+      const denied = yield* service.reload({ ...project, force }, desktop).pipe(Effect.flip);
+      assert.equal(denied.reason, "unavailable");
+      assert.include(denied.message, "Open a live conversation");
+    }
+    assert.equal(resolutions, 0);
+    assert.equal(reloads, 0);
+    assert.isFalse((yield* service.list(project, desktop)).canReload);
+    assert.equal(resolutions, 1);
+    assert.equal(reloads, 0);
+    assert.isTrue((yield* service.list(target, desktop)).canReload);
+    yield* service.reload(target, desktop);
+    assert.equal(reloads, 1);
   }),
 );
 

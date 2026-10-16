@@ -1841,6 +1841,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         action(name, "reconnect", (client) =>
           client.request("config/mcpServer/reload", undefined).pipe(Effect.asVoid),
         ),
+      reload: () =>
+        observedClient.pipe(
+          Effect.flatMap((client) => client.request("config/mcpServer/reload", undefined)),
+          Effect.as({ status: "reloaded" as const, failedServers: [] }),
+          Effect.mapError(() => mcpControlError("codex", "reload")),
+        ),
       setEnabled: (name, enabled) =>
         action(name, "change", (client) =>
           Effect.gen(function* () {

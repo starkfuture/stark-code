@@ -4,6 +4,7 @@ import { ThreadId, ProjectId } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   McpServersListInput,
+  McpServersReloadInput,
   McpServerStatusEntry,
   mcpAuthorizationHost,
   isExpectedMcpCallback,
@@ -11,6 +12,20 @@ import {
 const decodeStatus = Schema.decodeUnknownSync(McpServerStatusEntry);
 
 describe("MCP control contracts", () => {
+  it("requires a single reload target and a boolean force choice", () => {
+    const decode = Schema.decodeUnknownSync(McpServersReloadInput);
+    expect(decode({ threadId: "thread" })).toEqual({ threadId: "thread" });
+    expect(
+      decode({ providerInstanceId: "claudeAgent", projectId: "project", force: true }),
+    ).toEqual({ providerInstanceId: "claudeAgent", projectId: "project", force: true });
+    for (const input of [
+      {},
+      { projectId: "project" },
+      { threadId: "thread", providerInstanceId: "claudeAgent", projectId: "project" },
+      { threadId: "thread", force: "yes" },
+    ])
+      expect(() => decode(input)).toThrow();
+  });
   it("requires one unambiguous thread or project target", () => {
     const decode = Schema.decodeUnknownSync(McpServersListInput);
     expect(decode({ threadId: ThreadId.make("thread") })).toEqual({ threadId: "thread" });

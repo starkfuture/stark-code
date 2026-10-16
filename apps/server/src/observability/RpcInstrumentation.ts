@@ -162,6 +162,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.providerForgetPermissionRule]: "provider",
   [WS_METHODS.mcpServersList]: "provider",
   [WS_METHODS.mcpServerReconnect]: "provider",
+  [WS_METHODS.mcpServersReload]: "provider",
   [WS_METHODS.mcpServerSetEnabled]: "provider",
   [WS_METHODS.mcpServerSignIn]: "provider",
   [WS_METHODS.mcpServerSubmitCallback]: "provider",

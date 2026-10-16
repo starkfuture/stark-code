@@ -216,7 +216,7 @@ export function SideWorkPanel(props: {
         {(
           [
             ["question", "Side chat"],
-            ["format", "Make visual"],
+            ["format", "Reader"],
             ["agents", "Agents"],
           ] as const
         ).map(([value, label]) => (

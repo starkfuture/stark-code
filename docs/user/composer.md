@@ -267,7 +267,7 @@ server settings.
 ## Tools beside your chat
 
 Use **Tools** to open Pages, Files, Changes, a terminal, or Conversation tools
-(side chats, Make visual, and agents). Switching tools keeps your open pages and
+(Reader, side chats, and agents). Switching tools keeps your open pages and
 side-chat draft in place. Expand a panel to read across the app, or close it to
 return to the conversation.
 

@@ -154,6 +154,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
       "dataLocalSrc",
       "dataMarkdownTitle",
       "dataStandalone",
+      "dataReaderScreenshot",
     ],
   },
   protocols: {

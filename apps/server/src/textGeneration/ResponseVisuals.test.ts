@@ -266,6 +266,132 @@ it.layer(base)("ResponseVisuals", (it) => {
       }).pipe(Effect.scoped),
   );
 
+  it.effect("summarizes only the selected answer with a smaller bounded Sonnet call", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const summaryBullets = [
+        "The change is implemented, but live verification is still pending.",
+        "Review the result before publishing.",
+      ];
+      f.control.output = envelope({
+        ...useful,
+        summary: "The change needs verification before publishing.",
+        summaryBullets,
+        table: { columns: ["Step", "Action"], rows: [["One", "Review"]] },
+      });
+      const answer =
+        "SELECTED ANSWER: Implemented the change. Live verification is pending. Review before publishing.";
+      const result = yield* f.service.format({ threadId, answer, visualRequest: "summary" });
+      expect(result.summary).toBe("The change needs verification before publishing.");
+      expect(result.summaryBullets).toEqual(summaryBullets);
+      expect(result.table).toBeNull();
+      expect(result.mermaid).toBeNull();
+      expect(result.reason).toBeNull();
+      expect(f.calls).toHaveLength(1);
+      const command = f.calls[0]!;
+      const args = command.args;
+      expect(command.options.env?.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("768");
+      for (const [flag, value] of [
+        ["--model", "claude-sonnet-5-5"],
+        ["--effort", "low"],
+        ["--max-turns", "1"],
+        ["--max-budget-usd", "0.08"],
+        ["--tools", ""],
+        ["--mcp-config", '{"mcpServers":{}}'],
+      ])
+        expect(args[args.indexOf(flag!) + 1]).toBe(value);
+      expect(args[args.indexOf("--system-prompt") + 1]).toContain(
+        "do not turn a proposal or unverified claim into a completed action",
+      );
+      expect(args[args.indexOf("--system-prompt") + 1]).not.toContain('"flowchart"');
+      expect(args.join(" ")).not.toContain(answer);
+      expect(fromJson(f.prompts[0])).toEqual({
+        answer,
+        language: "same as answer",
+        visualRequest: "summary",
+      });
+      expect(result.generationUsage?.outputTokens).toBe(60);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("caches summaries independently from visuals and restores the bullets", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const input = { threadId, answer: "Prepare the change, then review the pending work." };
+      const visual = yield* f.service.format(input);
+      expect(visual.summaryBullets).toBeUndefined();
+      const summaryBullets = ["Prepare the change.", "Review the pending work."];
+      f.control.output = envelope({ summary: null, summaryBullets });
+      const summary = yield* f.service.format({ ...input, visualRequest: "summary" });
+      expect(summary.summaryBullets).toEqual(summaryBullets);
+      expect(summary.cacheHit).toBe(false);
+      expect(f.calls).toHaveLength(2);
+      const restored = yield* f.build;
+      expect(yield* restored.format({ ...input, visualRequest: "summary" })).toEqual({
+        ...summary,
+        cacheHit: true,
+      });
+      expect(yield* restored.format(input)).toEqual({ ...visual, cacheHit: true });
+      expect(f.calls).toHaveLength(2);
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* settings.updateSettings({
+        projectSettingsOverrides: {
+          [projectId]: {
+            providerInstances: { [ProviderInstanceId.make("claudeAgent")]: { enabled: false } },
+          },
+        },
+      });
+      expect(
+        (yield* restored.format({ ...input, visualRequest: "summary" }).pipe(Effect.flip)).reason,
+      ).toBe("disabled");
+      expect(f.calls).toHaveLength(2);
+      yield* settings.updateSettings({ projectSettingsOverrides: { [projectId]: null } });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps a valid summary part but never substitutes a diagram or reason for it", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.control.output = envelope({ summary: "x".repeat(281), summaryBullets: ["Review first."] });
+      const bullets = yield* f.service.format({
+        threadId,
+        answer: "Review first, then publish.",
+        visualRequest: "summary",
+      });
+      expect(bullets.summary).toBeNull();
+      expect(bullets.summaryBullets).toEqual(["Review first."]);
+      f.control.output = envelope({ summary: "Review first.", summaryBullets: ["x".repeat(241)] });
+      const lead = yield* f.service.format({
+        threadId,
+        answer: "Review first, and publish only when approved.",
+        visualRequest: "summary",
+      });
+      expect(lead.summary).toBe("Review first.");
+      expect(lead.summaryBullets).toBeUndefined();
+      for (const summaryBullets of [
+        undefined,
+        [],
+        [""],
+        ["   "],
+        Array(6).fill("Too many bullets."),
+      ]) {
+        f.control.output = envelope({
+          ...useful,
+          summary: "   ",
+          summaryBullets,
+          reason: "The flowchart is enough.",
+        });
+        expect(
+          (yield* f.service
+            .format({ threadId, answer: "Prepare, then review.", visualRequest: "summary" })
+            .pipe(Effect.flip)).reason,
+        ).toBe("output");
+      }
+      expect(f.calls).toHaveLength(7);
+      expect(f.closed).toBe(7);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("permits no additions with a reason and safely constructs diagram labels", () =>
     Effect.gen(function* () {
       const f = yield* fixture;

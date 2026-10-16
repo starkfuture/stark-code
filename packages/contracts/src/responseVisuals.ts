@@ -7,7 +7,7 @@ export const ResponseVisualsInput = Schema.Struct({
   threadId: ThreadId,
   answer: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(24_000)),
   language: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(40))),
-  visualRequest: Schema.optionalKey(Schema.Literals(["auto", "table", "flowchart"])),
+  visualRequest: Schema.optionalKey(Schema.Literals(["auto", "table", "flowchart", "summary"])),
 });
 export type ResponseVisualsInput = typeof ResponseVisualsInput.Type;
 
@@ -35,6 +35,13 @@ export const ResponseVisualsUsage = Schema.Struct({
 });
 export const ResponseVisualsResult = Schema.Struct({
   summary: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(280))),
+  /** Present only for an explicit Summarize request; the original answer is never replaced. */
+  summaryBullets: Schema.optionalKey(
+    Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(240))).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(5),
+    ),
+  ),
   table: Schema.NullOr(ResponseVisualsTable),
   mermaid: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000))),
   reason: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(240))),
@@ -64,12 +71,12 @@ export class ResponseVisualsError extends Schema.TaggedError<ResponseVisualsErro
   override get message(): string {
     return {
       invalid: "Choose a nonempty answer of at most 24,000 characters and 48 KiB.",
-      busy: "A visual is already being prepared. Try again when it finishes.",
-      disabled: "Enable a Claude connection for this project to make a visual.",
+      busy: "A summary or visual is already being prepared. Try again when it finishes.",
+      disabled: "Enable a Claude connection for this project to summarize or make a visual.",
       unavailable:
         "Sonnet formatting is unavailable. Check the enabled Claude connection and try again.",
-      timeout: "The visual took too long. Your original answer is unchanged.",
-      output: "The formatter did not return a usable visual. Your original answer is unchanged.",
+      timeout: "Formatting took too long. Your original answer is unchanged.",
+      output: "The formatter did not return a usable result. Your original answer is unchanged.",
       storage: "The formatter could not create its isolated working directory.",
     }[this.reason];
   }

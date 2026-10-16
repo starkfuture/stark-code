@@ -1,5 +1,6 @@
 import { MarkdownFindContext, useFindRevealRef } from "./chat/markdownFindContext";
 import { AssistantReader } from "./reader/AssistantReader";
+import { remarkReaderScreenshots } from "./reader/readerScreenshots";
 import {
   buildFileLinkParentSuffixByPath,
   fileLinkLabel,
@@ -3381,9 +3382,15 @@ const CHAT_MARKDOWN_COMPONENTS = {
           <ChatMarkdownAssetImage
             environmentId={threadRef.environmentId}
             resource={{
-              _tag: "media-file",
+              _tag:
+                node?.properties?.dataReaderScreenshot === "workspace-file"
+                  ? "workspace-file"
+                  : "media-file",
               threadId: threadRef.threadId,
-              path: imageSource.path,
+              path:
+                node?.properties?.dataReaderScreenshot === "workspace-file"
+                  ? srcString
+                  : imageSource.path,
             }}
             alt={altText}
             kind={kind}
@@ -3504,18 +3511,38 @@ function ChatMarkdown({
     markdownUrlTransform,
     localMediaPreview,
     setLocalMediaPreview,
-  } = useChatMarkdownState({ text, ...props });
+  } = useChatMarkdownState({
+    text,
+    ...props,
+    remoteImagePolicy: props.remoteImagePolicy ?? (reader ? "click-to-load" : "automatic"),
+  });
   const incrementalParsing =
     props.isStreaming === true &&
     extraRemarkPlugins.length === 0 &&
     /(?:^|\n) {0,3}(?:`{3}|~{3})/.test(text);
-  const remarkPlugins = useMemo(
+  const remarkPlugins = useMemo<NonNullable<ReactMarkdownOptions["remarkPlugins"]>>(
     () => [
       ...(lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS),
       ...extraRemarkPlugins,
+      ...(reader && props.cwd && props.threadRef && !props.isStreaming
+        ? [
+            [remarkReaderScreenshots, { cwd: props.cwd }] as [
+              typeof remarkReaderScreenshots,
+              { cwd: string },
+            ],
+          ]
+        : []),
       ...(incrementalParsing ? [createIncrementalMarkdownPlugin()] : []),
     ],
-    [extraRemarkPlugins, incrementalParsing, lineBreaks],
+    [
+      extraRemarkPlugins,
+      incrementalParsing,
+      lineBreaks,
+      reader,
+      props.cwd,
+      props.threadRef,
+      props.isStreaming,
+    ],
   );
 
   // react-markdown converts unparsed HTML nodes to text when skipHtml is false.

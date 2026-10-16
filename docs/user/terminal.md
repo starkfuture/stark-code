@@ -19,8 +19,22 @@ default. Restart Stark Code after changing this list.
 ### Read completed native replies
 
 Choose **Reader** above a native Claude or Codex terminal to read completed replies
-with the same typography as chat. **Make visual** can add an optional overview of
-one reply. The terminal retains the original conversation and CLI controls.
+with headings, tables, comfortable spacing, and local screenshots. Choose **Both**
+to keep the same terminal beside the reply; on narrow windows they stack. **Fill
+window** gives either view the whole window. Changing views preserves the terminal
+session, selected reply, and pasted text. Escape restores the workspace when focus
+is in the expanded Reader; inside the terminal it remains a CLI key.
+
+The Reader follows the latest completed reply by default. Select an earlier reply
+to keep reading it as new replies arrive. **Text size** changes Reader text without
+changing the terminal. Screenshot paths inside the current folder appear inline;
+paths in code examples and outside the folder stay as text or links. Explicit
+Markdown images continue to work.
+
+Reading uses no AI tokens. **Summarize** adds a short lead and up to five bullets;
+**Make visual** adds a useful overview, table, or flowchart. Each button uses one
+bounded Sonnet call for only that reply, caches its result, and keeps the original
+below. **Hide overview** returns to reading without removing the saved result.
 
 Start a new native session after updating to enable capture. Codex may ask you to
 review and approve Stark Code's local Stop hook first; its existing hooks and

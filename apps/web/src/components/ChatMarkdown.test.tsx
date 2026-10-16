@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { EnvironmentId, type AuthEnvironmentScope } from "@starkfuture/contracts";
+import { EnvironmentId, ThreadId, type AuthEnvironmentScope } from "@starkfuture/contracts";
 import { createRoot } from "react-dom/client";
 import { useThreadFindHighlights } from "./chat/threadFindHighlights";
 import { searchableMessageSegments } from "@starkfuture/shared/threadFindText";
@@ -67,6 +67,7 @@ vi.mock("../state/session", async (importOriginal) => {
   };
 });
 vi.mock("../state/entities", () => ({
+  readEnvironmentSupportsServerBrowser: () => false,
   readThreadShell: () => null,
   useProjects: () => [],
   useServerConfigs: () => new Map(),
@@ -100,6 +101,33 @@ function codeButton(renderer: ReactTestRenderer, label: string) {
 }
 
 describe("ChatMarkdown remote media consent", () => {
+  it("requires a click for remote images in Reader by default", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () =>
+        root.render(
+          <ChatMarkdown
+            reader
+            cwd={undefined}
+            text="![Remote screenshot](https://images.test/shot.png)"
+          />,
+        ),
+      );
+      expect(container.querySelector("img")).toBeNull();
+      expect(container.textContent).toContain("Load image");
+      await act(async () => container.querySelector<HTMLButtonElement>("button")!.click());
+      expect(container.querySelector<HTMLImageElement>("img")?.src).toBe(
+        "https://images.test/shot.png",
+      );
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
   it.each([
     "https://images.example.test/first.png",
     "http://images.example.test/first.png",
@@ -174,6 +202,62 @@ describe("ChatMarkdown remote media consent", () => {
         cwd: "/repo",
         url: "https://raw.githubusercontent.com/example/project/main/chart.png",
       });
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      asset.mockRestore();
+      refresh.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("Reader screenshot paths", () => {
+  it("adds signed workspace previews while preserving text and authored-image routing", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const asset = vi.spyOn(assetUrls, "useAssetUrlState").mockReturnValue({ _tag: "Loading" });
+    const refresh = vi.spyOn(assetUrls, "useAssetUrlRefresh").mockReturnValue(async () => null);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const threadRef = {
+      environmentId: EnvironmentId.make("reader"),
+      threadId: ThreadId.make("reader-thread"),
+    };
+    const text =
+      "Before: /repo/screens/before.png\n\nAfter: `screens/after.png`\n\n![Authored](/tmp/authored.png)\n\nDo not read /private/personal.png or https://images.test/remote.png.\n\n```sh\necho screens/example.png\n```";
+    try {
+      await act(async () =>
+        root.render(
+          <ChatMarkdown reader cwd="/repo" threadRef={threadRef} text={text} isStreaming />,
+        ),
+      );
+      expect(asset.mock.calls.map((call) => call[1])).toEqual([
+        expect.objectContaining({ _tag: "media-file", path: "/tmp/authored.png" }),
+      ]);
+      asset.mockClear();
+      await act(async () =>
+        root.render(<ChatMarkdown reader cwd="/repo" threadRef={threadRef} text={text} />),
+      );
+      expect(asset.mock.calls.map((call) => call[1])).toEqual(
+        expect.arrayContaining([
+          { _tag: "workspace-file", threadId: threadRef.threadId, path: "screens/before.png" },
+          { _tag: "workspace-file", threadId: threadRef.threadId, path: "screens/after.png" },
+        ]),
+      );
+      expect(
+        asset.mock.calls.some((call) => JSON.stringify(call[1]).includes("personal.png")),
+      ).toBe(false);
+      expect(asset.mock.calls.some((call) => JSON.stringify(call[1]).includes("remote.png"))).toBe(
+        false,
+      );
+      expect(asset.mock.calls.some((call) => JSON.stringify(call[1]).includes("example.png"))).toBe(
+        false,
+      );
+      expect(container.textContent).toContain("Before:");
+      expect(container.textContent).toContain("before.png");
+      expect(container.textContent).toContain("After:");
+      expect(container.textContent).toContain("after.png");
     } finally {
       await act(async () => root.unmount());
       container.remove();

@@ -11874,7 +11874,7 @@ export default function ChatView(props: ChatViewProps) {
                   {
                     id: "conversation",
                     label: "Conversation tools",
-                    description: "Side chat, Make visual, and agents",
+                    description: "Reader, side chat, and agents",
                     active: sideWorkOpen,
                     onSelect: () => {
                       if (activeThreadRef)
@@ -12186,8 +12186,9 @@ export default function ChatView(props: ChatViewProps) {
             onDragLeave={workspaceFileDropHandlers.onDragLeave}
             onDrop={workspaceFileDropHandlers.onDrop}
           >
+            {/* The shell owns its stacking level so Fill window can cover the global toolbar. */}
             {nativeShellMode && activeThreadRef && nativeShellSelection && activeProject ? (
-              <div className="absolute inset-0 z-30" data-native-shell-overlay>
+              <div className="absolute inset-0" data-native-shell-overlay>
                 <NativeAgentShell
                   key={`${activeThreadKey}:${nativeShellSelection.instanceId}`}
                   threadRef={activeThreadRef}

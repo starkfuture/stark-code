@@ -192,10 +192,15 @@ it("lists completed replies and makes a visual of the selected answer without st
     { ...answer("Still streaming"), id: MessageId.make("streaming"), streaming: true },
     { ...answer("User prompt"), id: MessageId.make("prompt"), role: "user", createdBy: "user" },
   ]);
-  await click("Make visual");
+  await click("Reader");
   const select = container.querySelector<HTMLSelectElement>('[aria-label="Reply to read"]')!;
-  expect([...select.options].map((option) => option.value)).toEqual(["second", "first", "paste"]);
-  expect(select.value).toBe("second");
+  expect([...select.options].map((option) => option.value)).toEqual([
+    "latest",
+    "second",
+    "first",
+    "paste",
+  ]);
+  expect(select.value).toBe("latest");
   await act(() => {
     select.value = "first";
     select.dispatchEvent(new Event("change", { bubbles: true }));
@@ -218,7 +223,7 @@ it("lists completed replies and makes a visual of the selected answer without st
 
 it("shows native capture's empty state without substituting chat history or starting an agent", async () => {
   await render(true);
-  await click("Make visual");
+  await click("Reader");
   expect(container.textContent).toContain("Completed native replies appear here");
   expect(container.textContent).not.toContain("Main answer to visualize");
   expect(container.querySelector("[data-reply-reader]")).toBeNull();
@@ -242,7 +247,7 @@ it("reads a captured shell reply without starting a side chat", async () => {
     },
   ];
   await render(true);
-  await click("Make visual");
+  await click("Reader");
   expect(container.querySelector('[aria-label="Original reply"]')?.textContent).toContain(
     "Captured native answer",
   );

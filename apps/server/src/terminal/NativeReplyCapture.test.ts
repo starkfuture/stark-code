@@ -10,8 +10,11 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Scope from "effect/Scope";
+import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
+import { parse as parseToml } from "smol-toml";
 import * as NativeReplyCapture from "./NativeReplyCapture.ts";
+import { nativeAgentLaunch } from "./NativeAgentLaunch.ts";
 import type { NativeAgentReply } from "@starkfuture/contracts";
 
 const delivery = (values: Record<string, unknown> = {}) => ({
@@ -63,7 +66,91 @@ const create = Effect.fn(function* (directory?: string) {
   return { capture, launch, replies, root };
 });
 
+const decodeStopHooks = Schema.decodeUnknownSync(
+  Schema.Struct({
+    hooks: Schema.Struct({
+      Stop: Schema.Array(
+        Schema.Struct({
+          hooks: Schema.Array(
+            Schema.Struct({
+              type: Schema.Literal("command"),
+              command: Schema.String,
+              async: Schema.Boolean,
+            }),
+          ),
+        }),
+      ),
+    }),
+  }),
+);
+
 it.layer(NodeServices.layer)("native completed replies", (it) => {
+  it.effect.each(["claude", "codex"] as const)(
+    "captures %s replies through the hook in its real launch configuration",
+    (provider, ctx) =>
+      Effect.gen(function* () {
+        const platform = yield* HostProcess.Platform;
+        if (platform === "win32") return ctx.skip("POSIX hook execution requires a POSIX host");
+        const { capture, root } = yield* create();
+        const launch = yield* capture.bind({
+          threadId: `${provider}-launch-thread`,
+          terminalId: "native",
+          provider,
+        });
+        const { args } = nativeAgentLaunch({
+          driver: provider === "claude" ? "claudeAgent" : "codex",
+          config: {},
+          home: root,
+          platform,
+          nodeExecutable: process.execPath,
+          replyCaptureCommand: launch.command,
+        });
+        const settings =
+          provider === "claude"
+            ? JSON.parse(args[args.indexOf("--settings") + 1]!)
+            : parseToml(args.find((arg) => arg.startsWith("hooks="))!);
+        const stopHooks = decodeStopHooks(settings).hooks.Stop.flatMap((group) => group.hooks);
+        expect(stopHooks).toHaveLength(1);
+        expect(stopHooks[0]?.async).toBe(true);
+        const text =
+          "# Verified reply\n\n**Result:** Ready to read.\n\n| Check | Result |\n| --- | --- |\n| Capture | Pass |\n\n![Screenshot](./screenshots/result.png)";
+        const result = yield* Effect.promise(
+          () =>
+            new Promise<{ code: number | null; out: string; err: string }>((resolve, reject) => {
+              // Run the command a real CLI receives, never a model turn or user hook.
+              const child = NodeChildProcess.spawn("/bin/sh", ["-c", stopHooks[0]!.command], {
+                env: { PATH: "/usr/bin:/bin", ...launch.env },
+              });
+              let out = "";
+              let err = "";
+              child.stdout.on("data", (chunk) => (out += chunk));
+              child.stderr.on("data", (chunk) => (err += chunk));
+              child.on("error", reject);
+              child.on("close", (code) => resolve({ code, out, err }));
+              child.stdin.end(
+                JSON.stringify({
+                  hook_event_name: "Stop",
+                  session_id: `${provider}-session`,
+                  ...(provider === "codex" ? { turn_id: "codex-turn" } : {}),
+                  stop_hook_active: false,
+                  last_assistant_message: text,
+                }),
+              );
+            }),
+        );
+        expect(result).toEqual({ code: 0, out: "{}\n", err: "" });
+        const retained = yield* capture.list({ threadId: `${provider}-launch-thread` });
+        expect(retained).toHaveLength(1);
+        expect(retained[0]).toMatchObject({
+          provider,
+          sessionId: `${provider}-session`,
+          turnId: provider === "codex" ? "codex-turn" : null,
+          text,
+          sequence: 1,
+        });
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("survives a hook that disconnects halfway through its POST", () =>
     Effect.gen(function* () {
       const { launch, capture } = yield* create();

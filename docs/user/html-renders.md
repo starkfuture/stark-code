@@ -6,7 +6,7 @@ Pages use your current theme, including custom themes, and follow light and dark
 
 Agents can place local images in a page by file path. Stark Code embeds them when the page is published, so the page keeps working after the original files move or are deleted. Deleting the thread deletes its pages.
 
-HTML tools are not pre-approved as read-only actions. Preview pages cannot connect to websites, and generated replies block external images, fonts, scripts and data requests. Ask the agent to embed the content it needs. For a compact overview of a completed answer, use **Workspace → Make visual**. It adds a summary, table or flowchart above the original reply.
+HTML tools are not pre-approved as read-only actions. Preview pages cannot connect to websites, and generated replies block external images, fonts, scripts and data requests. Ask the agent to embed the content it needs. For a compact overview of a completed answer, use **Tools → Conversation tools → Reader**. It adds a summary, table or flowchart above the original reply.
 
 Before publishing, agents check their work with screenshots from a small headless browser that Stark Code keeps for itself; it never uses a browser you installed. The first preview on a machine downloads it once (about 120 MB) into Stark Code's data folder, so that preview can take a minute. Browser tabs on a remote environment use the same browser, so whichever comes first downloads it. Some Linux hosts need [setup](remote-access.md#browser-host-setup) before it can start. Pages publish without it.
 

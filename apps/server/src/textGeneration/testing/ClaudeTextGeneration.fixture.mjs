@@ -29,6 +29,16 @@ const settingsIndex = argv.indexOf("--settings");
 if (settingsIndex === -1 || JSON.parse(argv[settingsIndex + 1]).disableAllHooks !== true) {
   fail("text generation must disable hooks", 10);
 }
+const helperSettings = JSON.parse(argv[settingsIndex + 1]);
+for (const key of [
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "CLAUDE_CODE_SUBAGENT_MODEL",
+]) {
+  if (process.env[key] !== "claude-sonnet-5-5" || helperSettings.env?.[key] !== "claude-sonnet-5-5")
+    fail("helper models must use Sonnet", 13);
+}
+if (process.env.CLAUDE_CODE_SUBAGENT_MODEL_FORCE !== "1") fail("subagent model must be forced", 14);
 const cwdMustNotBe = process.env.STARK_FAKE_CLAUDE_CWD_MUST_NOT_BE;
 if (cwdMustNotBe && NodeFS.realpathSync(process.cwd()) === NodeFS.realpathSync(cwdMustNotBe)) {
   fail("text generation ran in the project directory", 11);

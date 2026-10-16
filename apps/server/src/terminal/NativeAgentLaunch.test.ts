@@ -20,6 +20,35 @@ const defaultCodexPolicy = [
 ];
 
 describe("native agent shell launch", () => {
+  it.each([
+    "--model haiku",
+    "--model=claude-haiku-5-5",
+    "--fallback-model haiku",
+    "--advisor=claude-haiku-4-5",
+  ])("refuses an explicit Haiku launch: %s", (launchArgs) => {
+    expect(() =>
+      nativeAgentLaunch({ driver: "claudeAgent", config: { launchArgs }, home: "/tmp" }),
+    ).toThrow("Haiku is disabled");
+  });
+  it("pins helpers to Sonnet while preserving the main model and literal prompt", () => {
+    const { args } = nativeAgentLaunch({
+      driver: "claudeAgent",
+      config: {
+        launchArgs: "--model opus -- --model haiku",
+        customModels: ["haiku", "custom-sonnet"],
+      },
+      home: "/tmp",
+    });
+    expect(args.slice(0, 2)).toEqual(["--model", "opus"]);
+    expect(args.slice(-3)).toEqual(["--", "--model", "haiku"]);
+    const settings = JSON.parse(args[args.indexOf("--settings") + 1]!);
+    expect(settings).not.toHaveProperty("availableModels");
+    expect(settings.env).toMatchObject({
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-sonnet-5-5",
+      CLAUDE_CODE_SUBAGENT_MODEL: "claude-sonnet-5-5",
+      CLAUDE_CODE_SUBAGENT_MODEL_FORCE: "1",
+    });
+  });
   it("adds the bundled kit before the prompt while preserving user plugins, hooks and permission policy", () => {
     const launch = nativeAgentLaunch({
       driver: "claudeAgent",

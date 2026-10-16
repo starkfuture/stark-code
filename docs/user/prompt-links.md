@@ -15,9 +15,9 @@ and the model you picked. Sent messages have a **Copy prompt link** button too.
 You can also write a link by hand:
 
 ```
-https://unconfigured.invalid/new?prompt=Rate%20my%20swearing
-https://unconfigured.invalid/new?prompt=Fix%20the%20build&repo=owner/name&provider=codex&model=gpt-5.5
-https://unconfigured.invalid/new?pr=owner/name/123&prompt=Fix%20the%20failing%20check
+starkcode://new?prompt=Explain%20this%20project
+starkcode://new?prompt=Fix%20the%20build&repo=owner/name&provider=codex&model=gpt-5.5
+starkcode://new?pr=owner/name/123&prompt=Fix%20the%20failing%20check
 ```
 
 | Parameter  | Meaning                                                                       |
@@ -32,9 +32,9 @@ Encode the prompt for a URL. In JavaScript, use `encodeURIComponent`.
 
 ## Open a link
 
-On unconfigured.invalid, the link first asks where to open it: the desktop or mobile app, this browser
-when it is connected to a machine, or the download page. Select **Remember my choice** to skip
-this step next time.
+A `starkcode://` link opens the installed desktop app. A web link copied from a running
+server works only for people who can reach that server. This build has no public hosted
+app or download page.
 
 - **No `repo`**: the draft opens without a project, on the machine you used last.
 - **`repo`**: the draft opens in your most recently used project for that repository. A fork
@@ -47,7 +47,7 @@ this step next time.
   worktree. Stark Code checks the code out only after you confirm, because the checkout runs your
   setup script on it.
 
-A thread link with a prompt, such as `https://unconfigured.invalid/<environment>/<thread>?prompt=…`,
+A thread link with a prompt, such as `starkcode://threads/<environment>/<thread>?prompt=…`,
 puts the prompt in that thread's composer. If you already typed a draft there, Stark Code asks
 before it replaces it.
 

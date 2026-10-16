@@ -1,5 +1,16 @@
 # Claude
 
+Stark Code offers Sonnet, Opus and Fable. Older saved Haiku selections use Sonnet 5.5
+on the next app request; historical replies and usage keep their original model names.
+Claude's background helpers and subagents launched by Stark Code are configured to
+use Sonnet 5.5. Use Claude Code 2.1.284 or newer for that model and its subagent controls.
+Native forks and skills that explicitly inherit the main model keep the main model.
+
+This is an app launch policy, not a machine-wide model restriction. The unmodified
+native CLI still owns its `/model` command and personal settings, and opaque gateway
+model names cannot be identified by Stark Code. Strict organization-wide restrictions
+need Claude's managed settings. Stark Code does not edit your personal or managed settings.
+
 Stark Code uses Claude Code's login and configuration. Start with the default provider
 for one account; [provider setup](./install.md#providers) covers installation and
 shared provider settings.

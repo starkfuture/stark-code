@@ -22,6 +22,39 @@ import {
 } from "./modelOptions";
 
 describe("mobile model options", () => {
+  it("does not restore a saved Haiku selection as a custom fallback", () => {
+    const config = {
+      providers: [
+        {
+          instanceId: "claudeAgent",
+          driver: "claudeAgent",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: ["claude-sonnet-5-5", "claude-haiku-5-5"].map((slug) => ({
+            slug,
+            name: slug,
+            capabilities: {},
+            isCustom: false,
+          })),
+        },
+      ],
+    } as unknown as ServerConfig;
+    const options = buildModelOptions(
+      config,
+      { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-haiku-5-5" },
+      undefined,
+      null,
+    );
+    expect(options.map((model) => model.selection.model)).toEqual(["claude-sonnet-5-5"]);
+    expect(
+      resolveSelectableModelSelection(
+        config,
+        { instanceId: ProviderInstanceId.make("claudeAgent"), model: "haiku" },
+        null,
+      )?.model,
+    ).toBe("claude-sonnet-5-5");
+  });
   it("groups models by provider and flags legacy entries", () => {
     const config = {
       providers: [

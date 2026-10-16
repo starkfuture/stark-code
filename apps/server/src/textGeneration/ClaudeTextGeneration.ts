@@ -15,6 +15,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { type ClaudeSettings, TextGenerationError } from "@starkfuture/contracts";
+import { CLAUDE_HELPER_MODEL_ENV } from "@starkfuture/shared/claudeModelPolicy";
 import { resolveSpawnCommand } from "@starkfuture/shared/shell";
 
 import * as TextGenerationOperations from "@starkfuture/provider-core/server/textGenerationOperations";
@@ -170,6 +171,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       fastModeDescriptor?.type === "boolean" ? fastModeDescriptor.currentValue : undefined;
     const settings = {
       disableAllHooks: true,
+      env: CLAUDE_HELPER_MODEL_ENV,
       ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
       ...(fastMode ? { fastMode: true } : {}),
       ...(ultracode ? { ultracode: true } : {}),

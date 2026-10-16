@@ -24,6 +24,8 @@ import {
 import * as ModelCatalog from "@starkfuture/provider-core/server/ModelCatalog";
 import { BUNDLED_MODEL_MANIFEST, resolveProviderCatalog } from "./ModelManifest.ts";
 
+import { isClaudeHaikuModel, permittedClaudeModel } from "@starkfuture/shared/claudeModelPolicy";
+
 const CLAUDE = ProviderDriverKind.make("claudeAgent");
 const EMPTY_CAPABILITIES: ModelCapabilities = { optionDescriptors: [] };
 
@@ -173,7 +175,10 @@ export function resolveClaudeModelsForVersion(
   version: string | null | undefined,
 ): ReadonlyArray<ClaudeCatalogModel["model"]> {
   return catalog.models
-    .filter((entry) => isVersionSupported(entry.compatibility, version))
+    .filter(
+      (entry) =>
+        !isClaudeHaikuModel(entry.model.slug) && isVersionSupported(entry.compatibility, version),
+    )
     .map((entry) => entry.model);
 }
 
@@ -188,7 +193,12 @@ export function resolveClaudeUpdateRequiredModels(
   if (!version) return [];
   return catalog.models.flatMap(({ model, compatibility }) => {
     const minVersion = compatibility.minVersion;
-    if (model.isLegacy || !minVersion || compareSemverVersions(version, minVersion) >= 0) {
+    if (
+      isClaudeHaikuModel(model.slug) ||
+      model.isLegacy ||
+      !minVersion ||
+      compareSemverVersions(version, minVersion) >= 0
+    ) {
       return [];
     }
     return [
@@ -269,8 +279,9 @@ export function resolveClaudeCatalogApiModelId(
   catalog: ClaudeModelCatalog,
   modelSelection: ModelSelection,
 ): string {
-  const entry = resolveClaudeCatalogModel(catalog, modelSelection.model);
-  const slug = entry?.model.slug ?? modelSelection.model;
+  const requested = permittedClaudeModel(modelSelection.model);
+  const entry = resolveClaudeCatalogModel(catalog, requested);
+  const slug = permittedClaudeModel(entry?.model.slug ?? requested);
   const descriptors = getProviderOptionDescriptors({
     caps: entry?.model.capabilities ?? EMPTY_CAPABILITIES,
     selections: modelSelection.options,

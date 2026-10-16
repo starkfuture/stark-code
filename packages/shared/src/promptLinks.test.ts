@@ -46,7 +46,7 @@ describe("parseNewThreadLink", () => {
       value: {
         kind: "new",
         prompt: { text: "Rate me", hiddenCharacters: 0 },
-        repository: { owner: "example", name: "starkcode" },
+        repository: { owner: "example", name: "stark-code" },
         provider: "codex",
         model: "gpt-5",
       },
@@ -63,7 +63,7 @@ describe("parseNewThreadLink", () => {
         ok: true,
         value: {
           kind: "pull-request",
-          pullRequest: { owner: "example", name: "starkcode", number: 42 },
+          pullRequest: { owner: "example", name: "stark-code", number: 42 },
           prompt: null,
         },
       });
@@ -94,12 +94,13 @@ describe("link round trips", () => {
   it("builds a link that parses back to the same prompt", () => {
     const link = buildNewThreadLink({
       prompt: "Swear count & rating?",
-      repository: { owner: "example", name: "starkcode" },
+      repository: { owner: "example", name: "stark-code" },
       provider: "claudeAgent",
       model: "opus",
     });
     const path = promptLinkAppPath(link);
-    expect(path).toBe(new URL(link).pathname + new URL(link).search);
+    expect(link).toMatch(/^starkcode:\/\/new\?/);
+    expect(path).toBe(`/new${new URL(link).search}`);
     const parsed = parseNewThreadLink(new URL(link).search);
     expect(parsed.ok && parsed.value.kind === "new" && parsed.value.prompt.text).toBe(
       "Swear count & rating?",
@@ -109,12 +110,27 @@ describe("link round trips", () => {
   it("maps app scheme and hosted links to in-app paths, and nothing else", () => {
     expect(promptLinkAppPath("starkcode://new?prompt=hi")).toBe("/new?prompt=hi");
     expect(promptLinkAppPath("starkcode-dev://threads/env-1/thread-1")).toBe("/env-1/thread-1");
-    expect(promptLinkAppPath("https://unconfigured.invalid/env-1/thread-1?prompt=go")).toBe(
-      "/env-1/thread-1?prompt=go",
-    );
+    expect(promptLinkAppPath("https://unconfigured.invalid/env-1/thread-1?prompt=go")).toBeNull();
     expect(promptLinkAppPath("https://unconfigured.invalid/settings/general")).toBeNull();
     expect(promptLinkAppPath("https://evil.test/new?prompt=hi")).toBeNull();
     expect(promptLinkAppPath("starkcode://app/index.html")).toBeNull();
+  });
+
+  it("keeps an explicitly configured hosted origin", () => {
+    const origin = "https://team.example.com";
+    const link = buildNewThreadLink({ prompt: "Fix it", origin });
+    expect(link).toBe("https://team.example.com/new?prompt=Fix+it");
+    expect(promptLinkAppPath(link, origin)).toBe("/new?prompt=Fix+it");
+    expect(promptLinkAppPath(link)).toBeNull();
+    expect(promptLinkAppPath("https://team.example.com/env/thread?prompt=Fix+it", origin)).toBe(
+      "/env/thread?prompt=Fix+it",
+    );
+  });
+
+  it("uses the installed app when a hosted origin is blank", () => {
+    expect(buildNewThreadLink({ prompt: "Fix it", origin: "  " })).toBe(
+      "starkcode://new?prompt=Fix+it",
+    );
   });
 
   it("hands an in-app path to the installed app", () => {

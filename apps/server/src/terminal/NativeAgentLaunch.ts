@@ -1,4 +1,5 @@
 import { CODEX_PRIVACY_ARGS, PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/providerPrivacy";
+import { CLAUDE_HELPER_MODEL_ENV, isClaudeHaikuModel } from "@starkfuture/shared/claudeModelPolicy";
 import { BRAND } from "@starkfuture/shared/branding";
 import { STARK_PAGES_ENV } from "@starkfuture/shared/starkPages";
 import {
@@ -52,6 +53,20 @@ export function nativeAgentLaunch(input: {
   let args = delimiter < 0 ? userArgs : userArgs.slice(0, delimiter);
   if (input.driver === "claudeAgent") {
     const claudeSettings = decodeClaudeSettings(input.config);
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index]!;
+      const model =
+        arg === "--model" || arg === "--fallback-model" || arg === "--advisor"
+          ? args[index + 1]
+          : /^--(?:model|fallback-model|advisor)=/.test(arg)
+            ? arg.slice(arg.indexOf("=") + 1)
+            : undefined;
+      if (model && isClaudeHaikuModel(model)) {
+        throw new Error(
+          "Haiku is disabled in Stark Code. Choose Sonnet, Opus or Fable in Claude launch arguments.",
+        );
+      }
+    }
     const bypassRequested = args.some(
       (arg, index) =>
         /^--(?:allow-)?dangerously-skip-permissions(?:=|$)/.test(arg) ||
@@ -135,6 +150,7 @@ export function nativeAgentLaunch(input: {
           : { permissions: { disableBypassPermissionsMode: "disable" } }),
         env: {
           ...PROVIDER_PRIVACY_ENV,
+          ...CLAUDE_HELPER_MODEL_ENV,
           ...STARK_PAGES_ENV,
           ...(input.workbenchRoot
             ? starkWorkbenchEnvironment(input.workbenchRoot, input.nodeExecutable ?? "node")

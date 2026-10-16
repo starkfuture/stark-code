@@ -45,7 +45,7 @@ change. Export your theme as JSON to share it.
 ## Environment themes
 
 Environment themes and defaults come from the server serving your web app or the desktop app's
-main local environment. unconfigured.invalid and additional connections do not use them.
+main local environment. Additional connections do not supply appearance defaults to the client.
 
 Select a published theme in **Settings → Appearance** to follow its palette as the server updates
 it. **Duplicate** makes an independent copy you can edit. A saved custom theme with the same ID

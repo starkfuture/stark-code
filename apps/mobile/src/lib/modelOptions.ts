@@ -1,3 +1,4 @@
+import { isClaudeHaikuModel, permittedClaudeModel } from "@starkfuture/shared/claudeModelPolicy";
 import type { MenuAction } from "@react-native-menu/menu";
 import type {
   ModelCapabilities,
@@ -224,7 +225,9 @@ export function resolveSelectableModelSelection(
     isProviderEnabledForProject(config, provider, projectId) &&
     provider.installed &&
     provider.auth.status !== "unauthenticated"
-    ? selection
+    ? driver === "claudeAgent"
+      ? { ...selection, model: permittedClaudeModel(selection.model) }
+      : selection
     : null;
 }
 
@@ -296,7 +299,9 @@ export function buildModelOptions(
     const hiddenModels = new Set(preferences?.hiddenModels ?? []);
     const order = new Map((preferences?.modelOrder ?? []).map((slug, index) => [slug, index]));
     const models = provider.models.filter(
-      (model) => includeHidden || model.isCustom || !hiddenModels.has(model.slug),
+      (model) =>
+        (provider.driver !== "claudeAgent" || !isClaudeHaikuModel(model.slug)) &&
+        (includeHidden || model.isCustom || !hiddenModels.has(model.slug)),
     );
     if (order.size > 0)
       models.sort((a, b) => (order.get(a.slug) ?? Infinity) - (order.get(b.slug) ?? Infinity));
@@ -366,6 +371,8 @@ export function buildModelOptions(
         displayName: provider?.displayName ?? instanceConfig?.displayName,
         instanceId: fallbackModelSelection.instanceId,
       });
+      if (providerDriver === "claudeAgent" && isClaudeHaikuModel(fallbackModelSelection.model))
+        return [...options.values()];
       options.set(key, {
         key,
         label: model?.name ?? fallbackModelSelection.model,

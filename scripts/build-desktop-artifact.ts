@@ -2923,7 +2923,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "Development",
       synopsis: "Desktop GUI for coding agents",
       // Required by the .deb control file.
-      maintainer: "Stark Future <hello@unconfigured.invalid>",
+      maintainer: BRAND.companyName,
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
       // in the .desktop entry (Exec already gets %U), so browsers can hand
       // starkcode:// OAuth callbacks to the app.

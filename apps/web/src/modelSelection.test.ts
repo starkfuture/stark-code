@@ -68,6 +68,38 @@ function settingsWithProviderInstances(): UnifiedSettings {
 }
 
 describe("instance-scoped model selection", () => {
+  it("hides Haiku from stale server rows and custom settings", () => {
+    const instanceId = ProviderInstanceId.make("claude_test");
+    const settings: UnifiedSettings = {
+      ...DEFAULT_UNIFIED_SETTINGS,
+      providerInstances: {
+        [instanceId]: {
+          driver: ProviderDriverKind.make("claudeAgent"),
+          config: { customModels: ["haiku", "anthropic/claude-haiku-5-5", "custom-sonnet"] },
+        },
+      },
+    };
+    const entry = deriveProviderInstanceEntries([
+      provider({
+        instanceId,
+        models: ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-4-5"],
+      }),
+    ])[0]!;
+    expect(getAppModelOptionsForInstance(settings, entry).map((model) => model.slug)).toEqual([
+      "claude-sonnet-5-5",
+      "custom-sonnet",
+    ]);
+    const providers = [provider({ instanceId, models: ["claude-fable-5-1", "claude-sonnet-5-5"] })];
+    expect(resolveAppModelSelectionForInstance(instanceId, settings, providers, "haiku")).toBe(
+      "claude-sonnet-5-5",
+    );
+    expect(
+      resolveAppModelSelectionState(
+        { ...settings, textGenerationModelSelection: { instanceId, model: "claude-haiku-4-5" } },
+        providers,
+      ).model,
+    ).toBe("claude-sonnet-5-5");
+  });
   it("preserves server-provided legacy model metadata", () => {
     const baseProvider = provider({
       instanceId: "claudeAgent",

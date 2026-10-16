@@ -31,6 +31,11 @@
 Start with the [development runbook](./operations/development.md) and
 [contribution policy](../CONTRIBUTING.md).
 
+Development priorities follow the shared [Stark Code roadmap](../../agent_workspace/prototypes/stark-app/build-plan/ROADMAP.md),
+which takes precedence over its supporting research. Follow its release-1 order,
+starting with safety and model settings. The owner's all-Stark naming decision remains
+in effect; measure an upstream update before proposing any change to it.
+
 Internal notes preserve architectural decisions, constraints, and implementation traps that the
 source alone does not explain. Most code changes do not need an internal documentation update. Follow the
 [documentation rules](../AGENTS.md#documentation) before adding one.

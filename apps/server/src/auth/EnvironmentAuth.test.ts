@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
@@ -84,6 +85,36 @@ const requestMetadata = {
 };
 
 it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
+  it.effect(
+    "keeps full-access agent credentials off the human HTTP and WebSocket approval paths",
+    () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const issued = yield* serverAuth.issueMcpClientSession({
+          access: "full-access",
+          label: "Agent permission boundary test",
+          client: requestMetadata,
+        });
+        const request = HttpServerRequest.fromWeb(
+          new Request("http://localhost:3773/ws", {
+            headers: { authorization: `Bearer ${issued.token}` },
+          }),
+        );
+        expect((yield* serverAuth.authenticateMcpClient(request)).access).toBe("full-access");
+        expect((yield* serverAuth.authenticateHttpRequest(request).pipe(Effect.flip))._tag).toBe(
+          "ServerAuthInvalidCredentialError",
+        );
+        expect(
+          (yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(Effect.flip))._tag,
+        ).toBe("ServerAuthInvalidCredentialError");
+
+        const human = yield* serverAuth.issueSession();
+        expect(
+          (yield* serverAuth.authenticateHttpRequest(makeBearerRequest(human.token))).sessionId,
+        ).toBe(human.sessionId);
+      }).pipe(Effect.provide(layerEnvironmentAuth())),
+  );
+
   it.effect("uses the reusable dev cookie without overriding a normal scoped cookie", () =>
     Effect.gen(function* () {
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;

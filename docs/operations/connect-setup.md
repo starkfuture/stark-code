@@ -79,8 +79,8 @@ persistence and system-browser callback delivery.
 
 Clerk's native Android SDK uses `clerk://<applicationId>.callback`. In the Clerk instance selected by the app's publishable key, add each supported package to **Native applications > Allowlist for mobile SSO redirect**:
 
-| Variant     | Callback                                      |
-| ----------- | --------------------------------------------- |
+| Variant     | Callback                                             |
+| ----------- | ---------------------------------------------------- |
 | Development | `clerk://com.starkfuture.starkcode.dev.callback`     |
 | Preview     | `clerk://com.starkfuture.starkcode.preview.callback` |
 | Production  | `clerk://com.starkfuture.starkcode.callback`         |
@@ -97,7 +97,7 @@ For a production macOS app with bundle ID `com.starkfuture.starkcode`:
    This setting also configures Electron/macOS passkeys.
 4. Check `https://<frontend-api>/.well-known/apple-app-site-association`. Its
    `webcredentials.apps` must include `<TEAM_ID>.com.starkfuture.starkcode`.
-5. Configure signing as described in the [release runbook](./release.md#2-apple-signing--notarization-setup-macos).
+5. Configure signing as described in the [release runbook](./release.md#package-a-local-desktop-build).
 
 Local signed builds additionally use:
 

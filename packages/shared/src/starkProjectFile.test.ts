@@ -10,11 +10,11 @@ import {
 const decodeJson = Schema.decodeUnknownSync(StarkProjectFileFromJson);
 
 describe("buildStarkProjectFileJsonSchema", () => {
-  it("emits a draft 2020-12 schema with the published $id", () => {
+  it("emits a draft 2020-12 schema with the local $id", () => {
     const schema = buildStarkProjectFileJsonSchema();
 
     expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
-    expect(schema.$id).toBe("https://unconfigured.invalid/schema/stark.json");
+    expect(schema.$id).toBe("urn:stark-code:project-config");
     expect(schema.type).toBe("object");
     expect(schema.additionalProperties).toBe(false);
   });

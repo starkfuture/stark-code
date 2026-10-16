@@ -13,6 +13,7 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { isClaudeHaikuModel } from "@starkfuture/shared/claudeModelPolicy";
 import { createModelCapabilities } from "@starkfuture/shared/model";
 import { resolveSpawnCommand } from "@starkfuture/shared/shell";
 import {
@@ -522,7 +523,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     modelCatalog.models.map((entry) => entry.model),
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
-  );
+  ).filter((model) => !isClaudeHaikuModel(model.slug));
 
   if (!claudeSettings.enabled) {
     return buildServerProvider({
@@ -612,7 +613,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     resolveClaudeModelsForVersion(modelCatalog, parsedVersion),
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
-  );
+  ).filter((model) => !isClaudeHaikuModel(model.slug));
   const updateRequiredModels = resolveClaudeUpdateRequiredModels(modelCatalog, parsedVersion);
   const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
 
@@ -716,7 +717,7 @@ export const makePendingClaudeProvider = (
       modelCatalog.models.map((entry) => entry.model),
       claudeSettings.customModels,
       DEFAULT_CLAUDE_MODEL_CAPABILITIES,
-    );
+    ).filter((model) => !isClaudeHaikuModel(model.slug));
 
     if (!claudeSettings.enabled) {
       return buildServerProvider({

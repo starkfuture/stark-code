@@ -15,6 +15,25 @@ import {
 
 it.layer(NodeServices.layer)("ClaudeHome", (it) => {
   describe("Claude home resolution", () => {
+    it.effect("overrides inherited helper choices without mutating the caller's environment", () =>
+      Effect.gen(function* () {
+        const environment = {
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: "haiku",
+          CLAUDE_CODE_SUBAGENT_MODEL: "opus",
+          CLAUDE_CODE_SUBAGENT_MODEL_FORCE: "0",
+          KEEP: "value",
+        };
+        const resolved = yield* makeClaudeEnvironment({ homePath: "" }, environment);
+        expect(resolved).toMatchObject({
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-sonnet-5-5",
+          CLAUDE_CODE_SUBAGENT_MODEL: "claude-sonnet-5-5",
+          CLAUDE_CODE_SUBAGENT_MODEL_FORCE: "1",
+          KEEP: "value",
+        });
+        expect(environment.CLAUDE_CODE_SUBAGENT_MODEL).toBe("opus");
+      }),
+    );
+
     it.effect("treats empty, ~/.claude, and the expanded default as the same Claude home", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
@@ -23,7 +42,7 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         expect(yield* resolveClaudeHomePath({ homePath: "" })).toBe(resolved);
         expect(yield* resolveClaudeHomePath({ homePath: "~/.claude" })).toBe(resolved);
         expect(yield* resolveClaudeHomePath({ homePath: resolved })).toBe(resolved);
-        expect(yield* makeClaudeEnvironment({ homePath: "" })).toBe(process.env);
+        expect(yield* makeClaudeEnvironment({ homePath: "" })).toMatchObject(process.env);
 
         const key = `claude:home:${resolved}`;
         expect(yield* makeClaudeContinuationGroupKey({ homePath: "" })).toBe(key);

@@ -32,6 +32,8 @@ import {
 } from "./providerInstances";
 import { sortModelsForProviderInstance } from "./modelOrdering";
 
+import { CLAUDE_HELPER_MODEL, isClaudeHaikuModel } from "@starkfuture/shared/claudeModelPolicy";
+
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
 const DEFAULT_TEXT_GENERATION_INSTANCE_ID = ProviderInstanceId.make("codex");
@@ -63,7 +65,9 @@ function readInstanceCustomModels(
   if (config !== null && typeof config === "object") {
     const value = (config as Record<string, unknown>).customModels;
     if (Array.isArray(value)) {
-      return readCustomModelEntries(value);
+      return readCustomModelEntries(value).filter(
+        (model) => driverKind !== "claudeAgent" || !isClaudeHaikuModel(model.slug),
+      );
     }
   }
   return [];
@@ -181,7 +185,9 @@ function getAppModelOptions(
   // only built-ins are taken from the snapshot; custom rows are rebuilt from
   // settings below.
   const options: AppModelOption[] = rawModels
-    .filter((model) => !model.isCustom)
+    .filter(
+      (model) => !model.isCustom && (provider !== "claudeAgent" || !isClaudeHaikuModel(model.slug)),
+    )
     .map(toAppModelOption);
   const seen = new Set(options.map((option) => option.slug));
   const builtInModelSlugs = new Set(
@@ -231,7 +237,10 @@ export function getAppModelOptionsForInstance(
   selectedModel?: string | null,
 ): AppModelOption[] {
   const options: AppModelOption[] = entry.models
-    .filter((model) => !model.isCustom)
+    .filter(
+      (model) =>
+        !model.isCustom && (entry.driverKind !== "claudeAgent" || !isClaudeHaikuModel(model.slug)),
+    )
     .map(toAppModelOption);
   const seen = new Set(options.map((option) => option.slug));
   const builtInModelSlugs = new Set(
@@ -268,6 +277,8 @@ export function resolveAppModelSelection(
 ): string {
   const resolvedProvider = resolveSelectableProvider(providers, provider);
   const options = getAppModelOptions(settings, providers, resolvedProvider, selectedModel);
+  if (resolvedProvider === "claudeAgent" && selectedModel && isClaudeHaikuModel(selectedModel))
+    return CLAUDE_HELPER_MODEL;
   return (
     resolveSelectableModel(resolvedProvider, selectedModel, options) ??
     getDefaultServerModel(providers, resolvedProvider)
@@ -285,6 +296,8 @@ export function resolveAppModelSelectionForInstance(
     (candidate) => candidate.instanceId === instanceId,
   );
   if (!entry) return null;
+  if (entry.driverKind === "claudeAgent" && selectedModel && isClaudeHaikuModel(selectedModel))
+    return CLAUDE_HELPER_MODEL;
   const options = getAppModelOptionsForInstance(
     settings,
     entry,

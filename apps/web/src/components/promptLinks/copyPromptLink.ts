@@ -13,11 +13,10 @@ import {
 
 import { type ComposerThreadTarget, useComposerDraftStore } from "~/composerDraftStore";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
-import { promptLinkDeepLink } from "@starkfuture/shared/promptLinks";
 
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
-/** A shareable link to a prompt on the hosted app, or null when the prompt cannot fit in one. */
+/** A prompt deep link, or null when the prompt cannot fit in one. */
 export function promptLinkFor(
   prompt: string,
   context?: {
@@ -28,13 +27,7 @@ export function promptLinkFor(
 ): string | null {
   const trimmed = prompt.trim();
   if (trimmed.length === 0 || trimmed.length > PROMPT_LINK_MAX_PROMPT_LENGTH) return null;
-  const relative = buildNewThreadLink({
-    prompt: trimmed,
-    ...context,
-    origin: "https://app.invalid",
-  });
-  const localLink = new URL(relative);
-  return promptLinkDeepLink(`${localLink.pathname}${localLink.search}`);
+  return buildNewThreadLink({ prompt: trimmed, ...context });
 }
 
 /** The project's GitHub repository, the only kind a prompt link can name. */

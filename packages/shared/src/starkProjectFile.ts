@@ -24,10 +24,10 @@ export function parseStarkProjectFile(contents: string): StarkProjectFile | null
 }
 
 /**
- * Build the publishable JSON Schema document for `stark.json` (draft 2020-12).
+ * Build the JSON Schema document for `stark.json` (draft 2020-12).
  *
- * Served from the marketing site at {@link STARK_PROJECT_FILE_SCHEMA_URL} so
- * editors get LSP support via a `$schema` reference.
+ * Identified by {@link STARK_PROJECT_FILE_SCHEMA_URL}; this build does not host
+ * a public schema URL.
  */
 export function buildStarkProjectFileJsonSchema(): Record<string, unknown> {
   // Closed objects, as before effect rc.113 changed the generator default;

@@ -5,8 +5,8 @@ import { DEFAULT_HOSTED_APP_URL } from "./connectAuth.ts";
  * a link from a stranger fills a draft, and the user reads it and presses Send. A link also
  * cannot pick a runtime mode, branch, or worktree. Those stay the user's own defaults.
  *
- * Shared links are https on the hosted app, because that is what Twitter and GitHub make
- * clickable. The `starkcode://` scheme carries the same paths into desktop and mobile:
+ * Links use `starkcode://` unless a hosted app origin is explicitly configured. The same
+ * paths can be carried by a team-hosted web client:
  *
  *   http://127.0.0.1:3773/new?prompt=…&repo=owner/name&provider=codex&model=gpt-5
  *   http://127.0.0.1:3773/new?pr=owner/name/123&prompt=…
@@ -194,7 +194,7 @@ export function withoutPromptLinkParams(search: string): string {
   return rest ? `?${rest}` : "";
 }
 
-/** A shareable `/new` link on the hosted app. */
+/** A prompt deep link, or a web link when a hosted origin is configured. */
 export function buildNewThreadLink(input: {
   readonly prompt: string;
   readonly repository?: PromptLinkRepository | null;
@@ -202,7 +202,8 @@ export function buildNewThreadLink(input: {
   readonly model?: string | null;
   readonly origin?: string;
 }): string {
-  const url = new URL("/new", input.origin ?? DEFAULT_HOSTED_APP_URL);
+  const origin = (input.origin ?? DEFAULT_HOSTED_APP_URL).trim();
+  const url = origin ? new URL("/new", origin) : new URL("starkcode://new");
   url.searchParams.set("prompt", input.prompt);
   if (input.repository) {
     url.searchParams.set("repo", `${input.repository.owner}/${input.repository.name}`);

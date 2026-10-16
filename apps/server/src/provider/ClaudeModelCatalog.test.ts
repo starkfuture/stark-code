@@ -4,6 +4,7 @@ import { ProviderDriverKind, ProviderInstanceId } from "@starkfuture/contracts";
 import { hasValidClaudeManifestAdapters } from "./ClaudeModelManifest.ts";
 import { resolveProviderCatalog, type ModelManifestData } from "./ModelManifest.ts";
 import {
+  BUNDLED_CLAUDE_MODEL_CATALOG,
   formatClaudeVersionUpgradeMessage,
   normalizeClaudeCatalogEffort,
   resolveClaudeCatalogApiModelId,
@@ -78,6 +79,28 @@ const catalogFromManifest = (data: ModelManifestData) =>
   resolveClaudeModelCatalog(resolveProviderCatalog(data, CLAUDE) ?? undefined);
 
 describe("Claude model catalog", () => {
+  it("hides Haiku choices but retains historical metadata and upgrades stale dispatches to Sonnet", () => {
+    const catalog = BUNDLED_CLAUDE_MODEL_CATALOG;
+    assert.isTrue(catalog.models.some((entry) => entry.model.slug === "claude-haiku-4-5"));
+    assert.isFalse(
+      resolveClaudeModelsForVersion(catalog, "99.0.0").some((model) =>
+        model.slug.includes("haiku"),
+      ),
+    );
+    assert.isFalse(
+      resolveClaudeUpdateRequiredModels(catalog, "2.1.0").some((model) =>
+        model.slug.includes("haiku"),
+      ),
+    );
+    assert.equal(
+      resolveClaudeCatalogApiModelId(catalog, {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-4-5",
+      }),
+      "claude-sonnet-5-5",
+    );
+    assert.equal(resolveClaudeModelSlug(catalog, "haiku-4.5"), "claude-haiku-4-5");
+  });
   it("resolves capacity from selected options and fixed catalog windows without guessing custom models", () => {
     const source = manifest();
     const profile = source.providers!.claudeAgent!.profiles.synthetic!;

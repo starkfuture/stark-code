@@ -194,7 +194,13 @@ it.layer(NodeServices.layer)("native Claude settings preparation", (it) => {
         };
         yield* fs.writeFileString(
           path.join(cwd, "custom.json"),
-          JSON.stringify({ hooks: { PreToolUse: [publish] }, permissions: { allow: ["Read"] } }),
+          JSON.stringify({
+            model: "haiku",
+            availableModels: ["sonnet"],
+            env: { ANTHROPIC_DEFAULT_SONNET_MODEL: "haiku", KEEP_PLUGIN: "value" },
+            hooks: { PreToolUse: [publish] },
+            permissions: { allow: ["Read"] },
+          }),
         );
         const prompt = [
           "--",
@@ -220,11 +226,22 @@ it.layer(NodeServices.layer)("native Claude settings preparation", (it) => {
         expect(args.slice(4)).toEqual(prompt);
         expect(args.filter((arg) => arg === "--settings")).toHaveLength(2);
         const saved = JSON.parse(yield* fs.readFileString(args[3]!));
-        expect(saved).toEqual({
+        expect(saved).toMatchObject({
+          model: "claude-sonnet-5-5",
+          availableModels: ["sonnet"],
+          env: {
+            ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5-5",
+            CLAUDE_CODE_SUBAGENT_MODEL: "claude-sonnet-5-5",
+            CLAUDE_CODE_SUBAGENT_MODEL_FORCE: "1",
+            KEEP_PLUGIN: "value",
+          },
           hooks: { PreToolUse: [publish, child] },
           permissions: { allow: ["Read"] },
           disableAllHooks: false,
         });
+        expect(JSON.parse(yield* fs.readFileString(path.join(cwd, "custom.json"))).model).toBe(
+          "haiku",
+        );
       }).pipe(Effect.scoped),
   );
 

@@ -71,6 +71,7 @@ import { formatClaudeResumeCompactionQuestion } from "@starkfuture/shared/claude
 import * as HostProcess from "@starkfuture/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@starkfuture/shared/model";
 import { SpawnExecutableResolution } from "@starkfuture/shared/shell";
+import { CLAUDE_HELPER_MODEL_ENV } from "@starkfuture/shared/claudeModelPolicy";
 import { PROVIDER_PRIVACY_ENV } from "@starkfuture/shared/providerPrivacy";
 import { STARK_PAGES_ENV } from "@starkfuture/shared/starkPages";
 
@@ -234,6 +235,26 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       cwd: "/workspace",
       ...extra,
     });
+  it("pins SDK helper models even when inherited env or SDK settings request Haiku", () => {
+    const options = safetyOptions({
+      modelSelection: { ...CLAUDE_TEST_MODEL_SELECTION, model: "claude-haiku-5-5" },
+      environment: { CLAUDE_CODE_SUBAGENT_MODEL: "haiku", CLAUDE_CODE_SUBAGENT_MODEL_FORCE: "0" },
+      sdkSettings: { availableModels: ["sonnet"], env: { ANTHROPIC_DEFAULT_HAIKU_MODEL: "haiku" } },
+      settings: {
+        ...OPTED_IN_CLAUDE_SETTINGS,
+        launchArgs: "--model haiku --fallback-model haiku --advisor=claude-haiku-5-5",
+      },
+    });
+    assert.equal(options.model, "claude-sonnet-5-5");
+    assert.notProperty(options.extraArgs, "model");
+    assert.equal(options.extraArgs?.["fallback-model"], "claude-sonnet-5-5");
+    assert.equal(options.extraArgs?.advisor, "claude-sonnet-5-5");
+    assert.deepInclude(options.settings, { availableModels: ["sonnet"] });
+    assert.include(options.env, CLAUDE_HELPER_MODEL_ENV);
+    assert.deepInclude(options.settings, {
+      env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV, ...CLAUDE_HELPER_MODEL_ENV },
+    });
+  });
   it("locks Bypass until the account opts in, without disabling Auto", () => {
     const options = safetyOptions();
     assert.deepInclude(options.settings, {
@@ -5136,7 +5157,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 permissionMode: "bypassPermissions",
                 allowDangerouslySkipPermissions: true,
                 settings: {
-                  env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV },
+                  env: { ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV, ...CLAUDE_HELPER_MODEL_ENV },
                   showThinkingSummaries: true,
                 },
                 sessionId: WAKE_NATIVE_SESSION,

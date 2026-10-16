@@ -8,73 +8,17 @@ desktop, web, or mobile app. Set up the machine where the agents will work first
 You need an installed, authenticated provider before starting a thread. You can
 launch Stark Code and configure providers afterwards.
 
-## Command line
-
-```bash
-curl -fsSL https://unconfigured.invalid/install.sh | sh
-```
-
-On Windows, in PowerShell:
-
-```powershell
-irm https://unconfigured.invalid/install.ps1 | iex
-```
-
-This installs the `stark-code` binary to `~/.local/bin`. If your shell reports `command not found`
-afterwards, that directory is not on your `PATH` yet; the installer prints the
-line to add. Set `STARK_CODE_CHANNEL=nightly` to install the nightly train, or
-`STARK_CODE_VERSION` to pin an exact version.
-
-| Task                                             | Command                                                   |
-| ------------------------------------------------ | --------------------------------------------------------- |
-| Start the server and open the web app            | `stark-code`                                                      |
-| Start the server without a browser               | `stark-code serve`                                                |
-| Keep it running in the background (macOS, Linux) | `stark-code service install` ([details](./background-service.md)) |
-| Move to the newest release                       | `stark-code update`                                               |
-| Remove it again                                  | `stark-code uninstall`                                            |
-
-Run `stark-code help` or `stark-code --help` for the full reference. To start in a new working
-directory, use an explicit path such as `stark-code ./my-project`. A bare directory name
-is accepted only if it already exists.
-
-If `stark-code` or `stark-code start` reports an already running server, connect to that server
-instead. Stop it before starting a replacement, or use a different `--base-dir`
-for an independent server.
-
-To try Stark Code once without installing it, run `npx stark-code@latest` instead (needs
-Node.js for `npx`).
-
-### Intel Macs
-
-There is no `stark-code` executable for Intel Macs (the desktop app is available). To
-run a server there, build it from source with Node.js 24 and `vp`
-([Install vp](https://github.com/example/stark-code#install-vp)):
-
-```bash
-git clone https://github.com/example/stark-code
-cd starkcode && vp i && vp run build:desktop
-node apps/server/dist/bin.mjs
-```
-
-`stark-code update` and the background service do not apply to a server run this way;
-update it with `git pull` and a rebuild.
-
 ## Desktop app
 
-Download a release from [GitHub Releases](https://github.com/example/stark-code/releases),
-or use a package manager:
+Stark Code is currently built and updated locally. There is no public download site,
+package-manager release, or remote installer configured for this build. Use the app
+provided by your Stark workspace maintainer, or start it from your local source checkout.
 
-| Platform           | Install                            |
-| ------------------ | ---------------------------------- |
-| Windows            | `winget install StarkFuture.StarkCode`    |
-| macOS              | `brew install --cask stark-code`      |
-| Debian, Ubuntu     | `sudo apt install ./Stark-Code-*.deb` |
-| Arch Linux         | `yay -S starkcode-bin`                |
-| Arch Linux nightly | `yay -S starkcode-nightly-bin`        |
+On macOS, double-click **Start Stark Code.command** in the checkout. For setup and
+command-line launch instructions, see [Start the Mac app](../../README.md#start-the-mac-app).
 
-The `.deb` updates itself like the other desktop builds. It asks for your
-password to install each update. If your desktop has no password prompt, the
-update fails. Download the new `.deb` and install it the same way.
+To build a desktop installer from that checkout, see the
+[local packaging instructions](../operations/release.md).
 
 ### The `stark-code` command
 
@@ -107,24 +51,9 @@ command cannot reach the app, start or update the desktop app and try again.
 
 ## Mobile app
 
-Install Stark Code from the
-[App Store](https://apps.apple.com/us/app/stark-code-remote-claude-more/id6787819824) or
-[Google Play](https://play.google.com/store/apps/details?id=com.starkfuture.starkcode).
-The phone connects to a server on another machine. Follow
-[remote access](./remote-access.md) to link it through Stark Connect or a pairing URL.
-
-Nightly builds need the beta app. The store apps cannot connect to them. A Nightly build also
-shows these links as QR codes in **Settings → General → Mobile app**.
-
-- **iPhone and iPad:** join the [TestFlight beta](https://testflight.apple.com/join/XgaxaRtd).
-- **Android:** download and install the APK from the
-  [Android beta release](https://github.com/example/stark-code/releases/tag/android-nightly).
-
-If the app crashes during launch, open Settings → Diagnostics on the next launch
-that succeeds. It lists startup crashes from the last 7 days with the error and
-component stack that store crash reports leave out. Copy the report and paste it
-into a GitHub issue. Error messages can quote values from the app, so read it over
-before sharing.
+A Stark Code mobile store release is not configured. Use a development build supplied
+by your workspace maintainer. The phone connects to a server on another machine; follow
+[remote access](./remote-access.md) to connect with a direct pairing URL.
 
 ## Providers
 
@@ -140,7 +69,7 @@ computer.
 | Cursor      | Install [Cursor CLI](https://cursor.com/cli), then run `agent login`.                                                                                     |
 | Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                                                                                        |
 | OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                                                                                  |
-| Antigravity | Install and sign in with Google from Stark Code's provider settings.                                                                                         |
+| Antigravity | Install and sign in with Google from Stark Code's provider settings.                                                                                      |
 | Pi          | Install [Pi](./providers-pi.md#set-up-pi) with Node.js 22.19 or newer, then run `pi` and `/login`.                                                        |
 | Muse Code   | Install [Muse Code](https://dev.meta.ai/docs/muse-code) on the server, run `muse login`, then enable it in Settings → Providers.                          |
 

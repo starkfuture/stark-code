@@ -149,6 +149,10 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { resolveClaudeSdkExecutablePath } from "../../provider/Drivers/ClaudeExecutable.ts";
 import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
+import {
+  claudeModelEnvironment,
+  permittedClaudeModel,
+} from "@starkfuture/shared/claudeModelPolicy";
 import { compileClaudeModelSelection } from "../../claudeModelOptions.ts";
 import * as ServerConfig from "../../config.ts";
 import { expandHomePath } from "@starkfuture/provider-core/server/pathExpansion";
@@ -1162,6 +1166,12 @@ export function makeClaudeQueryOptions(input: {
   if (requestThinkingSummaries && extraArgs["thinking-display"] === undefined) {
     extraArgs["thinking-display"] = "summarized";
   }
+  // The selected chat model is authoritative; saved launch flags must not override it.
+  delete extraArgs.model;
+  for (const key of ["fallback-model", "advisor"]) {
+    const value = extraArgs[key];
+    if (typeof value === "string") extraArgs[key] = permittedClaudeModel(value);
+  }
   extraArgs["replay-user-messages"] = null;
   const threadIdentity: ClaudeAgentSdkThreadIdentity = input.resume
     ? { resume: input.nativeThreadId }
@@ -1194,7 +1204,12 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.allowBypassPermissions === true
       ? {}
       : { permissions: { ...current.permissions, disableBypassPermissionsMode: "disable" } }),
-    env: { ...current.env, ...PROVIDER_PRIVACY_ENV, ...STARK_PAGES_ENV, ...workbenchEnv },
+    env: claudeModelEnvironment({
+      ...current.env,
+      ...PROVIDER_PRIVACY_ENV,
+      ...STARK_PAGES_ENV,
+      ...workbenchEnv,
+    }),
   } as ClaudeSdkSettings;
   // The thread's selected mode wins over account launch arguments. Without a
   // thread policy, honor the account's native CLI configuration.
@@ -1305,7 +1320,7 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.binaryPath
       ? { pathToClaudeCodeExecutable: input.settings.binaryPath }
       : {}),
-    ...(input.environment === undefined ? {} : { env: { ...input.environment, ...workbenchEnv } }),
+    env: claudeModelEnvironment({ ...(input.environment ?? process.env), ...workbenchEnv }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
     systemPrompt: {
       type: "preset" as const,

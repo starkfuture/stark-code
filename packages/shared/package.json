@@ -506,6 +506,10 @@
     "./providerPrivacy": {
       "types": "./src/providerPrivacy.ts",
       "import": "./src/providerPrivacy.ts"
+    },
+    "./claudeModelPolicy": {
+      "types": "./src/claudeModelPolicy.ts",
+      "import": "./src/claudeModelPolicy.ts"
     }
   },
   "scripts": {

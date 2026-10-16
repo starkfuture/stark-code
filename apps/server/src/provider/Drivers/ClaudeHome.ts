@@ -1,3 +1,4 @@
+import { claudeModelEnvironment } from "@starkfuture/shared/claudeModelPolicy";
 import type { ClaudeSettings } from "@starkfuture/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
@@ -37,7 +38,7 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
   config: Pick<ClaudeSettings, "homePath">,
   baseEnv?: NodeJS.ProcessEnv,
 ): Effect.fn.Return<NodeJS.ProcessEnv, never, Path.Path> {
-  const resolvedBaseEnv = baseEnv ?? process.env;
+  const resolvedBaseEnv = claudeModelEnvironment(baseEnv ?? process.env);
   const homePath = config.homePath.trim();
   if (homePath.length === 0) return resolvedBaseEnv;
   const resolvedHomePath = yield* resolveClaudeHomePath(config);

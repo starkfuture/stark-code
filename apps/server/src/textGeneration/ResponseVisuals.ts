@@ -33,6 +33,7 @@ import { expandHomePath } from "@starkfuture/provider-core/server/pathExpansion"
 import { toJsonSchemaObject } from "@starkfuture/provider-core/server/textGenerationUtils";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { CLAUDE_HELPER_MODEL_ENV } from "@starkfuture/shared/claudeModelPolicy";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -271,6 +272,7 @@ const make = Effect.gen(function* () {
         "--settings",
         encodeJson({
           disableAllHooks: true,
+          env: CLAUDE_HELPER_MODEL_ENV,
           alwaysThinkingEnabled: false,
           fastMode: false,
           ultracode: false,

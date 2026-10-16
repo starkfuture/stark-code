@@ -1,3 +1,7 @@
+import {
+  claudeModelEnvironment,
+  permittedClaudeModel,
+} from "@starkfuture/shared/claudeModelPolicy";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -149,6 +153,18 @@ export const prepareNativeClaudeSettings = Effect.fn("terminal.prepareNativeClau
       );
       merged = mergeNativeSettings(merged, value);
     }
+    // Normalize only the temporary session copy, leaving personal settings and history untouched.
+    if (typeof merged.model === "string") merged.model = permittedClaudeModel(merged.model);
+    if (typeof merged.advisorModel === "string")
+      merged.advisorModel = permittedClaudeModel(merged.advisorModel);
+    const environment = isObject(merged.env) ? merged.env : {};
+    merged.env = claudeModelEnvironment(
+      Object.fromEntries(
+        Object.entries(environment).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      ),
+    );
     const cache = path.join(input.stateDir, "cache", "native-agent-settings");
     yield* fs.makeDirectory(cache, { recursive: true, mode: 0o700 });
     const directory = yield* fs.makeTempDirectory({ directory: cache, prefix: "session-" });

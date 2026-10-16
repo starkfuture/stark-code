@@ -149,9 +149,9 @@ If that port is already in use, choose another with
 
 ### Hosted web app
 
-[unconfigured.invalid](https://unconfigured.invalid) needs an HTTPS endpoint. It connects directly
-to your server; a hosted pairing link does not make an unreachable backend
-reachable or convert HTTP to HTTPS.
+This build has no public hosted web app. If your team deploys its own web client over
+HTTPS, it also needs an HTTPS server endpoint. A hosted pairing link does not make an
+unreachable backend reachable or convert HTTP to HTTPS.
 
 For a plain HTTP LAN endpoint, use the direct pairing URL in a browser that can
 open it, or pair from the desktop app. On mobile, an IP address entered without a
@@ -318,13 +318,13 @@ configuration. It is not a live reachability check. If the environment appears
 offline, run `stark-code service status` and read the displayed log. If it disappears
 when SSH closes, see [background-service troubleshooting](./background-service.md#troubleshooting).
 
-| Error                                                     | Recovery                                                                                                                                    |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart Stark Code on the host.                                                                         |
+| Error                                                     | Recovery                                                                                                                                                            |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart Stark Code on the host.                                                                                              |
 | `auth_invalid` or `invalid_bearer`                        | Run `stark-code connect login`. If credentials were revoked, run `stark-code connect logout`, then `stark-code connect` again. Restart the server after signing in. |
-| Expired or invalid link proof                             | Check the host's date and time, update Stark Code, then restart it.                                                                            |
-| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                               |
-| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                             |
+| Expired or invalid link proof                             | Check the host's date and time, update Stark Code, then restart it.                                                                                                 |
+| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                                                       |
+| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                                                     |
 
 After fixing a permanent rejection, restart the host's server. On Linux, use
 `systemctl --user restart starkcode.service` for the background service. For a

@@ -2,10 +2,10 @@
 
 Transcription edits a composer draft. It does not submit an agent turn. Audio is
 temporary client input, and only normal message submission sends the resulting
-text. The current implementation transcribes locally on supported iOS devices;
-environment-backed transcription is not implemented.
+text. Transcription runs locally on supported iOS devices and in the Mac desktop
+app; environment-backed transcription is not implemented.
 
-The [shared controller](../../packages/client-runtime/src/voice-input/controller.ts)
+On iOS, the [shared controller](../../packages/client-runtime/src/voice-input/controller.ts)
 owns the operation while the client supplies capture and transcription. Preparation
 binds the transcriber and resolved locale for the whole recording. Draft ownership,
 text, and revision are captured before recording and checked before insertion, so
@@ -18,3 +18,8 @@ fires would race that work. The [transcription contract](../../packages/client-r
 therefore requires implementations to settle only after their work has stopped;
 the [Apple binding](../../apps/mobile/src/native/voiceTranscription.ios.ts) checks
 cancellation between native calls and discards late results.
+
+Mac dictation uses a local speech process owned by the desktop window, even when
+the selected agent runs on another machine. It inserts only into the original,
+unchanged draft. On-device capability and the recognition request's on-device
+requirement are both checked: there is no fallback that uploads microphone audio.

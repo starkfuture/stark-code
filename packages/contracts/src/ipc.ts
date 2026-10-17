@@ -1123,7 +1123,47 @@ export const DesktopPreviewRecordingSaveInputSchema = Schema.Struct({
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
+export const NativeDictationSessionId = Schema.String.check(
+  Schema.isPattern(/^[a-zA-Z0-9_-]{1,128}$/),
+);
+export const NativeDictationStartInput = Schema.Struct({
+  sessionId: NativeDictationSessionId,
+  locale: Schema.String.check(
+    Schema.isPattern(/^[a-zA-Z]{2,8}(?:-[a-zA-Z0-9]{1,8})*$/),
+    Schema.isMaxLength(64),
+  ),
+});
+export type NativeDictationStartInput = typeof NativeDictationStartInput.Type;
+export const NativeDictationAvailability = Schema.Struct({
+  available: Schema.Boolean,
+  reason: Schema.optional(Schema.String),
+});
+export type NativeDictationAvailability = typeof NativeDictationAvailability.Type;
+export const NativeDictationEvent = Schema.Union([
+  Schema.Struct({ sessionId: NativeDictationSessionId, type: Schema.Literal("recording") }),
+  Schema.Struct({
+    sessionId: NativeDictationSessionId,
+    type: Schema.Literal("transcript"),
+    text: Schema.String.check(Schema.isMaxLength(65_536)),
+  }),
+  Schema.Struct({
+    sessionId: NativeDictationSessionId,
+    type: Schema.Literal("error"),
+    message: Schema.String.check(Schema.isMaxLength(1024)),
+  }),
+  Schema.Struct({ sessionId: NativeDictationSessionId, type: Schema.Literal("cancelled") }),
+]);
+export type NativeDictationEvent = typeof NativeDictationEvent.Type;
+export interface NativeDictationBridge {
+  availability(): Promise<NativeDictationAvailability>;
+  start(input: NativeDictationStartInput): Promise<void>;
+  stop(sessionId: string): Promise<void>;
+  cancel(sessionId: string): Promise<void>;
+  onEvent(listener: (event: NativeDictationEvent) => void): () => void;
+}
+
 export interface DesktopBridge {
+  readonly dictation?: NativeDictationBridge;
   readonly publishedPages?: StarkPublishedPagesBridge;
   getAppBranding: () => DesktopAppBranding | null;
   /** Absolute path of a dropped or picked file; absent on desktop builds predating it. */

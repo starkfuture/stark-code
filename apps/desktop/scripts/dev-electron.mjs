@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { prepareStarkWorkbench } from "../../../scripts/prepare-stark-workbench.mjs";
+import { buildDictation } from "./build-dictation.mjs";
 
 import {
   desktopDir,
@@ -12,6 +13,7 @@ import {
 import { waitForResources } from "./wait-for-resources.mjs";
 
 prepareStarkWorkbench();
+buildDictation();
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
 if (!devServerUrl) {

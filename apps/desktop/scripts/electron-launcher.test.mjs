@@ -127,6 +127,14 @@ describe("electron development launcher", () => {
       values.NSDocumentsFolderUsageDescription,
       "Stark Code reads project files you open in the desktop app.",
     );
+    assert.equal(
+      values.NSMicrophoneUsageDescription,
+      "Stark Code uses your microphone when you dictate a message.",
+    );
+    assert.equal(
+      values.NSSpeechRecognitionUsageDescription,
+      "Stark Code transcribes your dictated messages on this Mac.",
+    );
   });
 
   it("ad-hoc signs the complete development app bundle", () => {

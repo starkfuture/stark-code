@@ -180,6 +180,20 @@ Stashes containing uploaded files must be restored in their original environment
 Those files are retained for 24 hours. After an upload expires, restore the prompt
 and use **Attach again** or remove the missing file before sending.
 
+## Voice input on Mac
+
+Click the microphone in the message box, speak, then stop to insert the transcript.
+Review or edit it before sending; dictation never sends a message automatically.
+Cancel discards the recording, and switching chats stops it.
+
+Enable **System Settings → Keyboard → Dictation** for your system language if its
+local speech model is not installed. The first recording asks for macOS microphone
+and speech-recognition permission. Speech
+is processed on your Mac, using its system language, without Claude or Codex tokens.
+If on-device speech is unavailable for that language, the app reports it instead
+of sending audio to a transcription service. You can change denied permissions in
+**System Settings → Privacy & Security → Microphone / Speech Recognition**.
+
 ## Voice input on iPhone
 
 On supported iPhones with iOS 26 or later, use the composer's microphone to record,

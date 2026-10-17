@@ -73,6 +73,7 @@ import * as AppActivationIpc from "./methods/appActivation.ts";
 import * as WebLinksIpc from "./methods/webLinks.ts";
 import * as StarkPagesIpc from "./methods/starkPages.ts";
 import * as PublishedPagesIpc from "./methods/publishedPages.ts";
+import * as DictationIpc from "./methods/dictation.ts";
 import {
   completeLegacyLocalStorage,
   takeLegacyLocalStorage,
@@ -92,6 +93,10 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(AppActivationIpc.setReady);
   yield* ipc.handle(AppActivationIpc.complete);
   yield* ipc.handle(WebLinksIpc.setReady);
+  yield* ipc.handle(DictationIpc.availability);
+  yield* ipc.handle(DictationIpc.start);
+  yield* ipc.handle(DictationIpc.stop);
+  yield* ipc.handle(DictationIpc.cancel);
 
   yield* ipc.handleSync(takeLegacyLocalStorage);
   yield* ipc.handle(completeLegacyLocalStorage);

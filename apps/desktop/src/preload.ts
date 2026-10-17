@@ -6,6 +6,7 @@ import type {
   DesktopPreviewRecordingFrame,
   DesktopPreviewTabState,
   DesktopSnapShotEvent,
+  NativeDictationEvent,
 } from "@starkfuture/contracts";
 import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
@@ -78,6 +79,23 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  ...(clientPlatform === "darwin"
+    ? ({
+        dictation: {
+          availability: () => ipcRenderer.invoke(IpcChannels.DICTATION_AVAILABILITY_CHANNEL),
+          start: (input) => ipcRenderer.invoke(IpcChannels.DICTATION_START_CHANNEL, input),
+          stop: (sessionId) => ipcRenderer.invoke(IpcChannels.DICTATION_STOP_CHANNEL, sessionId),
+          cancel: (sessionId) =>
+            ipcRenderer.invoke(IpcChannels.DICTATION_CANCEL_CHANNEL, sessionId),
+          onEvent: (listener) => {
+            const handler = (_event: Electron.IpcRendererEvent, event: NativeDictationEvent) =>
+              listener(event);
+            ipcRenderer.on(IpcChannels.DICTATION_EVENT_CHANNEL, handler);
+            return () => ipcRenderer.removeListener(IpcChannels.DICTATION_EVENT_CHANNEL, handler);
+          },
+        },
+      } satisfies Pick<DesktopBridge, "dictation">)
+    : {}),
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_APP_BRANDING_CHANNEL);
     if (typeof result !== "object" || result === null) {

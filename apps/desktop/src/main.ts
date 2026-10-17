@@ -45,6 +45,8 @@ import * as DesktopAssets from "./app/DesktopAssets.ts";
 import * as StarkPages from "./starkPages/StarkPages.ts";
 import * as PublishedPages from "./starkPages/PublishedPages.ts";
 import * as DesktopWorkbench from "./starkPages/DesktopWorkbench.ts";
+import * as DesktopDictation from "./dictation/DesktopDictation.ts";
+import * as NativeDictationHost from "./dictation/NativeDictationHost.ts";
 import * as DesktopBackendConfiguration from "./backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "./backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "./backend/DesktopLocalEnvironmentAuth.ts";
@@ -146,6 +148,7 @@ const layerElectron = Layer.mergeAll(
 );
 
 const layerDesktopFoundation = Layer.mergeAll(
+  DesktopDictation.layer.pipe(Layer.provide(NativeDictationHost.layer)),
   PublishedPages.layer,
   Layer.unwrap(
     Effect.gen(function* () {

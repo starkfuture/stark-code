@@ -25,19 +25,19 @@ export default defineConfig({
     tasks: {
       build: {
         command:
-          "node ../../scripts/prepare-stark-workbench.mjs && node scripts/build-browser-secret.mjs && node scripts/build-preview-annotation-css.mjs && vp pack",
+          "node ../../scripts/prepare-stark-workbench.mjs && node scripts/build-browser-secret.mjs && node scripts/build-dictation.mjs && node scripts/build-preview-annotation-css.mjs && vp pack",
         dependsOn: ["stark-code#build"],
         cache: false,
       },
       dev: {
         command:
-          "node ../../scripts/prepare-stark-workbench.mjs && node scripts/build-browser-secret.mjs && node scripts/build-preview-annotation-css.mjs && node scripts/dev-desktop.mjs",
+          "node ../../scripts/prepare-stark-workbench.mjs && node scripts/build-browser-secret.mjs && node scripts/build-dictation.mjs && node scripts/build-preview-annotation-css.mjs && node scripts/dev-desktop.mjs",
         dependsOn: ["stark-code#build"],
         cache: false,
       },
       "dev:bundle": {
         command:
-          "node ../../scripts/prepare-stark-workbench.mjs && node scripts/build-browser-secret.mjs && node scripts/build-preview-annotation-css.mjs && vp pack --watch",
+          "node ../../scripts/prepare-stark-workbench.mjs && node scripts/build-browser-secret.mjs && node scripts/build-dictation.mjs && node scripts/build-preview-annotation-css.mjs && vp pack --watch",
         cache: false,
       },
       "dev:electron": {

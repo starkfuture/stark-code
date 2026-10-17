@@ -21,7 +21,7 @@ const APP_BUNDLE_ID = isDevelopment
   ? `${BRAND.bundleId}.dev.${devBundleIdSuffix || "local"}`
   : BRAND.bundleId;
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["starkcode-dev"] : ["starkcode"];
-const LAUNCHER_VERSION = 21;
+const LAUNCHER_VERSION = 22;
 const developmentMacIconPngPath = NodePath.join(repoRoot, ...BRAND.iconPath.split("/"));
 const productionMacIconPngPath = NodePath.join(repoRoot, ...BRAND.iconPath.split("/"));
 // oxlint-disable-next-line starkcode/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
@@ -305,6 +305,8 @@ export function resolveMacBundleInfoPlistStrings(executableName) {
     CFBundleIconFile: "icon.icns",
     NSScreenCaptureUsageDescription: `${BRAND.productName} captures the active window when you use the snapshot shortcut.`,
     NSDocumentsFolderUsageDescription: `${BRAND.productName} reads project files you open in the desktop app.`,
+    NSMicrophoneUsageDescription: `${BRAND.productName} uses your microphone when you dictate a message.`,
+    NSSpeechRecognitionUsageDescription: `${BRAND.productName} transcribes your dictated messages on this Mac.`,
   };
 }
 

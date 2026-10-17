@@ -1,5 +1,5 @@
 import { FileTextIcon, MessageCircleIcon, XIcon } from "lucide-react";
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -19,6 +19,8 @@ export interface ConversationPageTabsProps {
   onClose: (id: string) => void;
   className?: string;
   panelId?: string;
+  onChatActions?: ((position: { x: number; y: number }) => void) | undefined;
+  chatTitleEditor?: ReactNode;
 }
 
 export function conversationPageTabElementId(panelId: string, tabId: string): string {
@@ -33,6 +35,8 @@ export function ConversationPageTabs({
   onClose,
   className,
   panelId,
+  onChatActions,
+  chatTitleEditor,
 }: ConversationPageTabsProps) {
   const tabs = [
     { id: CONVERSATION_CHAT_TAB_ID, title: "Chat" },
@@ -67,6 +71,20 @@ export function ConversationPageTabs({
     const index = tabs.findIndex((tab) => tab.id === id);
     let nextIndex: number;
     switch (event.key) {
+      case "ContextMenu":
+      case "F10": {
+        if (
+          id !== CONVERSATION_CHAT_TAB_ID ||
+          !onChatActions ||
+          (event.key === "F10" && !event.shiftKey)
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        const bounds = event.currentTarget.getBoundingClientRect();
+        onChatActions({ x: bounds.left, y: bounds.bottom });
+        return;
+      }
       case "ArrowRight":
         nextIndex = (index + 1) % tabs.length;
         break;
@@ -117,11 +135,12 @@ export function ConversationPageTabs({
         aria-keyshortcuts={isChat ? undefined : "Delete"}
         tabIndex={tabStopId === tab.id ? 0 : -1}
         className={cn(
-          "flex h-9 min-w-0 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          isChat
-            ? "min-w-24 shrink-0 border-stark-gold bg-stark-gold-surface font-semibold text-stark-gold-foreground"
-            : "max-w-56 border-transparent font-medium",
-          isChat && selected && "inset-ring-2 inset-ring-stark-gold",
+          "flex h-8 min-w-0 cursor-pointer items-center gap-2 rounded-md border px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          isChat ? "shrink-0 font-medium" : "max-w-56 border-transparent font-medium",
+          isChat &&
+            (selected
+              ? "border-stark-gold/40 bg-stark-gold/10 text-foreground"
+              : "border-stark-gold/20 bg-stark-gold-surface text-muted-foreground hover:bg-stark-gold/10 hover:text-foreground"),
           !isChat &&
             (selected
               ? "bg-accent text-foreground"
@@ -129,10 +148,22 @@ export function ConversationPageTabs({
         )}
         onFocus={() => setFocusState({ selectedId, focusedId: tab.id })}
         onClick={() => onSelect(tab.id)}
+        onContextMenu={
+          isChat && onChatActions
+            ? (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onChatActions({ x: event.clientX, y: event.clientY });
+              }
+            : undefined
+        }
         onKeyDown={(event) => handleKeyDown(event, tab.id)}
       >
         {isChat ? (
-          <MessageCircleIcon className="size-4 shrink-0" aria-hidden="true" />
+          <MessageCircleIcon
+            className="size-3.5 shrink-0 text-stark-gold-foreground"
+            aria-hidden="true"
+          />
         ) : (
           <FileTextIcon className="size-3.5 shrink-0" aria-hidden="true" />
         )}
@@ -148,18 +179,18 @@ export function ConversationPageTabs({
   };
 
   return (
-    <div
-      data-conversation-page-tabs
-      className={cn("min-w-0 shrink-0 border-b border-border/70 px-3 py-2", className)}
-    >
+    <div data-conversation-page-tabs className={cn("min-w-0 flex-1", className)}>
       <div
         role="tablist"
         aria-label="Chat and opened pages"
         className="flex min-w-0 items-center gap-2"
       >
-        {renderTab(tabs[0]!, true)}
-        <div role="presentation" className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain">
-          <div role="presentation" className="flex w-max min-w-full items-center gap-1 py-0.5">
+        {chatTitleEditor ?? renderTab(tabs[0]!, true)}
+        <div
+          role="presentation"
+          className="min-w-0 overflow-x-auto overscroll-x-contain [-webkit-app-region:no-drag]"
+        >
+          <div role="presentation" className="flex w-max items-center gap-1 py-0.5">
             {tabs.slice(1).map((page) => (
               <div key={page.id} role="presentation" className="flex shrink-0 items-center gap-0.5">
                 {renderTab(page)}

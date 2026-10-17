@@ -1091,8 +1091,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(stark-mo
   color-scheme: light;
   /* The app mark's gold identifies the conversation home independently of themes. */
   --stark-gold: #b4a27b;
-  --stark-gold-surface: color-mix(in srgb, var(--stark-gold) 20%, var(--background));
-  --stark-gold-foreground: light-dark(#564722, #e0cfaa);
+  --stark-gold-surface: color-mix(in srgb, var(--stark-gold) 5%, var(--background));
+  --stark-gold-foreground: light-dark(#76613b, #b4a27b);
   --radius: 0.625rem;
   --background: var(--color-zinc-25);
   --app-chrome-background: var(--background);

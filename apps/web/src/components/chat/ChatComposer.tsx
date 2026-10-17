@@ -2,6 +2,8 @@ import { formatProviderSkillDisplayName } from "@starkfuture/shared/inlineSkills
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { useComposerDictation } from "./useComposerDictation";
 import { ComposerDictationControl } from "./ComposerDictationControl";
+import { ComposerAddMenu } from "./ComposerAddMenu";
+import { isComposerChatCommand } from "./ComposerSlashCommandsDialog";
 import {
   composerHasShellBlockingContent,
   enterUserShellFromHumanInput,
@@ -50,6 +52,8 @@ import type {
   RuntimeRequestId,
   ScopedThreadRef,
   ServerProvider,
+  ServerProviderSkill,
+  ServerProviderSlashCommand,
   ThreadId,
   SnapShotSource,
 } from "@starkfuture/contracts";
@@ -1108,7 +1112,6 @@ import {
   FileIcon,
   BotIcon,
   CircleAlertIcon,
-  PaperclipIcon,
   PencilRulerIcon,
   PlayIcon,
   ShieldIcon,
@@ -2538,6 +2541,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? null
       : detectComposerTrigger(prompt, prompt.length, shellModeRef.current),
   );
+  const [addCatalogOpen, setAddCatalogOpen] = useState(false);
   const sessionCatalog = useComposerSessionCatalog({
     environmentId,
     threadId: activeThreadId ?? null,
@@ -2545,7 +2549,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     providerInstanceId: selectedProviderEntry?.instanceId ?? null,
     open:
       !shellMode &&
-      (composerTrigger?.kind === "slash-command" || composerTrigger?.kind === "skill") &&
+      (addCatalogOpen ||
+        composerTrigger?.kind === "slash-command" ||
+        composerTrigger?.kind === "skill") &&
       routeKind === "server" &&
       props.activeThreadShell?.providerInstanceId === selectedProviderEntry?.instanceId,
   });
@@ -6500,6 +6506,68 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [expandMobileComposer, insertComposerText, isComposerCollapsedMobile],
   );
 
+  const canAddComposerContext =
+    canOperateThread &&
+    !dictation.busy &&
+    !shellMode &&
+    !isConnecting &&
+    !isComposerApprovalState &&
+    pendingUserInputs.length === 0 &&
+    !projectSelectionRequired;
+  const addMenuCommands: ReadonlyArray<ServerProviderSlashCommand> = [
+    { name: "model", source: "app", description: "Switch response model for this chat" },
+    ...(planModeUiEnabled
+      ? [
+          { name: "plan", source: "app" as const, description: "Switch this chat into plan mode" },
+          {
+            name: "default",
+            source: "app" as const,
+            description: "Switch this chat back to build mode",
+          },
+        ]
+      : []),
+    ...selectedProviderSlashCommands.filter(
+      (command) =>
+        !["model", ...(planModeUiEnabled ? ["plan", "default"] : [])].includes(command.name) &&
+        (command.name !== "compact" ||
+          (!compactDisabled && !prompt.trim() && !composerHasShellBlockingContent(composerDraft))),
+    ),
+  ];
+  const insertAddMenuCatalogEntry = (
+    entry:
+      | { type: "skill"; skill: ServerProviderSkill }
+      | { type: "provider-slash-command"; command: ServerProviderSlashCommand },
+  ) => {
+    if (!canAddComposerContext) return false;
+    if (entry.type === "provider-slash-command" && !isComposerChatCommand(entry.command))
+      return false;
+    if (entry.type === "provider-slash-command" && entry.command.source === "app") {
+      if (entry.command.name === "model") {
+        setIsComposerModelPickerOpen(true);
+        return true;
+      }
+      if (
+        planModeUiEnabled &&
+        (entry.command.name === "plan" || entry.command.name === "default")
+      ) {
+        handleInteractionModeChange(entry.command.name);
+        return true;
+      }
+    }
+    const asSlash = entry.type !== "skill" || entry.skill.userInvocationOnly === true;
+    const replacement = composerCommandInsertion(entry, asSlash ? "slash-command" : "skill");
+    const inserted = asSlash
+      ? applyPromptReplacement(0, 0, replacement, { expectedText: "" })
+      : insertComposerText(replacement, "cursor", { ensureLeadingBoundary: true });
+    const warning = permissionWarningForCatalogEntry(entry);
+    if (inserted && warning)
+      addProviderPermissionWarning(composerDraftTarget, {
+        reference: replacement.trim(),
+        warning,
+      });
+    return inserted;
+  };
+
   // Context produced by other panels (diff comments, preview picks) asks the store to place
   // its chip; while this composer is mounted for the draft, that means the caret.
   const insertContextReferencesAtCaret = useCallback(
@@ -8012,7 +8080,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {showComposerAttachAction ? (
+                  {!shellMode ? (
                     <>
                       <input
                         ref={attachmentInputRef}
@@ -8030,23 +8098,61 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           });
                         }}
                       />
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              onPointerDown={(event) => event.preventDefault()}
-                              onClick={() => attachmentInputRef.current?.click()}
-                              aria-label="Attach files"
-                            />
-                          }
-                        >
-                          <PaperclipIcon />
-                        </TooltipTrigger>
-                        <TooltipPopup>Attach files</TooltipPopup>
-                      </Tooltip>
+                      <ComposerAddMenu
+                        key={`${environmentId}:${draftId ?? activeThreadId}:${activeProjectId}:${gitCwd}:${selectedInstanceId}`}
+                        environmentId={environmentId}
+                        target={
+                          selectedProviderEntry && activeProjectId
+                            ? activeThreadId &&
+                              props.activeThreadShell?.providerInstanceId ===
+                                selectedProviderEntry.instanceId
+                              ? { threadId: activeThreadId }
+                              : {
+                                  providerInstanceId: selectedProviderEntry.instanceId,
+                                  projectId: activeProjectId,
+                                }
+                            : null
+                        }
+                        providerKind={selectedProvider}
+                        providerLabel={
+                          selectedProviderEntry?.displayName ??
+                          selectedProviderStatus?.displayName ??
+                          "Agent"
+                        }
+                        cwd={gitCwd}
+                        disabled={
+                          !canOperateThread ||
+                          dictation.busy ||
+                          isConnecting ||
+                          isComposerApprovalState ||
+                          activePendingIsResponding
+                        }
+                        canAttach={showComposerAttachAction}
+                        canAddContext={canAddComposerContext}
+                        skills={selectedProviderSkills}
+                        commands={addMenuCommands}
+                        catalogPending={sessionCatalog.isPending || workspaceSlashCommandsPending}
+                        onAttach={() => attachmentInputRef.current?.click()}
+                        onInsertPath={(path) =>
+                          canAddComposerContext &&
+                          insertComposerText(`${serializeComposerFileLink(path)} `, "cursor", {
+                            ensureLeadingBoundary: true,
+                          })
+                        }
+                        onInsertIssue={(link) =>
+                          canAddComposerContext &&
+                          insertComposerText(`${link.markdown} `, "cursor", {
+                            ensureLeadingBoundary: true,
+                          })
+                        }
+                        onInsertSkill={(skill) =>
+                          insertAddMenuCatalogEntry({ type: "skill", skill })
+                        }
+                        onInsertCommand={(command) =>
+                          insertAddMenuCatalogEntry({ type: "provider-slash-command", command })
+                        }
+                        onCatalogOpenChange={setAddCatalogOpen}
+                      />
                     </>
                   ) : null}
                   {shellMode ? (

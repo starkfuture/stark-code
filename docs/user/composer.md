@@ -38,6 +38,12 @@ it. Very large code blocks are shown without syntax highlighting.
 
 ## Attach files
 
+On web and desktop, open **+ → Add files or photos** to upload files. Use
+**Reference workspace file** or **Add folder** to point the agent to something
+already in the selected workspace, including a remote workspace. Folder references
+do not upload all the files inside them. **Add GitHub issue link** adds a reference;
+it does not download the issue or submit your message.
+
 Attach up to 100 files per message. Each image can be up to 10 MiB, with at most
 80 MiB of images in one message. Other files, including videos, can be up to
 50 MiB each, subject to the environment's upload support and limit. The agent
@@ -241,6 +247,19 @@ message starts or is removed while you are editing, the edit ends: changed conte
 composer when it is empty, and is discarded otherwise.
 
 ## Commands and skills
+
+The **+** menu also offers searchable **Slash commands** and **Skills & plugins**
+for the selected provider. Skills and provider commands are added to the draft;
+app commands such as `/model` open the relevant control without sending it. To
+install or manage plugins, use the native agent's manager in Shell mode: `/plugin` for Claude
+and `/plugins` for Codex. The skills picker includes invocable plugin skills;
+the native manager shows the full installed-plugin inventory.
+
+For Claude and Codex, **+ → Connectors** shows reported MCP connections. Open
+**Manage connections** for sign-in, reconnection, and reload controls. Changes to
+Claude connections apply to the project; Codex changes are saved in Codex settings
+and can affect other sessions. Remote clients show status; make changes on the
+desktop host. Connection status is unavailable until the agent session is running.
 
 Type `/` for commands or `$` to add a skill from the selected environment and
 provider. On mobile, both are also available before starting a thread on

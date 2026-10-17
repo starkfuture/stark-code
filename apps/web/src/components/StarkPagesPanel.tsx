@@ -236,7 +236,13 @@ export function StarkPagesPanel({
               inert={view !== "local"}
               className={view === "local" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}
             >
-              {visited.has("local") ? <StarkPagesSidebar {...props} showHeader={false} /> : null}
+              {visited.has("local") ? (
+                <StarkPagesSidebar
+                  {...props}
+                  active={active && view === "local"}
+                  showHeader={false}
+                />
+              ) : null}
             </div>
             <div
               hidden={view !== "published"}
@@ -244,7 +250,11 @@ export function StarkPagesPanel({
               className={view === "published" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}
             >
               {visited.has("published") ? (
-                <PublishedStarkPages expanded={expanded} onExitExpanded={restorePanel} />
+                <PublishedStarkPages
+                  expanded={expanded}
+                  onExitExpanded={restorePanel}
+                  onOpenPage={props.onOpenPage}
+                />
               ) : null}
             </div>
           </Dialog.Popup>

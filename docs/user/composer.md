@@ -327,9 +327,11 @@ Claude native shell mode, **Publish** prepares its command in the terminal for
 you to review and submit. It does not submit the command automatically. Other
 modes keep publishing unavailable.
 
-Use **Expand Pages** to read across the app, then the restore control to show the
-page beside your chat without losing your place. You can also drag the panel's
-edge to resize it.
+Opening a company page gives it a tab beside **Chat**, using the full reading
+area. For a folder preview, choose **Open page in tab**. Switch back to Chat
+without losing your draft or the page's reading position; closing a page returns
+you to Chat. Pages are added only when you open them. You can still expand or
+resize the Pages chooser to browse beside your conversation.
 
 Published pages include styles, images and fonts stored with the page. Viewing
 uses no model tokens. Recent pages are cached temporarily. The **Page actions**

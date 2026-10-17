@@ -252,6 +252,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(stark-mo
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-stark-gold: var(--stark-gold);
+  --color-stark-gold-surface: var(--stark-gold-surface);
+  --color-stark-gold-foreground: var(--stark-gold-foreground);
   --color-popover-foreground: var(--contrast-popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--contrast-card-foreground);
@@ -1086,6 +1089,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(stark-mo
 
 :root {
   color-scheme: light;
+  /* The app mark's gold identifies the conversation home independently of themes. */
+  --stark-gold: #b4a27b;
+  --stark-gold-surface: color-mix(in srgb, var(--stark-gold) 20%, var(--background));
+  --stark-gold-foreground: light-dark(#564722, #e0cfaa);
   --radius: 0.625rem;
   --background: var(--color-zinc-25);
   --app-chrome-background: var(--background);

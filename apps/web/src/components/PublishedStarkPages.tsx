@@ -17,6 +17,7 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { PublishedPageContent } from "./PublishedPageContent";
 import { cn } from "~/lib/utils";
+import type { StarkPageTarget } from "../starkPageTabs";
 import {
   publishedPageTitle,
   publishedProjectCatalog,
@@ -41,9 +42,11 @@ function readError(failure: unknown, fallback: string): string {
 export function PublishedStarkPages({
   expanded = false,
   onExitExpanded,
+  onOpenPage,
 }: {
   expanded?: boolean;
   onExitExpanded?: (() => void) | undefined;
+  onOpenPage?: ((page: StarkPageTarget) => void) | undefined;
 } = {}) {
   const bridge = window.desktopBridge?.publishedPages;
   const [status, setStatus] = useState<StarkPublishedPagesStatus | null>(null);
@@ -247,6 +250,10 @@ export function PublishedStarkPages({
   };
   const openPage = async (page: PublishedPageEntry, refresh = false) => {
     if (!bridge || !project) return;
+    if (onOpenPage && !refresh) {
+      onOpenPage({ kind: "published", root: project.root, path: page.path, title: page.title });
+      return;
+    }
     const request = ++requestGeneration.current;
     const previousDocument = refresh && reader?.page.path === page.path ? reader.document : null;
     if (!reader) pageListScroll.current = section.current?.scrollTop ?? 0;

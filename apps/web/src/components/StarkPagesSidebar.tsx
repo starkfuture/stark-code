@@ -7,6 +7,7 @@ import {
   type StarkPagesMirror,
 } from "@starkfuture/shared/starkPages";
 import { Button } from "./ui/button";
+import type { StarkPageTarget } from "../starkPageTabs";
 
 const EMPTY = "No pages yet. Ask Claude for a decision or a report, or run /stark-workbench:page.";
 
@@ -17,8 +18,20 @@ export function StarkPagesSidebar(props: {
   readonly onPublishRequest: (slug: string, title: string) => void;
   readonly onClose: () => void;
   readonly showHeader?: boolean;
+  readonly initialSlug?: string;
+  readonly active?: boolean;
+  readonly onOpenPage?: ((page: StarkPageTarget) => void) | undefined;
 }) {
-  const { projectRoot, agent, canPublish, onPublishRequest, onClose } = props;
+  const {
+    projectRoot,
+    agent,
+    canPublish,
+    onPublishRequest,
+    onClose,
+    initialSlug,
+    active = true,
+    onOpenPage,
+  } = props;
   const publishingEnabled = canPublish && agent === "claude";
   const frame = useRef<HTMLIFrameElement>(null);
   const trusted = useRef<{ key: string; ready: boolean } | null>(null);
@@ -31,11 +44,16 @@ export function StarkPagesSidebar(props: {
     startFailed: boolean;
   } | null>(null);
   const [notice, setNotice] = useState<{ key: string; message: string } | null>(null);
+  const [selectedPage, setSelectedPage] = useState<{
+    key: string;
+    page: Extract<StarkPageTarget, { kind: "local" }>;
+  } | null>(null);
   const mirror =
     discovery?.projectRoot === projectRoot && discovery.retry === retry ? discovery.mirror : null;
   const origin = mirror ? `http://127.0.0.1:${mirror.port}` : null;
 
-  const panelKey = `${projectRoot}:${origin ?? ""}:${retry}`;
+  const panelKey = `${projectRoot}:${origin ?? ""}:${initialSlug ?? ""}:${retry}`;
+  const shownSlug = useRef<string | null>(null);
   const mirrorRoot = mirror?.root;
   const mirrorPort = mirror?.port;
   const activeNotice =
@@ -87,6 +105,7 @@ export function StarkPagesSidebar(props: {
 
   useEffect(() => {
     trusted.current = { key: panelKey, ready: false };
+    shownSlug.current = null;
   }, [panelKey]);
   useEffect(() => {
     if (!origin) return;
@@ -117,6 +136,13 @@ export function StarkPagesSidebar(props: {
           origin,
         );
     };
+    const sendShow = () => {
+      if (initialSlug && trusted.current?.key === panelKey && trusted.current.ready)
+        frame.current?.contentWindow?.postMessage(
+          { v: 1, source: "stark-host", type: "show", slug: initialSlug },
+          origin,
+        );
+    };
     const onMessage = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== origin) return;
       const message = parseStarkPagesMessage(event.data);
@@ -135,10 +161,28 @@ export function StarkPagesSidebar(props: {
         connectionTimer.current = null;
         setNotice(null);
         sendHost();
+        // A named tab belongs to one page. Do not let mirror events replace it
+        // with a newly generated page while the user reads another tab.
+        if (initialSlug)
+          frame.current?.contentWindow?.postMessage(
+            { v: 1, source: "stark-host", type: "pause" },
+            origin,
+          );
         return;
       }
       if (trusted.current?.key !== panelKey || !trusted.current.ready) return;
-      if (message.type === "publish-request") {
+      if (message.type === "show") {
+        shownSlug.current = message.page.slug;
+        const page = { kind: "local" as const, ...message.page };
+        if (initialSlug) {
+          if (active) onOpenPage?.(page);
+        } else {
+          // The mirror follows new pages automatically. Opening a tab is an
+          // explicit user action, never a side effect of that background feed.
+          setSelectedPage({ key: panelKey, page });
+        }
+      } else if (message.type === "publish-request") {
+        if (!active) return;
         if (!publishingEnabled) {
           setNotice({
             key: panelKey,
@@ -176,6 +220,7 @@ export function StarkPagesSidebar(props: {
     };
     window.addEventListener("message", onMessage);
     sendHost();
+    if (active && initialSlug && shownSlug.current !== initialSlug) sendShow();
     return () => {
       window.removeEventListener("message", onMessage);
     };
@@ -188,6 +233,9 @@ export function StarkPagesSidebar(props: {
     agent,
     publishingEnabled,
     onPublishRequest,
+    initialSlug,
+    active,
+    onOpenPage,
   ]);
 
   return (
@@ -211,11 +259,24 @@ export function StarkPagesSidebar(props: {
           </Button>
         </div>
       ) : null}
+      {onOpenPage && !initialSlug && selectedPage?.key === panelKey && origin ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+          <span className="min-w-0 flex-1 truncate text-sm">{selectedPage.page.title}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!active}
+            onClick={() => onOpenPage(selectedPage.page)}
+          >
+            Open page in tab
+          </Button>
+        </div>
+      ) : null}
       {origin && mirror ? (
         <iframe
           key={panelKey}
           ref={frame}
-          src={`${origin}/panel`}
+          src={`${origin}/panel${initialSlug ? `?slug=${encodeURIComponent(initialSlug)}` : ""}`}
           sandbox="allow-scripts allow-same-origin allow-forms"
           referrerPolicy="no-referrer"
           title="Stark pages"

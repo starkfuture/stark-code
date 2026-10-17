@@ -286,3 +286,79 @@ it("reports a failed browser open without an unhandled rejection", async () => {
     "Could not open this link",
   );
 });
+
+it("opens named pages only from the trusted active frame and pins a tab to its page", async () => {
+  const onOpenPage = vi.fn();
+  const tab = (active: boolean) => (
+    <StarkPagesSidebar
+      {...props()}
+      initialSlug="decision-one"
+      active={active}
+      onOpenPage={onOpenPage}
+    />
+  );
+  await act(async () => {
+    renderer = create(tab(true), {
+      createNodeMock: (element) =>
+        element.type === "iframe" ? { contentWindow: frameWindow } : null,
+    });
+  });
+  const show = { ...request, type: "show" };
+  await message(show);
+  expect(onOpenPage).not.toHaveBeenCalled();
+  await ready();
+  expect(frameWindow.postMessage).toHaveBeenCalledWith(
+    { v: 1, source: "stark-host", type: "pause" },
+    "http://127.0.0.1:4317",
+  );
+  await message(show, { source: {} });
+  await message(show, { origin: "http://127.0.0.1:4318" });
+  expect(onOpenPage).not.toHaveBeenCalled();
+  await message(show);
+  expect(onOpenPage).toHaveBeenCalledExactlyOnceWith({
+    kind: "local",
+    slug: "decision-one",
+    title: "Decision",
+  });
+  const iframe = renderer!.root.findByType("iframe");
+  expect(iframe.props.src).toBe("http://127.0.0.1:4317/panel?slug=decision-one");
+  await act(async () => renderer!.update(tab(false)));
+  await message({ ...show, page: { slug: "another-page", title: "Another" } });
+  await message(request);
+  expect(onOpenPage).toHaveBeenCalledTimes(1);
+  expect(publish).not.toHaveBeenCalled();
+  expect(renderer!.root.findByType("iframe")).toBe(iframe);
+  await act(async () => renderer!.update(tab(true)));
+  expect(frameWindow.postMessage).toHaveBeenLastCalledWith(
+    { v: 1, source: "stark-host", type: "show", slug: "decision-one" },
+    "http://127.0.0.1:4317",
+  );
+});
+
+it("keeps initial and followed catalog pages as previews until the user opens a tab", async () => {
+  const onOpenPage = vi.fn();
+  await act(async () => {
+    renderer = create(<StarkPagesSidebar {...props()} onOpenPage={onOpenPage} />, {
+      createNodeMock: (element) =>
+        element.type === "iframe" ? { contentWindow: frameWindow } : null,
+    });
+  });
+  await ready();
+  await message({ ...request, type: "show" });
+  expect(onOpenPage).not.toHaveBeenCalled();
+  await message({
+    ...request,
+    type: "show",
+    page: { slug: "new-report", title: "New report" },
+  });
+  expect(onOpenPage).not.toHaveBeenCalled();
+  const open = renderer!.root
+    .findAllByType("button")
+    .find((item) => item.children.includes("Open page in tab"))!;
+  await act(async () => open.props.onClick());
+  expect(onOpenPage).toHaveBeenCalledExactlyOnceWith({
+    kind: "local",
+    slug: "new-report",
+    title: "New report",
+  });
+});

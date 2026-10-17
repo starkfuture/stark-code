@@ -388,3 +388,30 @@ it("keeps the selected page and search results when entering and leaving the ful
   await click("Back to pages");
   expect(shown()).toContain("2 results for “launch”");
 });
+
+it("opens explicit page tabs while keeping the library search and reading position", async () => {
+  status = { state: "connected", message: null };
+  const onOpenPage = vi.fn();
+  await act(() => root.render(<PublishedStarkPages onOpenPage={onOpenPage} />));
+  await click("release notes12 published files");
+  await searchPages();
+  const panel = container.querySelector<HTMLElement>('section[aria-label="Published Pages"]')!;
+  panel.scrollTop = 140;
+  await click("Launch planSchedule and ownerslaunch/index.html");
+  expect(onOpenPage).toHaveBeenCalledExactlyOnceWith({
+    kind: "published",
+    root: "team/release-notes",
+    path: "launch/index.html",
+    title: "Launch plan",
+  });
+  expect(openPage).not.toHaveBeenCalled();
+  expect(shown()).toContain("2 results for “launch”");
+  expect(panel.scrollTop).toBe(140);
+  await click("Open project home");
+  expect(onOpenPage).toHaveBeenLastCalledWith({
+    kind: "published",
+    root: "team/release-notes",
+    path: "index.html",
+    title: "Project home",
+  });
+});

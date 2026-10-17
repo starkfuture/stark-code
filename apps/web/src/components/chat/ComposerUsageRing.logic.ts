@@ -2,7 +2,14 @@ import type { ServerProvider, ServerProviderUsageWindow } from "@starkfuture/con
 
 const USAGE_STALE_AFTER_MS = 15 * 60_000;
 
-/** Select only the chosen profile's account quota, never a model-specific allowance. */
+type ComposerUsageWindow = {
+  id: "session" | "weekly" | "monthly";
+  label: string;
+  window: ServerProviderUsageWindow | null;
+  message: string | null;
+};
+
+/** Keep each account quota separate; the ring reflects the most-used current window. */
 export function selectComposerUsage(
   provider: ServerProvider | null,
   connected: boolean,
@@ -12,7 +19,13 @@ export function selectComposerUsage(
     return null;
   }
   const profile = provider.displayName ?? (provider.driver === "claudeAgent" ? "Claude" : "Codex");
-  const unknown = (message: string) => ({ profile, window: null, label: null, message });
+  const unknown = (message: string) => ({
+    profile,
+    window: null,
+    label: null,
+    message,
+    windows: [] as ComposerUsageWindow[],
+  });
   if (!connected) return unknown("Reconnect to see current usage.");
   if (!provider.enabled || !provider.installed || provider.availability === "unavailable") {
     return unknown("This profile is not available.");
@@ -32,33 +45,48 @@ export function selectComposerUsage(
   if (!Number.isFinite(checkedAt) || nowMs - checkedAt >= USAGE_STALE_AFTER_MS) {
     return unknown("Usage is out of date. Waiting for an update.");
   }
-  let window: ServerProviderUsageWindow | undefined;
-  if (provider.driver === "claudeAgent") {
-    window =
-      limits.windows.find((entry) => entry.id === "seven_day") ??
-      limits.windows.find((entry) => entry.id === "five_hour");
-  } else {
-    // Codex's adapter exposes its main allowance as primary/secondary only.
-    const accountWindows = limits.windows.filter(
-      (entry) => entry.id === "primary" || entry.id === "secondary",
-    );
-    window = ["weekly", "session", "monthly"].flatMap((kind) =>
-      accountWindows.filter((entry) => entry.kind === kind),
-    )[0];
-  }
-  if (!window || !Number.isFinite(window.usedPercent)) {
-    return unknown("No account usage window has been reported yet.");
-  }
-  if (window.resetsAt && Date.parse(window.resetsAt) <= nowMs) {
-    return unknown("The usage window has reset. Waiting for an update.");
-  }
-  const kind =
-    window.kind === "weekly" ? "Weekly" : window.kind === "monthly" ? "Monthly" : "Session";
+  const accountWindows = limits.windows.filter((entry) =>
+    provider.driver === "claudeAgent"
+      ? entry.id === "five_hour" || entry.id === "seven_day"
+      : entry.id === "primary" || entry.id === "secondary",
+  );
+  const kinds: ComposerUsageWindow["id"][] = ["session", "weekly"];
+  if (accountWindows.some((entry) => entry.kind === "monthly")) kinds.push("monthly");
+  const windows = kinds.map((kind): ComposerUsageWindow => {
+    // Codex's primary/secondary identifiers describe positions, not durations.
+    const reported = accountWindows.find((entry) => entry.kind === kind);
+    const name = kind === "weekly" ? "Weekly" : kind === "monthly" ? "Monthly" : "Session";
+    const label = provider.driver === "claudeAgent" ? `${name} · all models` : name;
+    if (!reported || !Number.isFinite(reported.usedPercent))
+      return { id: kind, label, window: null, message: "Not reported." };
+    if (reported.resetsAt && Date.parse(reported.resetsAt) <= nowMs)
+      return {
+        id: kind,
+        label,
+        window: null,
+        message: "The usage window has reset. Waiting for an update.",
+      };
+    return { id: kind, label, window: reported, message: null };
+  });
+  const dominant = windows.reduce<ComposerUsageWindow | null>((current, entry) => {
+    if (!entry.window) return current;
+    if (
+      !current?.window ||
+      entry.window.usedPercent > current.window.usedPercent ||
+      (entry.window.usedPercent === current.window.usedPercent && entry.id === "weekly")
+    )
+      return entry;
+    return current;
+  }, null);
   return {
     profile,
-    window,
-    label: provider.driver === "claudeAgent" ? `${kind} · all models` : kind,
-    message: null,
+    window: dominant?.window ?? null,
+    label: dominant?.label ?? null,
+    message: dominant
+      ? null
+      : (windows.find((entry) => entry.message?.includes("has reset"))?.message ??
+        "No account usage window has been reported yet."),
+    windows,
   };
 }
 

@@ -15,6 +15,13 @@ const weekly: ServerProviderUsageWindow = {
   usedPercent: 67,
   resetsAt: "2026-10-19T18:00:00Z",
 };
+const session: ServerProviderUsageWindow = {
+  id: "five_hour",
+  kind: "session",
+  label: "Session",
+  usedPercent: 12,
+  resetsAt: "2026-10-17T15:00:00Z",
+};
 function provider(windows: readonly ServerProviderUsageWindow[] = [weekly]): ServerProvider {
   return {
     instanceId: ProviderInstanceId.make("claude"),
@@ -33,18 +40,20 @@ function provider(windows: readonly ServerProviderUsageWindow[] = [weekly]): Ser
   };
 }
 describe("selectComposerUsage", () => {
-  it("prefers Claude's all-model week and excludes scoped buckets when falling back to the session", () => {
+  it("shows Claude's session and week while excluding scoped model allowances", () => {
     const scoped = { ...weekly, id: "seven_day_opus", usedPercent: 99 };
-    const session = { ...weekly, id: "five_hour", kind: "session" as const, usedPercent: 12 };
-    expect(
-      selectComposerUsage(provider([scoped, session, weekly]), true, now)?.window?.usedPercent,
-    ).toBe(67);
+    const result = selectComposerUsage(provider([scoped, session, weekly]), true, now);
+    expect(result?.window?.usedPercent).toBe(67);
+    expect(result?.windows).toEqual([
+      { id: "session", label: "Session · all models", window: session, message: null },
+      { id: "weekly", label: "Weekly · all models", window: weekly, message: null },
+    ]);
     expect(selectComposerUsage(provider([scoped, session]), true, now)?.label).toBe(
       "Session · all models",
     );
     expect(selectComposerUsage(provider([scoped]), true, now)?.window).toBeNull();
   });
-  it("prefers Codex's account week, then session, then monthly", () => {
+  it("shows Codex account windows and supports monthly plans without model-specific buckets", () => {
     const session = { ...weekly, id: "primary", kind: "session" as const, usedPercent: 12 };
     const week = { ...weekly, id: "secondary", usedPercent: 48 };
     const codex = { ...provider([session, week]), driver: ProviderDriverKind.make("codex") };
@@ -74,6 +83,96 @@ describe("selectComposerUsage", () => {
       )?.window,
     ).toBeNull();
   });
+  it("uses Codex's window kind rather than the primary/secondary position", () => {
+    const week = { ...weekly, id: "primary" };
+    const short = { ...session, id: "secondary" };
+    const codex = { ...provider([week, short]), driver: ProviderDriverKind.make("codex") };
+    const result = selectComposerUsage(codex, true, now);
+    expect(result?.windows).toEqual([
+      { id: "session", label: "Session", window: short, message: null },
+      { id: "weekly", label: "Weekly", window: week, message: null },
+    ]);
+    expect(result?.window).toEqual(week);
+  });
+  it.each(["claudeAgent", "codex"] as const)(
+    "makes the %s ring reflect the more consumed session while retaining weekly details",
+    (driver) => {
+      const short = {
+        ...session,
+        id: driver === "codex" ? "primary" : session.id,
+        usedPercent: 92,
+      };
+      const week = { ...weekly, id: driver === "codex" ? "secondary" : weekly.id };
+      const result = selectComposerUsage(
+        { ...provider([week, short]), driver: ProviderDriverKind.make(driver) },
+        true,
+        now,
+      );
+      expect(result?.window).toEqual(short);
+      expect(result?.label).toMatch(/^Session/);
+      expect(result?.windows.map((row) => row.window?.usedPercent)).toEqual([92, 67]);
+    },
+  );
+  it("keeps the established weekly ring when session and week have equal usage", () => {
+    const result = selectComposerUsage(
+      provider([{ ...session, usedPercent: 67 }, weekly]),
+      true,
+      now,
+    );
+    expect(result?.window).toEqual(weekly);
+    expect(result?.label).toBe("Weekly · all models");
+  });
+  it("keeps missing session allowance distinct from a reported zero weekly allowance", () => {
+    const zero = { ...weekly, usedPercent: 0 };
+    const result = selectComposerUsage(provider([zero]), true, now);
+    expect(result?.windows).toEqual([
+      { id: "session", label: "Session · all models", window: null, message: "Not reported." },
+      { id: "weekly", label: "Weekly · all models", window: zero, message: null },
+    ]);
+    expect(result?.window).toEqual(zero);
+    expect(result?.message).toBeNull();
+  });
+  it("adds a Codex monthly row while keeping missing session and weekly windows explicit", () => {
+    const monthly = { ...weekly, id: "primary", kind: "monthly" as const, label: "Monthly" };
+    const result = selectComposerUsage(
+      { ...provider([monthly]), driver: ProviderDriverKind.make("codex") },
+      true,
+      now,
+    );
+    expect(result?.windows).toEqual([
+      { id: "session", label: "Session", window: null, message: "Not reported." },
+      { id: "weekly", label: "Weekly", window: null, message: "Not reported." },
+      { id: "monthly", label: "Monthly", window: monthly, message: null },
+    ]);
+    expect(result?.window).toEqual(monthly);
+  });
+  it.each([
+    ["claudeAgent", "session"],
+    ["claudeAgent", "weekly"],
+    ["codex", "session"],
+    ["codex", "weekly"],
+  ] as const)("keeps the other %s window visible after %s resets", (driver, expiredKind) => {
+    const windows = [session, weekly].map((window) => ({
+      ...window,
+      id: driver === "codex" ? (window.kind === "session" ? "primary" : "secondary") : window.id,
+      ...(window.kind === expiredKind
+        ? { usedPercent: 100, resetsAt: new Date(now).toISOString() }
+        : {}),
+    }));
+    const result = selectComposerUsage(
+      { ...provider(windows), driver: ProviderDriverKind.make(driver) },
+      true,
+      now,
+    );
+    const reset = result?.windows.find((row) => row.id === expiredKind);
+    const valid = result?.windows.find((row) => row.id !== expiredKind);
+    expect(reset?.window).toBeNull();
+    expect(reset?.message).toContain("has reset");
+    expect(valid?.message).toBeNull();
+    expect(valid?.window?.usedPercent).toBe(expiredKind === "session" ? 67 : 12);
+    expect(result?.window).toEqual(valid?.window);
+    expect(result?.message).toBeNull();
+  });
   it.each([0, 100])("keeps a reported percentage of %s distinct from unknown", (percent) => {
     const result = selectComposerUsage(provider([{ ...weekly, usedPercent: percent }]), true, now);
     expect(result?.window?.usedPercent).toBe(percent);
@@ -84,13 +183,18 @@ describe("selectComposerUsage", () => {
     "does not present old cached usage after %s",
     (reason) => {
       const value = provider();
-      expect(
-        selectComposerUsage(
-          { ...value, usageLimits: { ...value.usageLimits!, unavailable: { reason } } },
-          true,
-          now,
-        )?.window,
-      ).toBeNull();
+      const result = selectComposerUsage(
+        { ...value, usageLimits: { ...value.usageLimits!, unavailable: { reason } } },
+        true,
+        now,
+      );
+      expect(result?.window).toBeNull();
+      expect(result?.windows).toEqual([]);
+      expect(result?.message).toBe(
+        reason === "unsupported"
+          ? "This account does not report subscription usage."
+          : "Usage could not be refreshed. Waiting for an update.",
+      );
     },
   );
   it("expires usage after 15 minutes and after its reset, without assuming zero", () => {
@@ -98,6 +202,7 @@ describe("selectComposerUsage", () => {
     expect(selectComposerUsage(provider(), true, now + 10 * 60_000)?.message).toContain(
       "out of date",
     );
+    expect(selectComposerUsage(provider(), true, now + 10 * 60_000)?.windows).toEqual([]);
     expect(
       selectComposerUsage(provider([{ ...weekly, resetsAt: "2026-10-17T12:00:00Z" }]), true, now)
         ?.message,
@@ -105,13 +210,22 @@ describe("selectComposerUsage", () => {
   });
   it("keeps offline, signed-out and missing quota states neutral", () => {
     expect(selectComposerUsage(provider(), false, now)?.window).toBeNull();
-    expect(
-      selectComposerUsage({ ...provider(), auth: { status: "unauthenticated" } }, true, now)
-        ?.window,
-    ).toBeNull();
-    expect(
-      selectComposerUsage({ ...provider(), usageLimits: undefined }, true, now)?.window,
-    ).toBeNull();
+    expect(selectComposerUsage(provider(), false, now)?.windows).toEqual([]);
+    expect(selectComposerUsage(provider(), false, now)?.message).toBe(
+      "Reconnect to see current usage.",
+    );
+    const signedOut = selectComposerUsage(
+      { ...provider(), auth: { status: "unauthenticated" } },
+      true,
+      now,
+    );
+    expect(signedOut?.window).toBeNull();
+    expect(signedOut?.windows).toEqual([]);
+    expect(signedOut?.message).toBe("Sign in to see subscription usage.");
+    const missing = selectComposerUsage({ ...provider(), usageLimits: undefined }, true, now);
+    expect(missing?.window).toBeNull();
+    expect(missing?.windows).toEqual([]);
+    expect(missing?.message).toBe("Usage has not been reported yet.");
     expect(selectComposerUsage(provider([]), true, now)?.window).toBeNull();
   });
   it("does not render unsupported providers or absent selection", () => {

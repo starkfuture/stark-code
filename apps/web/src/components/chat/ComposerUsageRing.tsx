@@ -28,22 +28,51 @@ export function ComposerUsageRing({
   if (!usage) return null;
   const percent = usage.window?.usedPercent;
   const title =
-    percent !== undefined
-      ? `${usage.label}: ${formatComposerUsagePercent(percent)} used`
+    usage.windows.length > 0
+      ? usage.windows
+          .map((entry) =>
+            entry.window
+              ? `${entry.label}: ${formatComposerUsagePercent(entry.window.usedPercent)} used`
+              : `${entry.label}: unavailable`,
+          )
+          .join(". ")
       : "Subscription usage unavailable";
-  const reset = usage.window?.resetsAt;
   const details = (
-    <div className="space-y-1 text-sm">
-      <p>{title}</p>
-      {reset ? (
-        <p className="text-muted-foreground">
-          Resets {weekdayFormatter.format(new Date(reset))}{" "}
-          {formatShortTimestamp(reset, timestampFormat)}
-        </p>
-      ) : usage.window ? (
-        <p className="text-muted-foreground">Reset time not reported.</p>
-      ) : null}
-      {usage.message ? <p className="text-muted-foreground">{usage.message}</p> : null}
+    <div className="space-y-3 text-sm">
+      {usage.windows.length > 0 ? (
+        usage.windows.map((entry) => {
+          const reset = entry.window?.resetsAt;
+          return (
+            <div key={entry.id} className="space-y-1">
+              <p>
+                {entry.label}:{" "}
+                {entry.window
+                  ? `${formatComposerUsagePercent(entry.window.usedPercent)} used`
+                  : "Not reported"}
+              </p>
+              {entry.window ? (
+                <p className="text-muted-foreground">
+                  {reset && Number.isFinite(Date.parse(reset)) ? (
+                    <>
+                      Resets {weekdayFormatter.format(new Date(reset))}{" "}
+                      {formatShortTimestamp(reset, timestampFormat)}
+                    </>
+                  ) : (
+                    "Reset time not reported."
+                  )}
+                </p>
+              ) : entry.message !== "Not reported." ? (
+                <p className="text-muted-foreground">{entry.message}</p>
+              ) : null}
+            </div>
+          );
+        })
+      ) : (
+        <>
+          <p>{title}</p>
+          {usage.message ? <p className="text-muted-foreground">{usage.message}</p> : null}
+        </>
+      )}
       <p className="text-xs text-muted-foreground">Selected profile: {usage.profile}</p>
     </div>
   );

@@ -23,6 +23,7 @@ const setup = (
 ) => {
   const calls: string[] = [];
   const api: ProviderAdapterV2McpServers = {
+    reconnectScope: "server",
     ...(input.reload ? { reload: input.reload } : {}),
     list: () => Effect.succeed(input.servers ?? []),
     reconnect: (name) =>
@@ -203,10 +204,7 @@ it.effect("advertises reload support and requires an explicit force after a held
     const applied = yield* service.reload({ ...target, force: true }, desktop);
     assert.equal(applied.status, "reloaded");
     assert.equal(applied.pluginErrors, 2);
-    assert.deepEqual(applied.failedServers, [
-      "docs",
-      "[redacted] https://auth.test?code=[redacted]",
-    ]);
+    assert.deepEqual(applied.failedServers, ["docs", "Authorization: [redacted]"]);
     assert.deepEqual(requests, [false, true]);
   }),
 );
@@ -248,7 +246,9 @@ it.effect("never reloads or creates a Settings inspection session for a project-
     }
     assert.equal(resolutions, 0);
     assert.equal(reloads, 0);
-    assert.isFalse((yield* service.list(project, desktop)).canReload);
+    const inspected = yield* service.list(project, desktop);
+    assert.isFalse(inspected.canReload);
+    assert.isFalse(inspected.live);
     assert.equal(resolutions, 1);
     assert.equal(reloads, 0);
     assert.isTrue((yield* service.list(target, desktop)).canReload);
@@ -277,5 +277,94 @@ it.effect("escapes status metadata and redacts callback parameters and auth head
     assert.isFalse(server?.error?.includes("secret"));
     for (const secret of ["=one", "=two", "=three"])
       assert.isFalse(server?.error?.includes(secret));
+  }),
+);
+
+it.effect("advertises targeted reconnect support and refuses unknown or global reconnects", () =>
+  Effect.gen(function* () {
+    const { service, api, calls } = setup();
+    assert.equal((yield* service.list(target, desktop)).reconnectScope, "server");
+    yield* service.reconnect({ ...target, name: "failed" }, desktop);
+    assert.deepEqual(calls, ["reconnect:failed"]);
+    for (const scope of ["all", undefined] as const) {
+      const { reconnectScope: _scope, ...withoutScope } = api;
+      const unsupported = makeForResolver(() =>
+        Effect.succeed({ ...withoutScope, ...(scope ? { reconnectScope: scope } : {}) }),
+      );
+      assert.equal((yield* unsupported.list(target, desktop)).reconnectScope, scope);
+      const error = yield* unsupported
+        .reconnect({ ...target, name: "failed" }, desktop)
+        .pipe(Effect.flip);
+      assert.equal(error.reason, "unavailable");
+      assert.include(error.message, "affecting other connections");
+    }
+    assert.deepEqual(calls, ["reconnect:failed"]);
+  }),
+);
+
+it.effect("keeps connection summaries while stripping URL secrets and credential fields", () =>
+  Effect.gen(function* () {
+    const errors = [
+      "ECONNREFUSED connecting to https://alice:secret-pass@private.example/mcp/private-path?refresh_token=refresh-value&client_secret=client-value#fragment-secret",
+      "DNS lookup failed\nAuthorization: Bearer auth-secret\nCookie: session=cookie-secret; csrf=csrf-secret\nx-api-key: api-secret\nSet-Cookie: session=new-secret; HttpOnly",
+      '{"refresh_token":"refresh-json", "client_secret":"client-json", "Authorization":"Bearer json-auth", "Cookie":"json-cookie", "x-api-key":"json-api"}',
+      "invalid_grant refresh_token=refresh-bare client_secret=client-bare access_token=access-bare code=code-bare state=state-bare",
+      "Proxy-Authorization: Basic proxy-secret\nFailed to connect.",
+      "TLS error at wss://alice:ws-secret@socket.example/private?key=unknown-secret#opaque-secret",
+      "Timed out\nAuthorization: " + "long-secret".repeat(300),
+      String.raw`{"Authorization":"Bearer prefix\"escaped-auth", "client_secret":"prefix\"escaped-client"}`,
+      "Auth\u001b[31morization\u001b[0m: Bearer terminal-secret\nrefresh_\u200btoken=hidden-secret",
+    ];
+    const { service } = setup({
+      servers: errors.map((error, index) => ({
+        name: `server-${index}`,
+        status: "failed",
+        authKind: "unknown",
+        locked: false,
+        tools: [],
+        error,
+      })),
+    });
+    const rows = (yield* service.list(target, desktop)).servers;
+    assert.equal(rows[0]?.error, "ECONNREFUSED connecting to https://private.example");
+    assert.include(rows[1]?.error ?? "", "DNS lookup failed");
+    assert.include(rows[3]?.error ?? "", "invalid_grant");
+    assert.include(rows[4]?.error ?? "", "Failed to connect.");
+    assert.equal(rows[5]?.error, "TLS error at wss://socket.example");
+    const visible = rows.map((row) => row.error).join("\n");
+    for (const secret of [
+      "alice",
+      "secret-pass",
+      "private-path",
+      "refresh-value",
+      "client-value",
+      "fragment-secret",
+      "auth-secret",
+      "cookie-secret",
+      "csrf-secret",
+      "api-secret",
+      "new-secret",
+      "refresh-json",
+      "client-json",
+      "json-auth",
+      "json-cookie",
+      "json-api",
+      "refresh-bare",
+      "client-bare",
+      "access-bare",
+      "code-bare",
+      "state-bare",
+      "proxy-secret",
+      "ws-secret",
+      "unknown-secret",
+      "opaque-secret",
+      "long-secret",
+      "escaped-auth",
+      "escaped-client",
+      "terminal-secret",
+      "hidden-secret",
+    ])
+      assert.isFalse(visible.includes(secret), `Leaked ${secret}`);
+    assert.isTrue(rows.every((row) => (row.error?.length ?? 0) <= 1000));
   }),
 );

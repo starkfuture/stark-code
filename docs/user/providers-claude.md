@@ -137,11 +137,20 @@ Claude supports the action. **Settings → MCP servers** also works without an o
 thread. Remote clients can view cached status but cannot start a cold inspection
 session or change server connections.
 
-In the conversation's **Tools → MCP** panel, choose **Reload MCPs** to pick up plugin changes and reconnect enabled external
-servers in the selected chat session. Disabled servers stay disabled. If Claude
+Stark Code checks MCP health when a chat session starts and between turns. It
+reconnects only failed servers, with at most three automatic attempts per failure.
+Healthy connections keep their prompt cache. Recovery waits for active turns,
+background work, and direct tool calls to finish. Sign-in failures show a sign-in
+action instead of retrying; network failures ask you to check your network or VPN.
+On macOS, it checks FortiClient's connection state when a server reports a network
+failure. It also recognizes disconnected Tailscale connections for tailnet servers.
+
+In the conversation's **Tools → MCP** panel, choose **Reload MCPs** to pick up plugin changes.
+Its follow-up reconnects only failed servers. Disabled servers stay disabled. If Claude
 reports that a plugin change affects its prompt cache, choose whether to apply it;
 applying it can increase input-token usage on the next turn. The reload itself
-does not send a message to the model. **Refresh status** only rereads the list.
+does not send a message to the model. **Refresh status** checks connection health
+without reloading plugins.
 Reload is available from a live conversation; Settings only inspects its own
 separate connection and cannot reload existing conversations.
 

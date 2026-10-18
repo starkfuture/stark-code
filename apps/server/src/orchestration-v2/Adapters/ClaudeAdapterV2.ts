@@ -3674,6 +3674,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         environment: { ...adapterOptions.environment, ...PROVIDER_PRIVACY_ENV },
       });
     return {
+      reconnectScope: "server",
       list: () =>
         Effect.gen(function* () {
           const query = yield* getQuery;
@@ -3710,12 +3711,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               }
               continue;
             }
-            if (
-              server.status === "needs-auth" ||
-              current.status === "needs-auth" ||
-              current.status === "disabled"
-            )
-              continue;
+            if (server.status === "needs-auth" || current.status !== "failed") continue;
             const connected =
               query.reconnectMcpServer === undefined
                 ? undefined
@@ -10139,18 +10135,44 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             resolveClaudeCatalogContextWindowTokens(BUNDLED_CLAUDE_MODEL_CATALOG, selection),
           events: Stream.fromEffectRepeat(Queue.take(events)),
           readSessionCatalog: () => catalog.read,
-          mcpServers: createMcpServers(
-            Ref.get(queryContext).pipe(
-              Effect.flatMap((live) =>
-                live === null
-                  ? Effect.fail(mcpControlError("claudeAgent", "read this inactive session for"))
-                  : Effect.succeed(live.query),
+          mcpServers: {
+            ...createMcpServers(
+              Ref.get(queryContext).pipe(
+                Effect.flatMap((live) =>
+                  live === null
+                    ? Effect.fail(mcpControlError("claudeAgent", "read this inactive session for"))
+                    : Effect.succeed(live.query),
+                ),
               ),
+              input.runtimePolicy.cwd,
+              Effect.void,
+              catalog.onReload,
             ),
-            input.runtimePolicy.cwd,
-            Effect.void,
-            catalog.onReload,
-          ),
+            isBusy: Effect.gen(function* () {
+              const live = yield* Ref.get(queryContext);
+              if (
+                live === null ||
+                live.stopping ||
+                (yield* Ref.get(activeTurn)) !== null ||
+                localShellExecution !== null ||
+                subagentToolCalls.size > 0 ||
+                (yield* Ref.get(pendingRuntimeRequests)).size > 0
+              )
+                return true;
+              // A notification-only buffer is idle for release accounting but
+              // can precede an autonomous wake. Reconnecting must wait for its
+              // known pending work without changing those release semantics.
+              for (const buffer of (yield* Ref.get(wakeBuffers)).values())
+                if (buffer.messages.length > 0) return true;
+              for (const frames of (yield* Ref.get(pendingSubagentFramesByToolUseId)).values())
+                if (frames.length > 0) return true;
+              for (const roster of (yield* Ref.get(pendingBackgroundTasksByNativeThread)).values())
+                if (roster.size > 0) return true;
+              for (const subagent of (yield* Ref.get(sessionSubagentsByTaskId)).values())
+                if (subagent.task.status === "running") return true;
+              return false;
+            }),
+          },
           readContextUsage: ({ detail }) =>
             Effect.gen(function* () {
               const live = yield* Ref.get(queryContext);

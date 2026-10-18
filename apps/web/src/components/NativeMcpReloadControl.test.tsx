@@ -19,7 +19,7 @@ async function render(driver: string) {
   await act(() =>
     root.render(<NativeMcpReloadControl driver={driver} onShowTerminal={state.show} />),
   );
-  await click(driver === "codex" ? "MCPs" : "Reload MCPs");
+  await click("Connection help");
 }
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -34,21 +34,23 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
 });
-it("offers Claude's distinct commands without running or forcing a reload", async () => {
+it("offers individual Claude connection inspection without running or suggesting a global reload", async () => {
   await render("claudeAgent");
   expect(state.copy).not.toHaveBeenCalled();
-  await click("Copy /reload-plugins");
-  expect(state.copy).toHaveBeenLastCalledWith("/reload-plugins", "native MCP command");
+  expect(document.body.textContent).not.toContain("/reload-plugins");
+  expect(document.body.textContent).not.toContain("/mcp reconnect all");
+  await click("Copy /mcp");
+  expect(state.copy).toHaveBeenLastCalledWith("/mcp", "native MCP command");
   expect(document.body.textContent).toContain("It has not been run.");
   expect(state.show).not.toHaveBeenCalled();
-  await click("Copy /mcp reconnect all");
-  expect(state.copy).toHaveBeenLastCalledWith("/mcp reconnect all", "native MCP command");
   await click("Show terminal");
   expect(state.show).toHaveBeenCalledExactlyOnceWith();
 });
-it("explains Codex's restart requirement and offers only its supported inspection command", async () => {
+it("explains Codex's individual reconnect limitation and offers only its inspection command", async () => {
   await render("codex");
-  expect(document.body.textContent).toContain("no live MCP reload command");
+  expect(document.body.textContent).toContain(
+    "no live command to reconnect an individual MCP server",
+  );
   expect(document.body.textContent).not.toContain("/reload-plugins");
   expect(document.body.textContent).not.toContain("/mcp reconnect");
   await click("Copy /mcp");
@@ -65,8 +67,8 @@ it("coalesces repeated copy clicks and reports a clipboard failure honestly", as
   );
   await render("claudeAgent");
   await act(() => {
-    button("Copy /reload-plugins").click();
-    button("Copy /reload-plugins").click();
+    button("Copy /mcp").click();
+    button("Copy /mcp").click();
   });
   expect(state.copy).toHaveBeenCalledTimes(1);
   await act(() => reject(new Error("Clipboard unavailable")));

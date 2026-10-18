@@ -9,7 +9,6 @@ import {
   type ScopedThreadRef,
 } from "@starkfuture/contracts";
 import { serverEnvironment } from "../../state/server";
-import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentPresentation } from "../../state/presentation";
@@ -17,6 +16,8 @@ import { isElectron } from "../../env";
 import { ensureLocalApi } from "../../localApi";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { useMcpServersQuery } from "./useMcpServersQuery";
+import { mcpRecoveryMessage } from "./mcpRecoveryPresentation";
 import {
   isLocalMcpDesktopTarget,
   mcpConnectionSummary,
@@ -63,6 +64,9 @@ export function McpServerRows({
               : MCP_STATUS_LABELS[server.status]}
             {server.locked ? " · Locked app server" : ""} · {server.tools.length} tools
           </p>
+          {mcpRecoveryMessage(server) ? (
+            <p className="mt-1 text-xs text-muted-foreground">{mcpRecoveryMessage(server)}</p>
+          ) : null}
           {server.error ? (
             <p className="mt-2 break-all text-xs text-destructive">
               {mcpDisplayText(server.error)}
@@ -104,7 +108,7 @@ export function McpServerRows({
           ) : null}
           {!server.locked ? (
             <div className="mt-3 flex flex-wrap gap-2">
-              {canReconnect && (server.status === "failed" || server.status === "connecting") ? (
+              {canReconnect && server.status === "failed" ? (
                 <Button
                   size="xs"
                   variant="outline"
@@ -167,6 +171,9 @@ export function McpServerRows({
 type McpServersPanelProps = {
   environmentId: EnvironmentId;
   target: McpServersListInput;
+  sessionBusy?: boolean | undefined;
+  /** Set only by an explicit Sign in click in the health banner. */
+  initialSignIn?: string | undefined;
 };
 
 export function McpServersPanel(props: McpServersPanelProps) {
@@ -181,8 +188,13 @@ export function McpServersPanel(props: McpServersPanelProps) {
   return <McpServersPanelTarget key={targetKey} {...props} />;
 }
 
-function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) {
-  const query = useEnvironmentQuery(serverEnvironment.mcpServers({ environmentId, input: target }));
+function McpServersPanelTarget({
+  environmentId,
+  target,
+  sessionBusy = false,
+  initialSignIn,
+}: McpServersPanelProps) {
+  const query = useMcpServersQuery(environmentId, target, 2_000);
   const reload = useAtomCommand(serverEnvironment.reloadMcpServers, { reportFailure: false });
   const reconnect = useAtomCommand(serverEnvironment.reconnectMcpServer, { reportFailure: false });
   const toggle = useAtomCommand(serverEnvironment.setMcpServerEnabled, { reportFailure: false });
@@ -195,15 +207,26 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
   const desktopHost = presentation
     ? isLocalMcpDesktopTarget(isElectron, presentation.entry.target)
     : false;
-  const canReconnect = useEnvironmentScope(environmentId, "orchestration:operate") && desktopHost;
+  const canOperate = useEnvironmentScope(environmentId, "orchestration:operate") && desktopHost;
+  const canReconnect =
+    canOperate && query.data?.live === true && query.data.reconnectScope === "server";
   const canReload =
     target.threadId !== undefined &&
-    canReconnect &&
+    canOperate &&
     query.data?.live === true &&
     query.data.canReload === true;
   const canManage = useEnvironmentScope(environmentId, "providers:manage") && desktopHost;
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const unavailable = !query.data || (target.threadId !== undefined && !query.data.live);
+  const mutationBlocked = busy || sessionBusy || unavailable;
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [reloadResult, setReloadResult] = useState<McpServersReloadResult | null>(null);
   const [pending, setPending] = useState<{
@@ -215,11 +238,6 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
   const [callback, setCallback] = useState("");
   const refresh = useRef(query.refresh);
   refresh.current = query.refresh;
-  useEffect(() => {
-    refresh.current();
-    const timer = window.setInterval(() => refresh.current(), 2_000);
-    return () => window.clearInterval(timer);
-  }, [environmentId, target.threadId, target.providerInstanceId, target.projectId]);
   useEffect(() => {
     if (!pending) return;
     if (
@@ -242,7 +260,7 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
     return () => window.clearTimeout(timer);
   }, [pending, query.data]);
   const run = async (operation: () => Promise<{ readonly _tag: string }>) => {
-    if (busyRef.current) return;
+    if (busyRef.current || sessionBusy || unavailable) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
@@ -261,6 +279,7 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
   const reloadServers = async (force = false) => {
     if (
       !canReload ||
+      sessionBusy ||
       busyRef.current ||
       (!force && reloadResult?.status === "confirmation-required") ||
       (force && reloadResult?.status !== "confirmation-required")
@@ -289,10 +308,11 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
     }
   };
   const action = (server: McpServerStatusEntry, kind: ServerAction) => {
-    if (server.locked || busy) return;
+    if (server.locked || mutationBlocked) return;
     const input = { ...target, name: server.name };
-    if (kind === "reconnect" && canReconnect) {
-      void run(() => reconnect({ environmentId, input }));
+    if (kind === "reconnect") {
+      if (canReconnect && server.status === "failed")
+        void run(() => reconnect({ environmentId, input }));
       return;
     }
     if (!canManage) return;
@@ -307,17 +327,28 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
     if (kind === "sign-in")
       void run(async () => {
         const result = await signIn({ environmentId, input });
-        if (result._tag === "Success") {
+        if (result._tag === "Success" && mounted.current) {
           const flow = result.value;
           if (flow.url && !safeMcpBrowserTarget(flow.url)) {
             setError("The server returned an unsafe sign-in URL.");
             return result;
           }
           if (!flow.completed) {
+            let opened = flow.browserOpened === true;
+            const browserTarget = flow.url ? safeMcpBrowserTarget(flow.url) : null;
+            if (!opened && browserTarget) {
+              try {
+                await ensureLocalApi().shell.openExternal(browserTarget.url);
+                opened = true;
+              } catch {
+                setError("Could not open the system browser. Try again.");
+              }
+            }
+            if (!mounted.current) return result;
             setPending({
               name: server.name,
               flow,
-              opened: flow.browserOpened === true,
+              opened,
               startedAt: Date.now(),
             });
             setCallback("");
@@ -326,6 +357,22 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
         return result;
       });
   };
+  const requestedSignIn = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !initialSignIn ||
+      requestedSignIn.current === initialSignIn ||
+      !canManage ||
+      mutationBlocked
+    )
+      return;
+    const server = query.data?.servers.find(
+      (entry) => entry.name === initialSignIn && entry.status === "needs-auth" && !entry.locked,
+    );
+    if (!server) return;
+    requestedSignIn.current = initialSignIn;
+    action(server, "sign-in");
+  });
   const browser = pending?.flow.url ? safeMcpBrowserTarget(pending.flow.url) : null;
   const waitingServer = query.data?.servers.find((server) => server.name === pending?.name);
   const canPaste =
@@ -341,7 +388,9 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
           <Button
             size="xs"
             variant="outline"
-            disabled={!canReload || busy || reloadResult?.status === "confirmation-required"}
+            disabled={
+              !canReload || mutationBlocked || reloadResult?.status === "confirmation-required"
+            }
             onClick={() => void reloadServers()}
           >
             Reload MCPs
@@ -351,6 +400,17 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
       {!desktopHost ? (
         <p className="text-xs text-muted-foreground">
           Status only. Manage MCP servers from the desktop host.
+        </p>
+      ) : null}
+      {sessionBusy ? (
+        <p className="text-xs text-muted-foreground">
+          Connection changes are available after this turn finishes.
+        </p>
+      ) : null}
+      {query.data?.live && query.data.reconnectScope === "all" ? (
+        <p className="text-xs text-muted-foreground">
+          This provider cannot reconnect one server without reloading healthy connections.
+          Individual retries are unavailable here.
         </p>
       ) : null}
       {target.threadId === undefined ? (
@@ -374,7 +434,7 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
             <Button
               size="xs"
               variant="outline"
-              disabled={!canReload || busy}
+              disabled={!canReload || mutationBlocked}
               onClick={() => void reloadServers(true)}
             >
               Reload anyway
@@ -415,8 +475,9 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
               <p>Opens {browser.host} in your browser.</p>
               <Button
                 size="xs"
+                disabled={mutationBlocked}
                 onClick={() => {
-                  if (!canManage) return;
+                  if (!canManage || mutationBlocked) return;
                   void ensureLocalApi()
                     .shell.openExternal(browser.url)
                     .then(() => {
@@ -435,7 +496,8 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
               className="space-y-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!canManage || !isExpectedMcpCallback(callback, pending.flow)) {
+                if (!canManage || mutationBlocked) return;
+                if (!isExpectedMcpCallback(callback, pending.flow)) {
                   setError("Paste the matching localhost callback address from this sign-in flow.");
                   return;
                 }
@@ -460,7 +522,7 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
                   onChange={(event) => setCallback(event.target.value)}
                 />
               </label>
-              <Button size="xs" disabled={busy || !callback.trim()} type="submit">
+              <Button size="xs" disabled={mutationBlocked || !callback.trim()} type="submit">
                 Complete sign-in
               </Button>
             </form>
@@ -480,12 +542,12 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
       {query.isPending && !query.data ? (
         <p className="text-xs text-muted-foreground">Reading server status…</p>
       ) : null}
-      {query.data && !query.data.live ? (
+      {target.threadId !== undefined && query.data && !query.data.live ? (
         <p className="text-xs text-muted-foreground">
           Send a message to start this thread's MCP session.
         </p>
       ) : null}
-      {query.data?.servers.length === 0 ? (
+      {query.data && !unavailable && query.data.servers.length === 0 ? (
         <p className="text-xs text-muted-foreground">No MCP servers reported.</p>
       ) : null}
       {canReconnect &&
@@ -493,7 +555,7 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
         <Button
           size="xs"
           variant="outline"
-          disabled={busy}
+          disabled={mutationBlocked}
           onClick={() => {
             void run(async () => {
               for (const server of query.data?.servers ?? []) {
@@ -508,14 +570,14 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
             });
           }}
         >
-          Reconnect all failed
+          Reconnect failed
         </Button>
       ) : null}
       <McpServerRows
         servers={query.data?.servers ?? []}
         canReconnect={canReconnect}
         canManage={canManage}
-        busy={busy}
+        busy={mutationBlocked}
         waitingName={pending?.name}
         onAction={action}
       />
@@ -523,22 +585,17 @@ function McpServersPanelTarget({ environmentId, target }: McpServersPanelProps) 
   );
 }
 
-export function McpServersChip({ threadRef }: { threadRef: ScopedThreadRef }) {
+export function McpServersChip({
+  threadRef,
+  sessionBusy,
+}: {
+  threadRef: ScopedThreadRef;
+  sessionBusy?: boolean;
+}) {
   const [open, setOpen] = useState(false);
-  const query = useEnvironmentQuery(
-    serverEnvironment.mcpServers({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    }),
-  );
-  const refresh = useRef(query.refresh);
-  refresh.current = query.refresh;
-  useEffect(() => {
-    refresh.current();
-    const timer = window.setInterval(() => refresh.current(), 10_000);
-    return () => window.clearInterval(timer);
-  }, [threadRef.environmentId, threadRef.threadId]);
+  const query = useMcpServersQuery(threadRef.environmentId, { threadId: threadRef.threadId });
   const summary = mcpConnectionSummary(query.data?.servers ?? []);
+  const hasStatus = query.data?.live === true && !query.error;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -546,10 +603,14 @@ export function McpServersChip({ threadRef }: { threadRef: ScopedThreadRef }) {
           <Button
             size="xs"
             variant="ghost"
-            aria-label={`MCP servers: ${summary.connected} connected${summary.warning ? ", needs attention" : ""}`}
+            aria-label={
+              hasStatus
+                ? `MCP servers: ${summary.connected} connected${summary.warning ? ", needs attention" : ""}`
+                : "MCP servers: status unavailable"
+            }
           >
-            MCP {summary.connected}
-            {summary.warning ? (
+            MCP{hasStatus ? ` ${summary.connected}` : ""}
+            {hasStatus && summary.warning ? (
               <span aria-hidden className="size-1.5 rounded-full bg-warning" />
             ) : null}
           </Button>
@@ -561,6 +622,7 @@ export function McpServersChip({ threadRef }: { threadRef: ScopedThreadRef }) {
             key={`${threadRef.environmentId}:${threadRef.threadId}`}
             environmentId={threadRef.environmentId}
             target={{ threadId: threadRef.threadId }}
+            sessionBusy={sessionBusy}
           />
         </div>
       </PopoverPopup>

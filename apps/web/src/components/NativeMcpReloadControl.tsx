@@ -32,48 +32,25 @@ export function NativeMcpReloadControl({
   };
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<Button variant="ghost" size="sm" />}>
-        {codex ? "MCPs" : "Reload MCPs"}
-      </PopoverTrigger>
+      <PopoverTrigger render={<Button variant="ghost" size="sm" />}>Connection help</PopoverTrigger>
       <PopoverPopup align="end" width="lg" aria-label="Native MCP controls" finalFocus={false}>
         <div className="space-y-4 text-sm">
-          <h3 className="font-medium">
-            {codex ? "Codex MCP connections" : "Claude MCPs and plugins"}
-          </h3>
+          <h3 className="font-medium">{codex ? "Codex connections" : "Claude connections"}</h3>
+          <p className="text-xs text-muted-foreground">
+            The terminal manages its own connections. Open /mcp there to inspect the affected server
+            and its sign-in or recovery options. Healthy connections do not need reloading.
+          </p>
           {codex ? (
             <p className="text-xs text-muted-foreground">
-              Codex's terminal has no live MCP reload command. Use /mcp to inspect connections. To
-              load changed configuration, restart Codex and resume your session.
+              Codex has no live command to reconnect an individual MCP server.
             </p>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Reload changed plugins and their MCP servers. Claude will ask before a reload that
-                  affects the conversation's prompt cache.
-                </p>
-                <Button size="xs" variant="outline" onClick={() => void copy("/reload-plugins")}>
-                  Copy /reload-plugins
-                </Button>
-              </div>
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Retry failed connections, including servers waiting for sign-in.
-                </p>
-                <Button size="xs" variant="outline" onClick={() => void copy("/mcp reconnect all")}>
-                  Copy /mcp reconnect all
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Use /mcp to inspect servers or reconnect one specific server.
-              </p>
-            </>
-          )}
+          ) : null}
           <Button size="xs" variant="outline" onClick={() => void copy("/mcp")}>
             Copy /mcp
           </Button>
           <p className="text-xs text-muted-foreground">
-            Paste the command at an empty CLI prompt, then press Enter.
+            When the agent is idle, paste at an empty CLI prompt and press Enter. Stark Code does
+            not type commands or restart the session for you.
           </p>
           {copied ? (
             <p role="status" className="text-xs">

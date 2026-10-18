@@ -18,15 +18,18 @@ default. Restart Stark Code after changing this list.
 
 ### Reload MCPs and plugins
 
-Claude's **Reload MCPs** menu offers `/reload-plugins` to apply plugin changes,
-`/mcp reconnect all` to retry failed connections, and `/mcp` to manage individual
-servers. The commands are copied for you to paste at an empty CLI prompt and run.
+Claude's connection controls offer `/reload-plugins` to apply plugin changes
+and `/mcp` to inspect or reconnect individual servers. The commands are copied
+for you to paste at an empty CLI prompt and run.
 They do not clear your input, submit a prompt, or restart the terminal. Claude may
 ask before applying plugin changes that increase the next turn's token cost.
 
 Codex's **MCPs** menu offers `/mcp` for inspection. Its terminal does not support
 a live reload command; restart and resume Codex to pick up changed configuration.
 The MCP reload control in chat mode affects the chat connection, not this terminal.
+If the terminal prints a recognized connection or sign-in warning, a banner lets
+you return to the terminal. Stark Code never types a recovery command into your
+CLI, submits a prompt, or restarts it automatically.
 
 ### Read completed native replies
 

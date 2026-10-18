@@ -6,6 +6,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type McpServerStatusEntry,
+  type McpServersListResult,
 } from "@starkfuture/contracts";
 const state = vi.hoisted(() => ({
   query: {
@@ -13,7 +14,7 @@ const state = vi.hoisted(() => ({
       servers: [] as McpServerStatusEntry[],
       live: true,
       canReload: true as boolean | undefined,
-    },
+    } as McpServersListResult,
     error: null,
     isPending: false,
     refresh: vi.fn(),
@@ -96,7 +97,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers();
   vi.stubGlobal("window", { setInterval, clearInterval, setTimeout, clearTimeout });
-  state.query.data = { servers: [server()], live: true, canReload: true };
+  state.query.data = { servers: [server()], live: true, canReload: true, reconnectScope: "server" };
   state.canOperate = true;
   state.localHost = true;
   state.query.refresh.mockReset();
@@ -136,7 +137,7 @@ it("keeps app servers locked and viewers status-only, then dispatches only an ex
   await act(async () => renderer!.root.findAllByType("button")[0]!.props.onClick());
   expect(action).toHaveBeenCalledWith(expect.objectContaining({ name: "Drive" }), "enable");
 });
-it("shows the authorization host before opening the system browser and validates a pasted callback", async () => {
+it("opens a validated authorization URL on Sign in and validates a pasted callback", async () => {
   state.signIn.mockResolvedValue({
     _tag: "Success",
     value: {
@@ -159,17 +160,12 @@ it("shows the authorization host before opening the system browser and validates
   const button = (text: string) =>
     renderer!.root.findAllByType("button").find((entry) => entry.children.join("") === text)!;
   await act(async () => button("Sign in").props.onClick());
-  expect(state.open).not.toHaveBeenCalled();
+  expect(state.open).toHaveBeenCalledExactlyOnceWith("https://auth.example.com/oauth");
   expect(
     renderer!.root
       .findAllByType("p")
       .some((entry) => entry.children.join("") === "Opens auth.example.com in your browser."),
   ).toBe(true);
-  const browserButton = renderer!.root
-    .findAllByType("button")
-    .find((entry) => entry.children.join("") === "Open auth.example.com in browser")!;
-  await act(async () => browserButton.props.onClick());
-  expect(state.open).toHaveBeenCalledWith("https://auth.example.com/oauth");
   const input = renderer!.root.findByType("input");
   await act(async () =>
     input.props.onChange({
@@ -247,9 +243,9 @@ it.each(["read-only", "remote", "no session", "unsupported", "older server"])(
   async (reason) => {
     if (reason === "read-only") state.canOperate = false;
     if (reason === "remote") state.localHost = false;
-    if (reason === "no session") state.query.data.live = false;
-    if (reason === "unsupported") state.query.data.canReload = false;
-    if (reason === "older server") state.query.data.canReload = undefined;
+    if (reason === "no session") state.query.data = { ...state.query.data, live: false };
+    if (reason === "unsupported") state.query.data = { ...state.query.data, canReload: false };
+    if (reason === "older server") state.query.data = { ...state.query.data, canReload: undefined };
     await act(async () => {
       renderer = create(panel());
     });
@@ -260,7 +256,7 @@ it.each(["read-only", "remote", "no session", "unsupported", "older server"])(
 );
 
 it("keeps Settings reload disabled even if the server advertises support for the inspection target", async () => {
-  state.query.data.canReload = true;
+  state.query.data = { ...state.query.data, canReload: true };
   await act(async () => {
     renderer = create(
       <McpServersPanel
@@ -392,4 +388,99 @@ it("reports failed reloads and never retries automatically", async () => {
   expect(paragraphs()).toContain("Could not reload MCP servers.");
   expect(state.reload).toHaveBeenCalledTimes(1);
   expect(button("Reload MCPs").props.disabled).toBe(false);
+});
+
+it.each(["all", undefined] as const)(
+  "never offers targeted retries when scope is %s",
+  async (scope) => {
+    state.query.data = {
+      live: true,
+      reconnectScope: scope,
+      servers: [server({ status: "failed" })],
+    };
+    await act(async () => {
+      renderer = create(panel());
+    });
+    expect(
+      renderer!.root.findAllByType("button").map((entry) => entry.children.join("")),
+    ).not.toContain("Reconnect");
+    expect(
+      renderer!.root.findAllByType("button").map((entry) => entry.children.join("")),
+    ).not.toContain("Reconnect failed");
+    expect(state.reconnect).not.toHaveBeenCalled();
+  },
+);
+
+it("retries only failed unlocked servers and blocks mutations during an active turn", async () => {
+  state.query.data = {
+    live: true,
+    reconnectScope: "server",
+    servers: [
+      server({ name: "failed", status: "failed" }),
+      server({ name: "healthy", status: "connected" }),
+      server({ name: "starting", status: "connecting" }),
+      server({ name: "locked", status: "failed", locked: true }),
+    ],
+  };
+  const content = (sessionBusy: boolean) => (
+    <McpServersPanel
+      environmentId={EnvironmentId.make("env")}
+      target={{ threadId: ThreadId.make("thread") }}
+      sessionBusy={sessionBusy}
+    />
+  );
+  await act(async () => {
+    renderer = create(content(true));
+  });
+  expect(button("Reconnect").props.disabled).toBe(true);
+  await act(async () => button("Reconnect failed").props.onClick());
+  expect(state.reconnect).not.toHaveBeenCalled();
+  await act(async () => renderer!.update(content(false)));
+  await act(async () => button("Reconnect failed").props.onClick());
+  expect(state.reconnect).toHaveBeenCalledExactlyOnceWith({
+    environmentId: "env",
+    input: { threadId: "thread", name: "failed" },
+  });
+});
+
+it("keeps inspected project sign-in available while its snapshot is not a live chat", async () => {
+  state.query.data = { live: false, servers: [server()] };
+  state.signIn.mockResolvedValue({ _tag: "Success", value: { completed: true } });
+  await act(async () => {
+    renderer = create(
+      <McpServersPanel
+        environmentId={EnvironmentId.make("env")}
+        target={{
+          projectId: ProjectId.make("project"),
+          providerInstanceId: ProviderInstanceId.make("claude"),
+        }}
+      />,
+    );
+  });
+  expect(button("Sign in").props.disabled).toBe(false);
+  await act(async () => button("Sign in").props.onClick());
+  expect(state.signIn).toHaveBeenCalledTimes(1);
+  expect(paragraphs()).not.toContain("Send a message");
+});
+
+it("rejects unsafe sign-in URLs and ignores a late auth result from a previous target", async () => {
+  state.signIn.mockResolvedValueOnce({ _tag: "Success", value: { url: "javascript:alert(1)" } });
+  await act(async () => {
+    renderer = create(panel());
+  });
+  await act(async () => button("Sign in").props.onClick());
+  expect(paragraphs()).toContain("unsafe sign-in URL");
+  expect(state.open).not.toHaveBeenCalled();
+  let resolve!: (result: unknown) => void;
+  state.signIn.mockReturnValueOnce(
+    new Promise((finish) => {
+      resolve = finish;
+    }),
+  );
+  await act(async () => button("Sign in").props.onClick());
+  await act(async () => renderer!.update(panel("next")));
+  await act(async () =>
+    resolve({ _tag: "Success", value: { url: "https://auth.example.com/late" } }),
+  );
+  expect(state.open).not.toHaveBeenCalled();
 });

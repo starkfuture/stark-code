@@ -3141,15 +3141,18 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           attachments: [],
         }),
       );
+      assert.isTrue(yield* harness.runtime.mcpServers!.isBusy!);
       yield* harness.offerAndWait(
         makeResultFrame({ uuid: "read-controls-result", result: "done" }),
       );
+      assert.isFalse(yield* harness.runtime.mcpServers!.isBusy!);
       assert.equal(
         (yield* harness.runtime.readContextUsage!({ detail: "summary" })).totalTokens,
         15,
       );
       assert.equal((yield* harness.runtime.readContextUsage!({ detail: "full" })).detail, "full");
       const mcp = harness.runtime.mcpServers!;
+      assert.equal(mcp.reconnectScope, "server");
       const servers = yield* mcp.list();
       assert.isTrue(servers[0]?.locked);
       assert.equal(servers[1]?.status, "needs-auth");
@@ -3211,14 +3214,19 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   );
 
   it.effect(
-    "holds a cache-impacting MCP reload, then refreshes metadata and reconnects only eligible servers",
+    "holds a cache-impacting MCP reload, then refreshes metadata and reconnects only failed servers",
     () =>
       Effect.gen(function* () {
         const calls: unknown[] = [];
         const before: McpServerStatus[] = [
           { name: "stark-code", status: "connected", source: "dynamic" },
           { name: "docs", status: "connected", source: "project" },
+          { name: "pending", status: "pending", source: "project" },
           { name: "broken", status: "failed", source: "project" },
+          { name: "recovered", status: "failed", source: "project" },
+          { name: "newly-failed", status: "connected", source: "project" },
+          { name: "now-pending", status: "failed", source: "project" },
+          { name: "now-auth", status: "failed", source: "project" },
           { name: "disabled", status: "disabled", source: "plugin" },
           { name: "auth", status: "needs-auth", source: "plugin" },
           { name: "removed", status: "connected", source: "plugin" },
@@ -3235,7 +3243,15 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   ? ("connected" as const)
                   : server.name === "now-disabled"
                     ? ("disabled" as const)
-                    : server.status,
+                    : server.name === "recovered"
+                      ? ("connected" as const)
+                      : server.name === "newly-failed"
+                        ? ("failed" as const)
+                        : server.name === "now-pending"
+                          ? ("pending" as const)
+                          : server.name === "now-auth"
+                            ? ("needs-auth" as const)
+                            : server.status,
             })),
           { name: "new-failed", status: "failed", source: "plugin" },
         ];
@@ -3270,6 +3286,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                     method: "reconnect",
                     cause: "private access_token=secret",
                   });
+                current = current.map((server) =>
+                  server.name === name ? { ...server, status: "connected" } : server,
+                );
               }),
             toggleMcpServer: (name, enabled) =>
               Effect.sync(() => {
@@ -3324,8 +3343,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.deepEqual(calls, [
           ["reload", true],
           ["reload", false],
-          ["reconnect", "docs"],
           ["reconnect", "broken"],
+          ["reconnect", "newly-failed"],
           ["toggle", "disabled", false],
         ]);
         assert.equal(current.find((server) => server.name === "disabled")?.status, "disabled");
@@ -7467,6 +7486,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         yield* awaitUntil(() => quietYields++ >= 50, "notification-only quiet window");
         assert.lengthOf(harness.continuationRequests, 0);
         assert.isFalse(yield* harness.hasPendingBackgroundWork);
+        assert.isTrue(yield* harness.runtime.mcpServers!.isBusy!);
 
         yield* Queue.offer(harness.sdkMessages, wakeAssistant);
         yield* awaitUntil(() => harness.continuationRequests.length === 1, "continuation request");

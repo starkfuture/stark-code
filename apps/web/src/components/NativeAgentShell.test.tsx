@@ -11,6 +11,7 @@ import {
   type NativeAgentReply,
 } from "@starkfuture/contracts";
 import { makeThreadFixture } from "../test-fixtures";
+import type { NativeMcpWarning } from "../nativeMcpWarning";
 
 const state = vi.hoisted(() => ({
   mounts: 0,
@@ -20,6 +21,8 @@ const state = vi.hoisted(() => ({
   restart: vi.fn(),
   generate: vi.fn(),
   back: vi.fn(),
+  warning: undefined as ((warning: NativeMcpWarning) => void) | undefined,
+  exit: undefined as (() => void) | undefined,
 }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => true }));
 vi.mock("../state/responseVisuals", () => ({
@@ -39,7 +42,15 @@ vi.mock("./ChatMarkdown", () => ({
   default: ({ text }: { text: string }) => <div data-markdown>{text}</div>,
 }));
 vi.mock("./ThreadTerminalDrawer", () => ({
-  TerminalViewport: () => {
+  TerminalViewport: ({
+    onMcpWarning,
+    onSessionExited,
+  }: {
+    onMcpWarning?: (warning: NativeMcpWarning) => void;
+    onSessionExited?: () => void;
+  }) => {
+    state.warning = onMcpWarning;
+    state.exit = onSessionExited;
     useEffect(() => {
       state.mounts++;
       return () => {
@@ -116,6 +127,8 @@ beforeEach(() => {
   state.mounts = 0;
   state.unmounts = 0;
   state.escapes = 0;
+  state.warning = undefined;
+  state.exit = undefined;
   state.back.mockReset();
   state.restart.mockReset();
   state.generate.mockReset().mockResolvedValue({
@@ -172,6 +185,33 @@ it("keeps one terminal and its input while changing views and filling/restoring 
   expect(state.restart).not.toHaveBeenCalled();
   expect(state.generate).not.toHaveBeenCalled();
   expect(state.back).not.toHaveBeenCalled();
+});
+
+it("surfaces passive connection warnings without changing terminal input or restarting", async () => {
+  await render();
+  const input = container.querySelector<HTMLInputElement>('[aria-label="CLI input"]')!;
+  input.value = "unfinished command";
+  await click("Reader");
+  await act(() => state.warning?.("sign-in"));
+  expect(container.textContent).toContain(
+    "A connector may need sign-in. Review it in the terminal.",
+  );
+  await click("Show terminal");
+  expect(
+    container.querySelector("[data-native-shell-layout]")?.getAttribute("data-native-shell-layout"),
+  ).toBe("terminal");
+  expect(input.value).toBe("unfinished command");
+  expect(state.mounts).toBe(1);
+  expect(state.restart).not.toHaveBeenCalled();
+  await click("Dismiss connection warning");
+  expect(container.textContent).not.toContain("A connector may need sign-in.");
+  await act(() => state.warning?.("connection"));
+  expect(container.textContent).toContain("A connection warning appeared in the terminal.");
+  state.restart.mockResolvedValue({ _tag: "Success" });
+  await act(() => state.exit?.());
+  await click("Start another session");
+  expect(container.textContent).not.toContain("A connection warning appeared in the terminal.");
+  expect(state.restart).toHaveBeenCalledTimes(1);
 });
 
 it("preserves the selected reply, reading position and generated overview when the terminal is shown", async () => {

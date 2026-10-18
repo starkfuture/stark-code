@@ -9,6 +9,21 @@ export const McpServerStatusEntry = Schema.Struct({
   scope: Schema.optional(TrimmedNonEmptyString),
   status: Schema.Literals(["connected", "connecting", "needs-auth", "failed", "disabled"]),
   error: Schema.optional(Schema.String),
+  // Hostname only. Never expose MCP endpoint paths, credentials, or headers.
+  endpointHost: Schema.optional(Schema.String),
+  recovery: Schema.optional(
+    Schema.Struct({
+      state: Schema.Literals([
+        "waiting",
+        "reconnecting",
+        "exhausted",
+        "manual",
+        "vpn-off",
+        "network-unavailable",
+      ]),
+      attempts: NonNegativeInt,
+    }),
+  ),
   tools: Schema.Array(
     Schema.Struct({
       name: TrimmedNonEmptyString,
@@ -60,6 +75,7 @@ export const McpServersListResult = Schema.Struct({
   servers: Schema.Array(McpServerStatusEntry),
   live: Schema.Boolean,
   canReload: Schema.optional(Schema.Boolean),
+  reconnectScope: Schema.optional(Schema.Literals(["server", "all"])),
 });
 export type McpServersListResult = typeof McpServersListResult.Type;
 export const McpServersReloadInput = Schema.Struct({

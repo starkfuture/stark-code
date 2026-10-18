@@ -31,11 +31,28 @@ const clean = (value: string) => cleanHookText(value, 2048);
 const isMcpSource = Schema.is(ServerProviderMcpSource);
 const decodeSignIn = Schema.decodeUnknownSync(McpServerSignInStart);
 
+const mcpEndpointHost = (value: string | null | undefined): string | undefined => {
+  if (value === undefined || value === null) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+    // Hosts are enough for network diagnostics. Never retain credentials or
+    // private paths, and omit IPv6 URL brackets for address lookup.
+    return url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
+  } catch {
+    return undefined;
+  }
+};
+
 export function claudeMcpStatusEntry(value: McpServerStatus): McpServerStatusEntry {
   const source = isMcpSource(value.source) ? value.source : undefined;
-  const config = value.config as { type?: string } | undefined;
+  const config = value.config;
+  const endpointHost = mcpEndpointHost(
+    config !== undefined && "url" in config ? config.url : undefined,
+  );
   return {
     name: clean(value.name),
+    ...(endpointHost === undefined ? {} : { endpointHost }),
     ...(source === undefined ? {} : { source }),
     ...(value.scope === undefined ? {} : { scope: clean(value.scope) }),
     status: value.status === "pending" ? "connecting" : value.status,
@@ -67,6 +84,7 @@ export function claudeMcpStatusEntry(value: McpServerStatus): McpServerStatusEnt
 export function codexMcpStatusEntry(
   value: CodexSchema.V2ListMcpServerStatusResponse__McpServerStatus,
 ): McpServerStatusEntry {
+  const endpointHost = mcpEndpointHost(value.httpOrigin);
   const status =
     value.runtimeStatus === "disabled"
       ? "disabled"
@@ -77,11 +95,14 @@ export function codexMcpStatusEntry(
               Object.keys(value.tools).length > 0 &&
               !value.toolsError)
           ? "connected"
-          : value.runtimeStatus === "failed" || value.runtimeStatus === "cancelled"
+          : value.runtimeStatus === "failed" ||
+              value.runtimeStatus === "cancelled" ||
+              (value.runtimeStatus == null && Boolean(value.toolsError))
             ? "failed"
             : "connecting";
   return {
     name: clean(value.name),
+    ...(endpointHost === undefined ? {} : { endpointHost }),
     source: "codex",
     status,
     ...(value.toolsError ? { error: clean(value.toolsError) } : {}),

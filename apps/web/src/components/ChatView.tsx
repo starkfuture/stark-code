@@ -10,6 +10,7 @@ import { SideWorkPanel } from "./chat/SideWorkPanel";
 import { ConversationToolsPanel } from "./chat/ConversationToolsPanel";
 import { WorkspaceToolsMenu } from "./chat/WorkspaceToolsMenu";
 import { McpServersChip } from "./chat/McpServersPanel";
+import { McpHealthBanner } from "./chat/McpHealthBanner";
 import { CheckpointRestoreChoices } from "./chat/CheckpointRestoreChoices";
 import {
   userShellCommandAvailability,
@@ -11894,7 +11895,10 @@ export default function ChatView(props: ChatViewProps) {
     <WorkspaceToolsMenu
       connections={
         !nativeShellMode && isServerThread && activeThreadRef ? (
-          <McpServersChip threadRef={activeThreadRef} />
+          <McpServersChip
+            threadRef={activeThreadRef}
+            sessionBusy={isWorking || !latestRunSettled}
+          />
         ) : undefined
       }
       groups={[
@@ -12309,6 +12313,12 @@ export default function ChatView(props: ChatViewProps) {
               ) : null}
               {/* Banners overlay the timeline without changing its content height. */}
               <div className="chat-banner-lane pointer-events-none absolute top-0 z-20 flex flex-col">
+                {!nativeShellMode && isServerThread && activeThreadRef ? (
+                  <McpHealthBanner
+                    threadRef={activeThreadRef}
+                    sessionBusy={isWorking || !latestRunSettled}
+                  />
+                ) : null}
                 <ProviderStatusBanner
                   status={visibleProviderStatus}
                   onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}

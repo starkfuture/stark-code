@@ -45,6 +45,8 @@ import {
   withMetrics,
 } from "../observability/Metrics.ts";
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
+import * as McpRecovery from "../provider/McpRecovery.ts";
+import * as McpNetworkHealth from "../provider/McpNetworkHealth.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSessions from "@starkfuture/provider-core/server/McpProviderSessions";
 import * as ServerSettings from "../serverSettings.ts";
@@ -250,6 +252,7 @@ interface LiveSessionEntry {
   readonly supportsMultipleProviderThreads: boolean;
   readonly runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime;
   readonly exposedRuntime: ProviderAdapter.ProviderAdapterV2SessionRuntime;
+  readonly mcpRecovery: McpRecovery.McpRecovery | undefined;
   readonly eventSubscribers: Ref.Ref<
     ReadonlyMap<number, Queue.Queue<ProviderSessionEventSignal, Cause.Done>>
   >;
@@ -382,6 +385,7 @@ export const layerWithOptions = (
       const fileSystem = yield* FileSystem.FileSystem;
       const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry;
       const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      const inspectMcpNetwork = yield* McpNetworkHealth.make;
       /**
        * Optional so the many focused tests that assemble this layer by hand do
        * not each need a settings stub; the production composition always
@@ -929,6 +933,7 @@ export const layerWithOptions = (
               if (
                 input.onlyIfIdleGeneration !== undefined &&
                 (existing.busyTurns.size > 0 ||
+                  existing.mcpRecovery?.hasPendingWorkNow() === true ||
                   existing.idleGeneration !== input.onlyIfIdleGeneration)
               ) {
                 return ["kept", current] as const;
@@ -1118,9 +1123,9 @@ export const layerWithOptions = (
           // can reuse the same providerSessionId while this fiber is parked.
           const probedRuntime = entry.runtime;
           const hasPendingWork =
-            probedRuntime.hasPendingBackgroundWork === undefined
+            entry.exposedRuntime.hasPendingBackgroundWork === undefined
               ? false
-              : yield* probedRuntime.hasPendingBackgroundWork.pipe(
+              : yield* entry.exposedRuntime.hasPendingBackgroundWork.pipe(
                   Effect.catchCause(() => Effect.succeed(false)),
                 );
           if (hasPendingWork) {
@@ -1512,6 +1517,8 @@ export const layerWithOptions = (
             });
             yield* scheduleIdleReleaseInternal(providerSessionId);
             yield* scheduleThreadUnload(providerSessionId, providerThreadId);
+            const current = (yield* Ref.get(sessions)).get(key);
+            if (current?.mcpRecovery) yield* current.mcpRecovery.trigger;
           }),
         );
 
@@ -1742,9 +1749,15 @@ export const layerWithOptions = (
         eventSubscribers: Ref.Ref<
           ReadonlyMap<number, Queue.Queue<ProviderSessionEventSignal, Cause.Done>>
         >,
+        recovery: McpRecovery.McpRecovery | undefined,
       ): ProviderAdapter.ProviderAdapterV2SessionRuntime => {
         const providerSessionId = runtime.providerSessionId;
         const subscribeEvents = makeEventSubscription(eventSubscribers);
+        // Acquire attachment locks before maintenance. Unload holds that same
+        // attachment lock, so taking maintenance around the whole method inverts
+        // the order and can deadlock resume against unload.
+        const providerOperation = <A, E>(operation: Effect.Effect<A, E>) =>
+          recovery ? recovery.withToolActivity(operation) : operation;
         // Every provider's turn operations pass through here, so this is where they are
         // counted. Only turn starts are timed: until the provider accepts the turn.
         const turnMetrics = (operation: string, model?: string) =>
@@ -1757,8 +1770,9 @@ export const layerWithOptions = (
               modelFamily: normalizeModelMetricLabel(model),
             },
           });
-        return {
+        const decorated: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
           ...runtime,
+          ...(recovery ? { mcpServers: recovery.api } : {}),
           subscribeEvents,
           events: Stream.unwrap(
             subscribeEvents.pipe(Effect.map((subscription) => subscription.events)),
@@ -1773,13 +1787,15 @@ export const layerWithOptions = (
               }),
             ).pipe(
               Effect.andThen(
-                runtime.ensureThread({
-                  ...input,
-                  runtimePolicy:
-                    runtime.driver === "claudeAgent"
-                      ? input.runtimePolicy
-                      : supervisedRuntimePolicy(input.runtimePolicy),
-                }),
+                runtime
+                  .ensureThread({
+                    ...input,
+                    runtimePolicy:
+                      runtime.driver === "claudeAgent"
+                        ? input.runtimePolicy
+                        : supervisedRuntimePolicy(input.runtimePolicy),
+                  })
+                  .pipe(providerOperation),
               ),
               Effect.tap((providerThread) =>
                 markProviderThreadLoaded({
@@ -1799,17 +1815,19 @@ export const layerWithOptions = (
           resumeThread: (input) => {
             const threadId = input.threadId ?? input.providerThread.appThreadId;
             if (threadId === null || threadId === undefined) {
-              return runtime.resumeThread({
-                ...input,
-                ...(input.runtimePolicy === undefined
-                  ? {}
-                  : {
-                      runtimePolicy:
-                        runtime.driver === "claudeAgent"
-                          ? input.runtimePolicy
-                          : supervisedRuntimePolicy(input.runtimePolicy),
-                    }),
-              });
+              return runtime
+                .resumeThread({
+                  ...input,
+                  ...(input.runtimePolicy === undefined
+                    ? {}
+                    : {
+                        runtimePolicy:
+                          runtime.driver === "claudeAgent"
+                            ? input.runtimePolicy
+                            : supervisedRuntimePolicy(input.runtimePolicy),
+                      }),
+                })
+                .pipe(providerOperation);
             }
             const providerThreadKey = providerThreadLoadKey({
               providerThread: input.providerThread,
@@ -1846,17 +1864,19 @@ export const layerWithOptions = (
               Effect.flatMap((loaded) =>
                 loaded
                   ? Effect.succeed(input.providerThread)
-                  : runtime.resumeThread({
-                      ...input,
-                      ...(input.runtimePolicy === undefined
-                        ? {}
-                        : {
-                            runtimePolicy:
-                              runtime.driver === "claudeAgent"
-                                ? input.runtimePolicy
-                                : supervisedRuntimePolicy(input.runtimePolicy),
-                          }),
-                    }),
+                  : runtime
+                      .resumeThread({
+                        ...input,
+                        ...(input.runtimePolicy === undefined
+                          ? {}
+                          : {
+                              runtimePolicy:
+                                runtime.driver === "claudeAgent"
+                                  ? input.runtimePolicy
+                                  : supervisedRuntimePolicy(input.runtimePolicy),
+                            }),
+                      })
+                      .pipe(providerOperation),
               ),
               Effect.tap((providerThread) =>
                 markProviderThreadLoaded({
@@ -1890,17 +1910,19 @@ export const layerWithOptions = (
               }),
             ).pipe(
               Effect.andThen(
-                runtime.forkThread({
-                  ...input,
-                  ...(input.runtimePolicy === undefined
-                    ? {}
-                    : {
-                        runtimePolicy:
-                          runtime.driver === "claudeAgent"
-                            ? input.runtimePolicy
-                            : supervisedRuntimePolicy(input.runtimePolicy),
-                      }),
-                }),
+                runtime
+                  .forkThread({
+                    ...input,
+                    ...(input.runtimePolicy === undefined
+                      ? {}
+                      : {
+                          runtimePolicy:
+                            runtime.driver === "claudeAgent"
+                              ? input.runtimePolicy
+                              : supervisedRuntimePolicy(input.runtimePolicy),
+                        }),
+                  })
+                  .pipe(providerOperation),
               ),
               Effect.tap((providerThread) =>
                 markProviderThreadLoaded({
@@ -1969,7 +1991,12 @@ export const layerWithOptions = (
                       }
                       yield* observeActivity(
                         providerSessionId,
-                        markBusy(providerSessionId, turnKey),
+                        recovery
+                          ? withActivityError(
+                              providerSessionId,
+                              recovery.withActivity(markBusy(providerSessionId, turnKey)),
+                            )
+                          : markBusy(providerSessionId, turnKey),
                       ).pipe(
                         Effect.onError(() =>
                           Effect.sync(() => {
@@ -2001,7 +2028,12 @@ export const layerWithOptions = (
                             ? input.runtimePolicy
                             : supervisedRuntimePolicy(input.runtimePolicy),
                       })
-                      .pipe(turnMetrics("send", input.modelSelection.model)),
+                      .pipe(
+                        turnMetrics("send", input.modelSelection.model),
+                        // Claude opens its query lazily on the first turn. Read
+                        // health now, but the busy reservation forbids repair.
+                        Effect.tap(() => recovery?.trigger ?? Effect.void),
+                      ),
                   (_, exit) =>
                     Exit.isFailure(exit)
                       ? observeActivity(
@@ -2028,6 +2060,69 @@ export const layerWithOptions = (
                   .pipe(turnMetrics("runtime-request-response")),
               ),
             ),
+        };
+        if (!recovery) return decorated;
+        const trackAuxiliaryTurn = (
+          input: ProviderAdapter.ProviderAdapterV2TurnInput,
+          operation: Effect.Effect<void, ProviderAdapter.ProviderAdapterV2Error>,
+        ) =>
+          recovery
+            .withActivity(
+              markBusy(providerSessionId, busyTurnKey(input.providerThread.id, input.runOrdinal)),
+            )
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterTurnStartError({
+                    driver: runtime.driver,
+                    threadId: input.threadId,
+                    providerThreadId: input.providerThread.id,
+                    runId: input.runId,
+                    cause,
+                  }),
+              ),
+              Effect.andThen(operation),
+              Effect.onError(() =>
+                markIdle(providerSessionId, input.providerThread.id, input.runOrdinal).pipe(
+                  Effect.ignore,
+                ),
+              ),
+            );
+        return {
+          ...decorated,
+          hasPendingBackgroundWork: Effect.gen(function* () {
+            if (yield* recovery.hasPendingWork) return true;
+            return yield* runtime.hasPendingBackgroundWork ?? Effect.succeed(false);
+          }),
+          rollbackThread: (input) => recovery.withToolActivity(runtime.rollbackThread(input)),
+          ...(runtime.rewindFiles
+            ? { rewindFiles: (input) => recovery.withToolActivity(runtime.rewindFiles!(input)) }
+            : {}),
+          ...(runtime.unloadThread
+            ? { unloadThread: (input) => recovery.withToolActivity(runtime.unloadThread!(input)) }
+            : {}),
+          ...(runtime.runUserShellCommand
+            ? {
+                runUserShellCommand: (input) =>
+                  trackAuxiliaryTurn(input, runtime.runUserShellCommand!(input)),
+              }
+            : {}),
+          ...(runtime.compactThread
+            ? {
+                compactThread: (input) => trackAuxiliaryTurn(input, runtime.compactThread!(input)),
+              }
+            : {}),
+          ...(runtime.mcpApps
+            ? {
+                mcpApps: {
+                  listTools: (input) =>
+                    recovery.withToolActivity(runtime.mcpApps!.listTools(input)),
+                  callTool: (input) => recovery.withToolActivity(runtime.mcpApps!.callTool(input)),
+                  readResource: (input) =>
+                    recovery.withToolActivity(runtime.mcpApps!.readResource(input)),
+                },
+              }
+            : {}),
         };
       };
 
@@ -2338,7 +2433,27 @@ export const layerWithOptions = (
               const eventSubscribers = yield* Ref.make<
                 ReadonlyMap<number, Queue.Queue<ProviderSessionEventSignal, Cause.Done>>
               >(new Map());
-              const exposedRuntime = decorateRuntime(runtime, eventSubscribers);
+              const mcpRecovery = runtime.mcpServers
+                ? yield* McpRecovery.make({
+                    api: runtime.mcpServers,
+                    driver: runtime.driver,
+                    isBusy: Effect.gen(function* () {
+                      const current = (yield* Ref.get(sessions)).get(key);
+                      if (current?.runtime !== runtime || current.busyTurns.size > 0) return true;
+                      if (
+                        yield* (runtime.mcpServers?.isBusy ?? Effect.succeed(false)).pipe(
+                          Effect.orElseSucceed(() => true),
+                        )
+                      )
+                        return true;
+                      return yield* (
+                        runtime.hasPendingBackgroundWork ?? Effect.succeed(false)
+                      ).pipe(Effect.orElseSucceed(() => true));
+                    }),
+                    inspectNetwork: inspectMcpNetwork,
+                  }).pipe(Effect.provideService(Scope.Scope, sessionScope))
+                : undefined;
+              const exposedRuntime = decorateRuntime(runtime, eventSubscribers, mcpRecovery);
               const now = yield* Clock.currentTimeMillis;
               const entry: LiveSessionEntry = {
                 attachedThreadIds: new Set([input.threadId]),
@@ -2352,6 +2467,7 @@ export const layerWithOptions = (
                     .supportsMultipleProviderThreadsPerSession,
                 runtime,
                 exposedRuntime,
+                mcpRecovery,
                 eventSubscribers,
                 requestEventPermit: yield* Semaphore.make(1),
                 scope: sessionScope,
@@ -2398,6 +2514,7 @@ export const layerWithOptions = (
                 ),
               );
               yield* startEventPump(entry);
+              if (mcpRecovery) yield* mcpRecovery.trigger;
               yield* scheduleIdleRelease(input.providerSessionId);
               return exposedRuntime;
             }),

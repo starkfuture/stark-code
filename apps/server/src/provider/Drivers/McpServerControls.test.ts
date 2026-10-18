@@ -53,6 +53,61 @@ describe("provider MCP controls", () => {
       },
     );
   });
+  it("exposes only HTTP endpoint hostnames without URL secrets for either provider", () => {
+    const url =
+      "https://username:secret@MCP.Example.test:8443/private/customer?token=secret#fragment";
+    const claude = claudeMcpStatusEntry({
+      name: "private",
+      status: "failed",
+      config: { type: "http", url, headers: { Authorization: "Bearer secret" } },
+    });
+    const codex = codexMcpStatusEntry({
+      name: "private",
+      authStatus: "unsupported",
+      httpOrigin: url,
+      tools: {},
+      resources: [],
+      resourceTemplates: [],
+    });
+    for (const row of [claude, codex]) {
+      assert.equal(row.endpointHost, "mcp.example.test");
+      assert.notInclude(JSON.stringify(row), "secret");
+      assert.notInclude(JSON.stringify(row), "customer");
+      assert.notInclude(JSON.stringify(row), "8443");
+    }
+    assert.equal(
+      claudeMcpStatusEntry({
+        name: "local",
+        status: "failed",
+        config: { type: "sse", url: "http://[::1]:8080/mcp" },
+      }).endpointHost,
+      "::1",
+    );
+  });
+  it.each([
+    "not a URL",
+    "file:///private/token",
+    "data:text/plain,secret",
+    "ssh://private.test/path",
+  ])("omits unusable endpoint metadata: %s", (url) => {
+    assert.isUndefined(
+      claudeMcpStatusEntry({
+        name: "private",
+        status: "failed",
+        config: { type: "http", url },
+      }).endpointHost,
+    );
+    assert.isUndefined(
+      codexMcpStatusEntry({
+        name: "private",
+        authStatus: "unsupported",
+        httpOrigin: url,
+        tools: {},
+        resources: [],
+        resourceTemplates: [],
+      }).endpointHost,
+    );
+  });
   it("maps Codex statuses and older live servers with tools but no runtimeStatus", () => {
     const base = {
       name: "local",
@@ -62,6 +117,11 @@ describe("provider MCP controls", () => {
       tools: { read: { name: "read", inputSchema: {}, annotations: { readOnlyHint: true } } },
     };
     assert.equal(codexMcpStatusEntry(base).status, "connected");
+    assert.equal(
+      codexMcpStatusEntry({ ...base, runtimeStatus: null, toolsError: "Could not list tools" })
+        .status,
+      "failed",
+    );
     assert.equal(
       codexMcpStatusEntry({ ...base, runtimeStatus: "authenticationRequired" }).status,
       "needs-auth",

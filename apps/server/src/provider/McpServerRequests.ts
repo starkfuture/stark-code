@@ -38,10 +38,35 @@ const safeFailure = () =>
 const isLocked = (name: string) => catalogText(name, 256).toLowerCase() === "stark-code";
 const targetKey = (input: McpServersListInput) =>
   input.threadId ?? `${input.providerInstanceId}:${input.projectId}`;
-const safeError = (text: string) =>
-  catalogText(text, 1000)
-    .replace(/([?&](?:code|state|token|access_token)=)[^\s&#]*/gi, "$1[redacted]")
-    .replace(/(?:Bearer\s+|Authorization\s*[:=]\s*)\S+/gi, "[redacted]");
+// Redact before flattening/truncating text: otherwise a newline or a cut quote
+// can turn a secret-bearing header into seemingly ordinary error prose.
+const safeError = (text: string) => {
+  const plain = text
+    .split(/\r\n?|\n/u)
+    .map((line) => catalogText(line, line.length))
+    .join("\n");
+  const redacted = plain
+    .replace(/\b(?:https?|wss?):\/\/[^\s<>"'`]+/gi, (value) => {
+      try {
+        const url = new URL(value);
+        // Paths, query strings and fragments may all contain credentials.
+        // The origin preserves the useful connection destination only.
+        return url.origin;
+      } catch {
+        return "[redacted URL]";
+      }
+    })
+    .replace(
+      /(["']?(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\r\n]*)/gi,
+      "$1[redacted]",
+    )
+    .replace(
+      /(["']?(?:code|state|token|access[_-]token|refresh[_-]token|id[_-]token|client[_-]secret|api[_-]key|password)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s&,;#}\]]+)/gi,
+      "$1[redacted]",
+    )
+    .replace(/\b(?:Bearer|Basic)\s+[^\s,"'}\]]+/gi, "[redacted]");
+  return catalogText(redacted, 1000);
+};
 
 export class McpServerRequests extends Context.Service<
   McpServerRequests,
@@ -145,7 +170,8 @@ export function makeForResolver(
         if (!api) return { servers: [], live: false };
         const servers = yield* api.list().pipe(Effect.mapError(safeFailure));
         return {
-          live: true,
+          live: input.threadId !== undefined,
+          ...(api.reconnectScope === undefined ? {} : { reconnectScope: api.reconnectScope }),
           canReload:
             input.threadId !== undefined &&
             client?.desktopHost === true &&
@@ -191,6 +217,12 @@ export function makeForResolver(
     reconnect: (input, client) =>
       Effect.gen(function* () {
         const api = yield* control(input, client);
+        if (api.reconnectScope !== "server")
+          return yield* new McpServerRequestError({
+            reason: "unavailable",
+            message:
+              "This provider cannot reconnect one MCP server without affecting other connections. Use Reload MCPs explicitly if needed.",
+          });
         yield* api.reconnect(input.name).pipe(Effect.mapError(safeFailure));
       }),
     setEnabled: (input, client) =>

@@ -3289,6 +3289,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               requested.push(method);
             }),
         );
+        assert.equal(harness.runtime.mcpServers!.reconnectScope, "all");
         const result = yield* harness.runtime.mcpServers!.reload!({ force: scenario.force }).pipe(
           Effect.result,
         );
@@ -3321,6 +3322,131 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
         ),
       ),
+  );
+
+  it.effect.each([
+    { previous: "ready", runtimeStatus: "failed", authStatus: "unsupported", expected: "failed" },
+    {
+      previous: "ready",
+      runtimeStatus: "authenticationRequired",
+      authStatus: "oAuth",
+      expected: "needs-auth",
+    },
+    {
+      previous: "ready",
+      runtimeStatus: null,
+      authStatus: "notLoggedIn",
+      expected: "needs-auth",
+    },
+    {
+      previous: "failed",
+      runtimeStatus: "connected",
+      authStatus: "unsupported",
+      expected: "connected",
+    },
+    {
+      previous: "failed",
+      runtimeStatus: "disabled",
+      authStatus: "unsupported",
+      expected: "disabled",
+    },
+    {
+      previous: "ready",
+      runtimeStatus: null,
+      authStatus: "unsupported",
+      toolsError: "Could not list tools",
+      expected: "failed",
+    },
+    {
+      previous: "failed",
+      runtimeStatus: null,
+      authStatus: "oAuth",
+      previousAuth: true,
+      tools: { read: { name: "read", inputSchema: {} } },
+      expected: "connected",
+    },
+  ])("uses current MCP snapshot $expected after an earlier $previous notification", (scenario) =>
+    Effect.gen(function* () {
+      const server = {
+        name: "docs",
+        authStatus: "unsupported",
+        runtimeStatus: null,
+        tools: {},
+        resources: [],
+        resourceTemplates: [],
+      };
+      const entries: CodexReplay.CodexAppServerReplayEntry[] = [
+        ...codexReplayPreamble({
+          nativeThreadId: "mcp-status-refresh-thread",
+          nativeTurnId: "unused",
+          prompt: "unused",
+        }).slice(0, 5),
+        {
+          type: "expect_outbound",
+          frame: { id: 3, method: "mcpServerStatus/list", params: { detail: "full", limit: 100 } },
+        },
+        {
+          type: "emit_inbound",
+          frame: {
+            method: "mcpServer/startupStatus/updated",
+            params: {
+              name: "docs",
+              status: scenario.previous,
+              ...("previousAuth" in scenario ? { failureReason: "reauthenticationRequired" } : {}),
+            },
+          },
+        },
+        { type: "emit_inbound", frame: { id: 3, result: { data: [server], nextCursor: null } } },
+        {
+          type: "expect_outbound",
+          frame: { id: 4, method: "mcpServerStatus/list", params: { detail: "full", limit: 100 } },
+        },
+        {
+          type: "emit_inbound",
+          frame: {
+            id: 4,
+            result: {
+              data: [
+                {
+                  ...server,
+                  runtimeStatus: scenario.runtimeStatus,
+                  authStatus: scenario.authStatus,
+                  ...("tools" in scenario ? { tools: scenario.tools } : {}),
+                  ...("toolsError" in scenario ? { toolsError: scenario.toolsError } : {}),
+                },
+              ],
+              nextCursor: null,
+            },
+          },
+        },
+      ];
+      const requested: string[] = [];
+      const harness = yield* makeCodexReplayHarness(
+        makeCodexReplayTranscript({ scenario: "mcp-status-refresh", entries }),
+        undefined,
+        (method) =>
+          Effect.sync(() => {
+            requested.push(method);
+          }),
+      );
+      const mcp = harness.runtime.mcpServers!;
+      assert.equal(
+        (yield* mcp.list())[0]?.status,
+        "previousAuth" in scenario
+          ? "needs-auth"
+          : scenario.previous === "ready"
+            ? "connected"
+            : "failed",
+      );
+      assert.equal((yield* mcp.list())[0]?.status, scenario.expected);
+      assert.notInclude(requested, "config/mcpServer/reload");
+      assert.notInclude(requested, "turn/start");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
   );
 
   it.effect("pages MCP status and applies quoted config keys without sending a model turn", () =>
@@ -3373,7 +3499,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           },
         },
         request(8, "mcpServerStatus/list", { detail: "full", limit: 100 }),
-        result(8, { data: [server], nextCursor: null }),
+        result(8, { data: [{ ...server, runtimeStatus: null }], nextCursor: null }),
         request(9, "skills/list", { cwds: ["/workspace"], forceReload: false }),
         result(9, {
           data: [

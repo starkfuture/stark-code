@@ -324,6 +324,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
     readonly hasPendingBackgroundWorkForThread?: Effect.Effect<boolean>;
     readonly hangSessionScopeClose?: boolean;
     readonly startTurn?: Effect.Effect<void>;
+    readonly mcpServers?: ProviderAdapter.ProviderAdapterV2McpServers;
     readonly beforeUnload?: Effect.Effect<void>;
     /** Registers the process's closeCount finalizer before `beforeOpen` runs. */
     readonly spawnBeforeOpen?: boolean;
@@ -399,6 +400,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
           instanceId: ProviderInstanceId.make("codex"),
           driver: options.driver ?? CODEX_DRIVER,
           providerSessionId: input.providerSessionId,
+          ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
           providerSession: { ...session, driver: options.driver ?? CODEX_DRIVER },
           events: options.failEventStream
             ? Stream.fail(
@@ -487,6 +489,7 @@ function layerTest(input: {
   readonly hasPendingBackgroundWorkForThread?: Effect.Effect<boolean>;
   readonly hangSessionScopeClose?: boolean;
   readonly startTurn?: Effect.Effect<void>;
+  readonly mcpServers?: ProviderAdapter.ProviderAdapterV2McpServers;
   readonly beforeUnload?: Effect.Effect<void>;
   readonly spawnBeforeOpen?: boolean;
   readonly scopeCloseReached?: Deferred.Deferred<void>;
@@ -519,6 +522,7 @@ function layerTest(input: {
         ? {}
         : { hangSessionScopeClose: input.hangSessionScopeClose }),
       ...(input.startTurn === undefined ? {} : { startTurn: input.startTurn }),
+      ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
       ...(input.beforeUnload === undefined ? {} : { beforeUnload: input.beforeUnload }),
       ...(input.spawnBeforeOpen === undefined ? {} : { spawnBeforeOpen: input.spawnBeforeOpen }),
       ...(input.scopeCloseReached === undefined
@@ -1014,6 +1018,128 @@ it.effect("ProviderSessionManagerV2 closes every live session for a provider ins
         layerTest({
           state,
           idleTimeoutMs: 60_000,
+        }),
+      ),
+    );
+  }),
+);
+
+it.effect("MCP recovery checks startup and waits for turn completion and background work", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const startup = yield* Deferred.make<void>();
+    const repaired = yield* Deferred.make<void>();
+    const background = yield* Ref.make(false);
+    let failed = false;
+    let reconnects = 0;
+    const mcpServers: ProviderAdapter.ProviderAdapterV2McpServers = {
+      reconnectScope: "server",
+      list: () =>
+        Deferred.succeed(startup, undefined).pipe(
+          Effect.as([
+            {
+              name: "service",
+              status: failed ? ("failed" as const) : ("connected" as const),
+              tools: [],
+              locked: false,
+              authKind: "none" as const,
+            },
+          ]),
+        ),
+      reconnect: () =>
+        Effect.sync(() => {
+          reconnects += 1;
+          failed = false;
+        }).pipe(Effect.andThen(Deferred.succeed(repaired, undefined)), Effect.asVoid),
+      setEnabled: () => Effect.void,
+      startSignIn: () => Effect.succeed({ callbackExpected: false }),
+      submitCallback: () => Effect.void,
+      signOut: () => Effect.void,
+    };
+    yield* Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("mcp-recovery-lifecycle");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      const providerThread = makeProviderThread({ idAllocator, threadId, providerSessionId, now });
+      const runId = idAllocator.derive.run({ threadId, ordinal: 1 });
+      yield* eventSink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+      });
+      const runtime = yield* manager.open({
+        threadId,
+        providerSessionId,
+        modelSelection,
+        runtimePolicy,
+      });
+      yield* Deferred.await(startup);
+      assert.equal(reconnects, 0);
+      yield* runtime.startTurn({
+        appThread: (yield* projectionStore.getThreadProjection(threadId)).thread,
+        threadId,
+        runId,
+        runOrdinal: 1,
+        providerTurnOrdinal: 1,
+        attemptId: idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 }),
+        rootNodeId: idAllocator.derive.rootNode({ runId }),
+        providerThread,
+        message: {
+          createdBy: "user",
+          creationSource: "web",
+          messageId: yield* idAllocator.allocate.message({ threadId, ordinal: 1 }),
+          text: "hello",
+          attachments: [],
+        },
+        modelSelection,
+        runtimePolicy,
+      });
+      failed = true;
+      yield* runtime.mcpServers!.list();
+      assert.equal(reconnects, 0);
+      yield* Ref.set(background, true);
+      const subscription = yield* runtime.subscribeEvents!;
+      const terminal = yield* subscription.events.pipe(
+        Stream.take(1),
+        Stream.runDrain,
+        Effect.forkScoped,
+      );
+      const queue = (yield* Ref.get(state)).eventQueues.get(String(providerSessionId))!;
+      yield* Queue.offer(queue, {
+        type: "turn.terminal",
+        driver: CODEX_DRIVER,
+        providerThreadId: providerThread.id,
+        providerTurnId: idAllocator.derive.providerTurn({
+          driver: CODEX_DRIVER,
+          nativeTurnId: "mcp-turn",
+        }),
+        runOrdinal: 1,
+        status: "completed",
+        failure: null,
+        threadDisposition: "reusable",
+      });
+      yield* Fiber.join(terminal);
+      yield* runtime.mcpServers!.list();
+      assert.equal(reconnects, 0);
+      yield* Ref.set(background, false);
+      yield* runtime.mcpServers!.list();
+      yield* Deferred.await(repaired);
+      assert.equal(reconnects, 1);
+      yield* manager.close(providerSessionId);
+      yield* TestClock.adjust("60 seconds");
+      assert.equal(reconnects, 1);
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          state,
+          idleTimeoutMs: 120_000,
+          mcpServers,
+          hasPendingBackgroundWork: Ref.get(background),
         }),
       ),
     );
@@ -4371,9 +4497,9 @@ it.effect(
     }),
 );
 
-it.effect(
-  "ProviderSessionManagerV2 re-attaching a thread waits for its in-flight unload, then reloads it",
-  () =>
+it.effect.each([false, true])(
+  "ProviderSessionManagerV2 re-attaching waits for unload with MCP maintenance enabled=%s",
+  (withMcp) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const unloadStarted = yield* Deferred.make<void>();
@@ -4471,7 +4597,26 @@ it.effect(
       });
 
       yield* effect.pipe(
-        Effect.provide(layerTest({ state, idleTimeoutMs: 1000, beforeUnload })),
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 1000,
+            beforeUnload,
+            ...(withMcp
+              ? {
+                  mcpServers: {
+                    reconnectScope: "server" as const,
+                    list: () => Effect.succeed([]),
+                    reconnect: () => Effect.void,
+                    setEnabled: () => Effect.void,
+                    startSignIn: () => Effect.succeed({ callbackExpected: false }),
+                    submitCallback: () => Effect.void,
+                    signOut: () => Effect.void,
+                  },
+                }
+              : {}),
+          }),
+        ),
         Effect.scoped,
       );
     }),

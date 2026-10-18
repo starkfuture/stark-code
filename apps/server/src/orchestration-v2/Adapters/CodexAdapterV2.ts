@@ -1808,6 +1808,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         Effect.mapError(() => mcpControlError("codex", operation)),
       );
     return {
+      reconnectScope: "all",
       list: () =>
         Effect.gen(function* () {
           const client = yield* observedClient;
@@ -1824,9 +1825,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             rows.push(
               ...page.data.map((value) => {
                 const mapped = codexMcpStatusEntry(value);
-                return mapped.status === "disabled"
-                  ? mapped
-                  : { ...mapped, ...updates.get(value.name) };
+                // Current snapshots supersede earlier startup/login notifications.
+                // Older servers omit runtimeStatus; retain notifications only as
+                // a fallback when that authoritative state is unavailable.
+                if (
+                  value.runtimeStatus != null ||
+                  value.authStatus === "notLoggedIn" ||
+                  mapped.status === "failed" ||
+                  (value.authStatus === "oAuth" && mapped.status === "connected")
+                ) {
+                  updates.delete(value.name);
+                  return mapped;
+                }
+                return { ...mapped, ...updates.get(value.name) };
               }),
             );
             cursor = page.nextCursor ?? undefined;

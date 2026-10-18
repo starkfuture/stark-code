@@ -546,6 +546,10 @@ export type ProviderAdapterV2SubagentOutcome = {
 
 export interface ProviderAdapterV2McpServers {
   readonly list: () => Effect.Effect<readonly McpServerStatusEntry[], ProviderAdapterV2Error>;
+  /** Whether reconnect(name) preserves other servers' live connections. */
+  readonly reconnectScope?: "server" | "all";
+  /** Known provider work that makes connection maintenance unsafe, including pending wakes. */
+  readonly isBusy?: Effect.Effect<boolean, ProviderAdapterV2Error>;
   readonly reload?: (options: {
     readonly force: boolean;
   }) => Effect.Effect<McpServersReloadResult, ProviderAdapterV2Error>;

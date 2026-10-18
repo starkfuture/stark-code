@@ -78,6 +78,11 @@ contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 
 ## Reload MCP connections
 
+Stark Code checks connection health at session startup and between turns. Codex
+currently exposes only a global MCP reload, so Stark Code does not automatically
+reconnect a failed server and disturb healthy connections. Sign-in failures show
+a sign-in action. Connection controls wait until agent work has finished.
+
 In a live conversation in the local desktop app, open **Tools → MCP** and
 choose **Reload MCPs**. This asks the selected Codex chat connection to reload its
 MCP configuration; watch the server list for connection results. **Refresh status**

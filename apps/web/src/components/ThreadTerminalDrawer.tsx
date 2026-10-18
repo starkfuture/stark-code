@@ -96,6 +96,7 @@ import {
   resolveTerminalFontSizePreference,
   TYPOGRAPHY_ADVANCED_STORAGE_KEY,
 } from "../appearanceFonts";
+import { createNativeMcpWarningDetector, type NativeMcpWarning } from "../nativeMcpWarning";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -117,11 +118,14 @@ function writeSystemMessage(terminal: GhosttyTerminalSurface, message: string): 
 export function writeTerminalOutputUpdate(
   terminal: Pick<GhosttyTerminalSurface, "resetAndWrite" | "write">,
   update: TerminalOutputUpdate,
+  onOutput?: (update: TerminalOutputUpdate) => void,
 ): void {
   if (update.type === "reset") {
     terminal.resetAndWrite(update.data);
+    onOutput?.(update);
   } else if (update.type === "append") {
     terminal.write(update.data);
+    onOutput?.(update);
   }
 }
 
@@ -129,10 +133,11 @@ export function synchronizeTerminalOutput(
   terminal: Pick<GhosttyTerminalSurface, "resetAndWrite" | "write" | "clearSelection">,
   session: Pick<TerminalSessionState, "output" | "version">,
   cursor: TerminalOutputCursor,
+  onOutput?: (update: TerminalOutputUpdate) => void,
 ): TerminalOutputCursor {
   if (session.version === 0) return cursor;
   const update = readTerminalOutputUpdate(session.output, cursor);
-  writeTerminalOutputUpdate(terminal, update);
+  writeTerminalOutputUpdate(terminal, update, onOutput);
   terminal.clearSelection();
   return update.cursor;
 }
@@ -393,6 +398,7 @@ interface TerminalViewportProps {
   runtimeEnv?: Record<string, string>;
   providerInstanceId?: ProviderInstanceId;
   agentShell?: boolean;
+  onMcpWarning?: (warning: NativeMcpWarning) => void;
   onSessionExited: () => void;
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
   focusRequestId: number;
@@ -420,6 +426,7 @@ export function TerminalViewport({
   runtimeEnv,
   providerInstanceId,
   agentShell,
+  onMcpWarning,
   onSessionExited,
   onAddTerminalContext,
   focusRequestId,
@@ -520,6 +527,13 @@ export function TerminalViewport({
   const terminalError = terminalSession.error;
   const terminalStatus = terminalSession.status;
   const outputCursorRef = useRef<TerminalOutputCursor>(INITIAL_TERMINAL_OUTPUT_CURSOR);
+  const mcpWarningDetector = useRef(createNativeMcpWarningDetector());
+  const handleMcpOutput = useEffectEvent((update: TerminalOutputUpdate) => {
+    if (onMcpWarning === undefined) return;
+    if (update.type !== "append" && update.type !== "reset") return;
+    const warning = mcpWarningDetector.current.read(update.data, update.type === "reset");
+    if (warning !== undefined) onMcpWarning(warning);
+  });
   const synchronizedStatusRef = useRef<TerminalSessionState["status"]>("closed");
   const synchronizeTerminalStatus = useEffectEvent(
     (terminal: GhosttyTerminalSurface, status: TerminalSessionState["status"], version: number) => {
@@ -644,6 +658,7 @@ export function TerminalViewport({
         latestSession.output,
         INITIAL_TERMINAL_OUTPUT_CURSOR,
       );
+      handleMcpOutput(initialOutput);
       if (initialOutput.type === "reset" && initialOutput.data.length > 0) {
         writeTerminalOutputUpdate(terminal, initialOutput);
       }
@@ -1085,7 +1100,12 @@ export function TerminalViewport({
       return;
     }
 
-    outputCursorRef.current = synchronizeTerminalOutput(terminal, current, outputCursorRef.current);
+    outputCursorRef.current = synchronizeTerminalOutput(
+      terminal,
+      current,
+      outputCursorRef.current,
+      handleMcpOutput,
+    );
 
     if (current.error !== null && current.error !== previous.error) {
       writeSystemMessage(terminal, current.error);

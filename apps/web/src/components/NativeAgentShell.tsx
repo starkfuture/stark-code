@@ -1,5 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
-import { Maximize2Icon, Minimize2Icon } from "lucide-react";
+import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
 import type {
@@ -18,6 +18,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { terminalEnvironment } from "../state/terminal";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../appearanceFonts";
+import type { NativeMcpWarning } from "../nativeMcpWarning";
 
 export function nativeAgentTerminalId(instanceId: ProviderInstanceId): string {
   return `native-agent-${instanceId}`;
@@ -42,6 +43,7 @@ export function NativeAgentShell(props: {
   const expandButton = useRef<HTMLButtonElement>(null);
   const [resizeEpoch, setResizeEpoch] = useState(0);
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
+  const [mcpWarning, setMcpWarning] = useState<NativeMcpWarning | null>(null);
   const chooseView = (next: typeof view) => {
     setView(next);
     if (next !== "terminal") setReaderVisited(true);
@@ -60,6 +62,10 @@ export function NativeAgentShell(props: {
   const terminalId = nativeAgentTerminalId(props.providerInstanceId);
   const replies = useNativeReplies(props.threadRef, readerVisited, terminalId);
   const label = props.driver === "codex" ? "Codex" : "Claude";
+  const showTerminal = () => {
+    if (view === "reader") chooseView("terminal");
+    setTerminalFocusRequest((request) => request + 1);
+  };
   return (
     <Dialog.Root
       open
@@ -111,13 +117,7 @@ export function NativeAgentShell(props: {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <NativeMcpReloadControl
-                  driver={props.driver}
-                  onShowTerminal={() => {
-                    if (view === "reader") chooseView("terminal");
-                    setTerminalFocusRequest((request) => request + 1);
-                  }}
-                />
+                <NativeMcpReloadControl driver={props.driver} onShowTerminal={showTerminal} />
                 <Button
                   ref={expandButton}
                   variant="ghost"
@@ -132,6 +132,29 @@ export function NativeAgentShell(props: {
                 </Button>
               </div>
             </div>
+            {mcpWarning ? (
+              <div
+                className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/40 px-4 py-2 text-xs"
+                role="status"
+              >
+                <p className="min-w-0 flex-1">
+                  {mcpWarning === "sign-in"
+                    ? "A connector may need sign-in. Review it in the terminal."
+                    : "A connection warning appeared in the terminal."}
+                </p>
+                <Button size="xs" variant="outline" onClick={showTerminal}>
+                  Show terminal
+                </Button>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="Dismiss connection warning"
+                  onClick={() => setMcpWarning(null)}
+                >
+                  <XIcon aria-hidden />
+                </Button>
+              </div>
+            ) : null}
             <div
               className="flex shrink-0 flex-wrap gap-1 border-b px-3 py-2"
               aria-label="Native shell view"
@@ -186,6 +209,7 @@ export function NativeAgentShell(props: {
                   providerInstanceId={props.providerInstanceId}
                   agentShell
                   onSessionExited={() => setEnded(true)}
+                  onMcpWarning={setMcpWarning}
                   focusRequestId={(props.focusRequestId ?? 1) + terminalFocusRequest}
                   autoFocus
                   visible={view !== "reader"}
@@ -246,7 +270,10 @@ export function NativeAgentShell(props: {
                         rows: 30,
                       },
                     }).then((result) => {
-                      if (result._tag === "Success") setEnded(false);
+                      if (result._tag === "Success") {
+                        setEnded(false);
+                        setMcpWarning(null);
+                      }
                     });
                   }}
                 >

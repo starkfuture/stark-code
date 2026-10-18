@@ -9,6 +9,7 @@ import type {
 } from "@starkfuture/contracts";
 import { useComposerDictation } from "./useComposerDictation";
 import { ComposerDictationControl } from "./ComposerDictationControl";
+import { ComposerDictationStatus } from "./ComposerDictationStatus";
 import { TooltipProvider } from "../ui/tooltip";
 
 let root: Root;
@@ -37,6 +38,14 @@ function Harness({ owner = "thread-a", disabled = false }: { owner?: string; dis
   return (
     <TooltipProvider>
       <ComposerDictationControl voice={current} disabled={disabled} />
+      {current.busy ? (
+        <ComposerDictationStatus
+          phase={current.state.phase}
+          meter={current.meter}
+          onStop={current.stop}
+          onCancel={current.cancel}
+        />
+      ) : null}
       <output>{current.state.phase}</output>
     </TooltipProvider>
   );

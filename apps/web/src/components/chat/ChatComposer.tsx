@@ -5462,11 +5462,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     : standaloneComposerImages;
   // Keep collapsed controls inside the input when workspace context is hidden.
   const composerControlsCollapsed = isComposerResting || isComposerCollapsedMobile;
+  const hideEmptyDictationEditor =
+    dictation.busy &&
+    !isComposerApprovalState &&
+    !activePendingProgress &&
+    prompt.trim().length === 0;
   const showInlineRestingControls = composerControlsCollapsed && restingControlsHost === null;
   const composerControlsVisibleInStrip =
     composerControlsCollapsed && restingControlsHost !== null && restingControlsVisible;
   const composerControlsHidden = composerControlsCollapsed && !restingControlsVisible;
-  if (composerControlsHidden && isComposerModelPickerOpen) {
+  if ((composerControlsHidden || dictation.busy) && isComposerModelPickerOpen) {
     setIsComposerModelPickerOpen(false);
   }
   useLayoutEffect(() => {
@@ -6748,6 +6753,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Imperative handle
   // ------------------------------------------------------------------
   const openModelPicker = useCallback(() => {
+    if (isDictationBusy()) return;
     if (composerControlsHidden) {
       if (composerBlurFrameRef.current !== null) {
         window.cancelAnimationFrame(composerBlurFrameRef.current);
@@ -6757,7 +6763,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setIsComposerFocused(true);
     }
     setIsComposerModelPickerOpen(true);
-  }, [composerControlsHidden, setIsComposerFocused, setIsComposerScrollCollapsed]);
+  }, [composerControlsHidden, isDictationBusy, setIsComposerFocused, setIsComposerScrollCollapsed]);
 
   useImperativeHandle(
     composerRef,
@@ -7414,6 +7420,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
                 isComposerResting && "py-2 sm:py-2",
+                hideEmptyDictationEditor && "pb-0",
               )}
             >
               {isStashMenuOpen && !composerMenuOpen && !isComposerApprovalState && (
@@ -7910,7 +7917,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     buildContextClipboardFragment={buildContextClipboardFragment}
                     importContextFragment={importContextFragment}
                     skills={selectedProviderSkills}
-                    containerClassName={cn(isComposerResting && "min-w-0 flex-1")}
+                    containerClassName={cn(
+                      isComposerResting && "min-w-0 flex-1",
+                      hideEmptyDictationEditor && "hidden",
+                    )}
                     className={cn(
                       shellMode && "font-mono",
                       showMobilePendingAnswerActions && "max-sm:pb-12",
@@ -8011,7 +8021,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               message={providerInputSubmissionError ?? composerSubmissionError}
             />
             {dictation.busy ? (
-              <ComposerDictationStatus phase={dictation.state.phase} meter={dictation.meter} />
+              <ComposerDictationStatus
+                phase={dictation.state.phase}
+                meter={dictation.meter}
+                onStop={dictation.stop}
+                onCancel={dictation.cancel}
+              />
             ) : dictation.state.error ? (
               <div className="flex items-start gap-2 px-3 pb-2 sm:px-4">
                 <p
@@ -8034,7 +8049,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             ) : null}
 
             {/* Bottom toolbar */}
-            {isComposerCollapsedMobile || isComposerApprovalState ? null : (
+            {isComposerCollapsedMobile || isComposerApprovalState || dictation.busy ? null : (
               <div
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}

@@ -15,7 +15,9 @@ function Parent({ phase }: { phase: VoiceInputState["phase"] }) {
   useEffect(() => {
     onParentRender();
   });
-  return <ComposerDictationStatus phase={phase} meter={meter} />;
+  return (
+    <ComposerDictationStatus phase={phase} meter={meter} onStop={() => {}} onCancel={() => {}} />
+  );
 }
 
 beforeEach(() => {
@@ -46,7 +48,7 @@ it("shows real microphone samples without rerendering the editor or animating si
   await render("recording");
   expect(status()?.textContent).toBe("Listening");
   expect(bars()).toHaveLength(24);
-  expect(bars().every((bar) => bar.style.height === "2px")).toBe(true);
+  expect(bars().every((bar) => bar.style.height === "3px")).toBe(true);
   const rendersBeforeSamples = onParentRender.mock.calls.length;
   await act(() => {
     meter.sample(0);
@@ -57,7 +59,7 @@ it("shows real microphone samples without rerendering the editor or animating si
     bars()
       .slice(-3)
       .map((bar) => bar.style.height),
-  ).toEqual(["2px", "6px", "18px"]);
+  ).toEqual(["3px", "18.5px", "34px"]);
   expect(onParentRender).toHaveBeenCalledTimes(rendersBeforeSamples);
   const heights = bars().map((bar) => bar.style.height);
   await act(() => vi.advanceTimersByTime(3000));
@@ -73,7 +75,7 @@ it("shows real microphone samples without rerendering the editor or animating si
 
 it("starts elapsed time at native recording, freezes it on stop, and resets for a new recording", async () => {
   await render("preparing");
-  expect(status()?.textContent).toBe("Preparing dictation…");
+  expect(status()?.textContent).toBe("Starting…");
   expect(timer()).toBeNull();
   expect(bars()).toHaveLength(0);
   expect(vi.getTimerCount()).toBe(0);

@@ -94,7 +94,7 @@ it("searches actual invocable skills by plugin and adds only the chosen skill to
   expect(document.body.textContent).toContain("plugin manager");
   expect(document.body.textContent).not.toContain("private");
   expect(document.body.textContent).not.toContain("disabled");
-  await search("Search skills and plugins", "release-tools");
+  await search("Search skills", "release-tools");
   expect(document.querySelectorAll('[aria-label="Claude skills"] li')).toHaveLength(1);
   expect(document.body.textContent).toContain("Plugin · release-tools");
   expect(selected).not.toHaveBeenCalled();

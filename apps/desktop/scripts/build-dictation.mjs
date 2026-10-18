@@ -23,9 +23,16 @@ export function buildDictation({ arch = hostArch, output, platform = hostPlatfor
   const bundle = output ?? NodePath.join(root, "build", arch, "Stark Dictation.app");
   const executable = NodePath.join(bundle, "Contents/MacOS/stark-dictation");
   const source = NodePath.join(root, "main.swift");
+  const brokerSource = NodePath.join(root, "LaunchBroker.swift");
   const plist = NodePath.join(root, "Info.plist");
   const entitlements = NodePath.join(root, "entitlements.plist");
-  const inputs = [source, plist, entitlements, NodeURL.fileURLToPath(import.meta.url)];
+  const inputs = [
+    source,
+    brokerSource,
+    plist,
+    entitlements,
+    NodeURL.fileURLToPath(import.meta.url),
+  ];
   const stamp = NodePath.join(bundle, "Contents/Resources/build-architecture");
   try {
     if (
@@ -60,7 +67,10 @@ export function buildDictation({ arch = hostArch, output, platform = hostPlatfor
           "AVFoundation",
           "-framework",
           "Speech",
+          "-framework",
+          "AppKit",
           source,
+          brokerSource,
           "-o",
           binary,
         ],

@@ -2,6 +2,7 @@ import {
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
+  ThreadId,
   type McpServersListResult,
 } from "@starkfuture/contracts";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
@@ -54,8 +55,8 @@ vi.mock("../../env", () => ({
   },
 }));
 vi.mock("./McpServersPanel", () => ({
-  McpServersPanel: ({ target }: { target: { projectId: string } }) => (
-    <section data-target={target.projectId}>Full connection controls</section>
+  McpServersPanel: ({ target }: { target: { projectId?: string; threadId?: string } }) => (
+    <section data-target={target.threadId ?? target.projectId}>Full connection controls</section>
   ),
 }));
 vi.mock("../ui/menu", () => ({
@@ -100,12 +101,14 @@ vi.mock("../ui/dialog", () => ({
 
 import { ComposerConnectionsDialog, ComposerConnectorsMenu } from "./ComposerConnectorsMenu";
 
+const inspectionTarget = {
+  projectId: ProjectId.make("project"),
+  providerInstanceId: ProviderInstanceId.make("claude"),
+};
 const props = {
   environmentId: EnvironmentId.make("local"),
-  target: {
-    projectId: ProjectId.make("project"),
-    providerInstanceId: ProviderInstanceId.make("claude"),
-  },
+  target: { threadId: ThreadId.make("thread") },
+  inspectionTarget,
   providerKind: "claudeAgent" as const,
   providerLabel: "Claude",
 };
@@ -181,6 +184,68 @@ it("reads only while open and never polls an idle composer", async () => {
   expect(state.toggle).not.toHaveBeenCalled();
 });
 
+it("leaves project connections unchecked until the user explicitly asks to inspect", async () => {
+  const manage = vi.fn();
+  await act(async () => {
+    renderer = create(
+      <ComposerConnectorsMenu {...props} target={inspectionTarget} open onManage={manage} />,
+    );
+  });
+  expect(state.list).not.toHaveBeenCalled();
+  expect(state.query.refresh).not.toHaveBeenCalled();
+  expect(text()).toContain("Connections have not been checked.");
+  expect(text()).not.toContain("0 configured");
+  expect(toggles()).toHaveLength(0);
+  await act(async () => renderer!.root.findByType("button").props.onClick());
+  expect(manage).toHaveBeenCalledExactlyOnceWith(inspectionTarget);
+  expect(state.toggle).not.toHaveBeenCalled();
+});
+
+it("offers project inspection for an inactive thread without claiming no connections exist", async () => {
+  state.query.data = { live: false, servers: [] };
+  const manage = vi.fn();
+  await act(async () => {
+    renderer = create(<ComposerConnectorsMenu {...props} open onManage={manage} />);
+  });
+  expect(text()).toContain("Connection status unavailable · Session not running");
+  expect(text()).toContain("Inspect project connections");
+  expect(text()).not.toContain("0 configured");
+  expect(text()).not.toContain("No connections reported");
+  expect(state.list).toHaveBeenCalledWith({ environmentId: "local", input: props.target });
+  expect(state.list.mock.calls.every(([input]) => input.input.threadId === "thread")).toBe(true);
+  await act(async () => renderer!.root.findByType("button").props.onClick());
+  expect(manage).toHaveBeenCalledExactlyOnceWith(inspectionTarget);
+});
+
+it("reports an empty list only when a live provider actually returned one", async () => {
+  state.query.data = { live: true, servers: [] };
+  await render();
+  expect(text()).toContain("0 configured · Current provider status");
+  expect(text()).toContain("No connections reported");
+  expect(text()).not.toContain("Session not running");
+});
+
+it.each(["remote", "browser"])(
+  "does not offer project inspection from a %s client",
+  async (client) => {
+    if (client === "remote") state.localHost = false;
+    else state.electron = false;
+    const manage = vi.fn();
+    await act(async () => {
+      renderer = create(
+        <ComposerConnectorsMenu {...props} target={inspectionTarget} open onManage={manage} />,
+      );
+    });
+    expect(state.list).not.toHaveBeenCalled();
+    expect(text()).toContain("Manage connections on the desktop host.");
+    expect(text()).not.toContain("Inspect to load");
+    const inspect = renderer!.root.findByType("button");
+    expect(inspect.props.disabled).toBe(true);
+    await act(async () => inspect.props.onClick());
+    expect(manage).not.toHaveBeenCalled();
+  },
+);
+
 it("toggles the selected provider target only after an explicit click and never offers a locked toggle", async () => {
   await render();
   expect(toggles()).toHaveLength(2);
@@ -232,7 +297,7 @@ it("routes failed and signed-out servers to management instead of silently recon
   await act(async () =>
     renderer!.root.findByProps({ "aria-label": "Manage Pages" }).props.onClick(),
   );
-  expect(manage).toHaveBeenCalledOnce();
+  expect(manage).toHaveBeenCalledExactlyOnceWith(props.target);
   expect(state.toggle).not.toHaveBeenCalled();
 });
 
@@ -274,7 +339,7 @@ it("does not leak a previous provider's late result into the newly selected prov
         {...props}
         providerKind="codex"
         providerLabel="Codex"
-        target={{ ...props.target, providerInstanceId: ProviderInstanceId.make("codex") }}
+        target={{ threadId: ThreadId.make("codex-thread") }}
         open
         onManage={vi.fn()}
       />,
@@ -294,7 +359,7 @@ it("mounts full management only while its separate dialog is open", async () => 
   await act(async () => {
     renderer!.update(<ComposerConnectionsDialog {...props} open onOpenChange={vi.fn()} />);
   });
-  expect(renderer!.root.findByType("section").props["data-target"]).toBe("project");
+  expect(renderer!.root.findByType("section").props["data-target"]).toBe("thread");
   expect(text()).toContain("claude mcp add");
   await act(async () => {
     renderer!.update(<ComposerConnectionsDialog {...props} open={false} onOpenChange={vi.fn()} />);

@@ -9,6 +9,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as DesktopDictation from "../../dictation/DesktopDictation.ts";
+import { DESKTOP_HOST, getDesktopScheme } from "../../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 import * as Channels from "../channels.ts";
@@ -33,10 +34,8 @@ const owner = (event?: DesktopIpc.DesktopIpcInvokeEvent) =>
       return (
         !url.username &&
         !url.password &&
-        ((url.protocol === "starkcode:" && url.hostname === "app") ||
-          (environment.isDevelopment &&
-            Option.isSome(environment.devServerUrl) &&
-            url.origin === environment.devServerUrl.value.origin))
+        url.protocol === `${getDesktopScheme(environment.isDevelopment)}:` &&
+        url.host === DESKTOP_HOST
       );
     }).pipe(Effect.orElseSucceed(() => false));
     if (!trusted) return yield* new DesktopDictation.DictationError({ reason: "sender" });

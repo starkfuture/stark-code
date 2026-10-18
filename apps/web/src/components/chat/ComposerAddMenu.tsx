@@ -6,16 +6,7 @@ import type {
   ServerProviderSkill,
   ServerProviderSlashCommand,
 } from "@starkfuture/contracts";
-import {
-  BlocksIcon,
-  FileSearchIcon,
-  FolderIcon,
-  GithubIcon,
-  PaperclipIcon,
-  PlusIcon,
-  PuzzleIcon,
-  SquareSlashIcon,
-} from "lucide-react";
+import { BlocksIcon, PaperclipIcon, PlusIcon, PuzzleIcon, SquareSlashIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -27,9 +18,6 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { composerFloatingLayerProps } from "./composerEventScope";
-import { ComposerContextPickerDialog } from "./ComposerContextPickerDialog";
-import { ComposerIssueLinkDialog } from "./ComposerIssueLinkDialog";
-import type { ComposerIssueLink } from "./composerIssueLink";
 import { ComposerConnectionsDialog, ComposerConnectorsMenu } from "./ComposerConnectorsMenu";
 import { ComposerSkillsDialog } from "./ComposerSkillsDialog";
 import { ComposerSlashCommandsDialog } from "./ComposerSlashCommandsDialog";
@@ -38,9 +26,9 @@ import { ComposerSlashCommandsDialog } from "./ComposerSlashCommandsDialog";
 export function ComposerAddMenu({
   environmentId,
   target,
+  inspectionTarget,
   providerKind,
   providerLabel,
-  cwd,
   disabled,
   canAttach,
   canAddContext,
@@ -48,17 +36,15 @@ export function ComposerAddMenu({
   commands,
   catalogPending,
   onAttach,
-  onInsertPath,
-  onInsertIssue,
   onInsertSkill,
   onInsertCommand,
   onCatalogOpenChange,
 }: {
   environmentId: EnvironmentId;
   target: McpServersListInput | null;
+  inspectionTarget: McpServersListInput | null;
   providerKind: ProviderDriverKind;
   providerLabel: string;
-  cwd: string | null;
   disabled: boolean;
   canAttach: boolean;
   canAddContext: boolean;
@@ -66,20 +52,17 @@ export function ComposerAddMenu({
   commands: ReadonlyArray<ServerProviderSlashCommand>;
   catalogPending: boolean;
   onAttach: () => void;
-  onInsertPath: (path: string) => boolean;
-  onInsertIssue: (link: ComposerIssueLink) => boolean;
   onInsertSkill: (skill: ServerProviderSkill) => boolean;
   onInsertCommand: (command: ServerProviderSlashCommand) => boolean;
   onCatalogOpenChange: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [connectorsOpen, setConnectorsOpen] = useState(false);
-  const [dialog, setDialog] = useState<
-    "file" | "directory" | "issue" | "commands" | "skills" | "connections" | null
-  >(null);
+  const [dialog, setDialog] = useState<"commands" | "skills" | "connections" | null>(null);
+  const [managedTarget, setManagedTarget] = useState<McpServersListInput | null>(null);
   const mcpProvider =
     providerKind === "claudeAgent" ? "claudeAgent" : providerKind === "codex" ? "codex" : null;
-  const catalogOpen = open || dialog === "commands" || dialog === "skills";
+  const catalogOpen = dialog === "commands" || dialog === "skills";
   useEffect(() => {
     onCatalogOpenChange(catalogOpen);
     return () => onCatalogOpenChange(false);
@@ -123,18 +106,6 @@ export function ComposerAddMenu({
             <PaperclipIcon />
             Add files or photos
           </MenuItem>
-          <MenuItem disabled={!canAddContext || !cwd} onClick={() => openDialog("file")}>
-            <FileSearchIcon />
-            Reference workspace file
-          </MenuItem>
-          <MenuItem disabled={!canAddContext || !cwd} onClick={() => openDialog("directory")}>
-            <FolderIcon />
-            Add folder
-          </MenuItem>
-          <MenuItem disabled={!canAddContext} onClick={() => openDialog("issue")}>
-            <GithubIcon />
-            Add GitHub issue link
-          </MenuItem>
           <MenuSeparator />
           <MenuItem disabled={!canAddContext} onClick={() => openDialog("commands")}>
             <SquareSlashIcon />
@@ -149,32 +120,23 @@ export function ComposerAddMenu({
               <ComposerConnectorsMenu
                 environmentId={environmentId}
                 target={target}
+                {...(inspectionTarget ? { inspectionTarget } : {})}
                 providerKind={mcpProvider}
                 providerLabel={providerLabel}
                 open={open && connectorsOpen}
-                onManage={() => openDialog("connections")}
+                onManage={(nextTarget) => {
+                  setManagedTarget(nextTarget);
+                  openDialog("connections");
+                }}
               />
             </MenuSub>
           ) : null}
           <MenuItem disabled={!canAddContext} onClick={() => openDialog("skills")}>
             <PuzzleIcon />
-            Skills &amp; plugins
+            Skills
           </MenuItem>
         </MenuPopup>
       </Menu>
-      {cwd && (dialog === "file" || dialog === "directory") ? (
-        <ComposerContextPickerDialog
-          open
-          onOpenChange={closeDialog}
-          environmentId={environmentId}
-          cwd={cwd}
-          kind={dialog}
-          onSelect={onInsertPath}
-        />
-      ) : null}
-      {dialog === "issue" ? (
-        <ComposerIssueLinkDialog open onOpenChange={closeDialog} onSelect={onInsertIssue} />
-      ) : null}
       {dialog === "commands" ? (
         <ComposerSlashCommandsDialog
           open
@@ -201,7 +163,7 @@ export function ComposerAddMenu({
           open
           onOpenChange={closeDialog}
           environmentId={environmentId}
-          target={target}
+          target={managedTarget ?? target}
           providerKind={mcpProvider}
           providerLabel={providerLabel}
         />

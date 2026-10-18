@@ -9,6 +9,7 @@ import {
   nativeDictationLocale,
   type NativeDictationTarget,
 } from "./nativeDictation";
+import { NativeDictationMeter } from "./nativeDictationMeter";
 
 export function useComposerDictation(input: {
   ownerKey: string;
@@ -20,6 +21,7 @@ export function useComposerDictation(input: {
 }) {
   const latest = useRef(input);
   const controller = useRef<NativeDictationController | null>(null);
+  const [meter] = useState(() => new NativeDictationMeter());
   const [state, setState] = useState<VoiceInputState>({
     phase: "idle",
     error: null,
@@ -37,6 +39,7 @@ export function useComposerDictation(input: {
       (next) => {
         if (alive) setState(next);
       },
+      meter,
     );
     controller.current = active;
     void bridge
@@ -70,7 +73,7 @@ export function useComposerDictation(input: {
       document.removeEventListener("visibilitychange", hidden);
       window.removeEventListener("keydown", escape, true);
     };
-  }, [bridge]);
+  }, [bridge, meter]);
 
   useLayoutEffect(() => {
     const changedOwner = latest.current.ownerKey !== input.ownerKey;
@@ -95,6 +98,7 @@ export function useComposerDictation(input: {
     available: availability?.available ?? false,
     unavailableReason: availability?.reason ?? "Preparing dictation…",
     state,
+    meter,
     busy: voiceInputBlocksSubmission(state),
     isBusy,
     start,

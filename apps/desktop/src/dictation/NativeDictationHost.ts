@@ -50,7 +50,9 @@ const make = Effect.gen(function* () {
             })),
           ),
     launch: (locale) =>
-      NodeChildProcess.spawn(helper, ["--locale", locale], { stdio: ["pipe", "pipe", "ignore"] }),
+      NodeChildProcess.spawn(helper, ["--launch", "--locale", locale], {
+        stdio: ["pipe", "pipe", "ignore"],
+      }),
     onQuit: (listener) => {
       Electron.app.on("before-quit", listener);
       return () => Electron.app.removeListener("before-quit", listener);

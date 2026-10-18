@@ -78,6 +78,100 @@ function fixture(availability = Effect.succeed<NativeDictationAvailability>({ av
 }
 
 describe("desktop dictation lifecycle", () => {
+  it.effect("reports native auto-stop finalization without closing before the transcript", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* DesktopDictation.DesktopDictation;
+      yield* service.start({ sessionId: "auto-stop", locale: "en-US" }, f.owner);
+      const child = f.children[0]!;
+      child.stdout.write('{"type":"recording"}\n');
+      child.stdout.write('{"type":"recording","finalizing":true}\n');
+      expect(f.events.at(-1)).toEqual({
+        sessionId: "auto-stop",
+        type: "recording",
+        finalizing: true,
+      });
+      expect(child.kill).not.toHaveBeenCalled();
+      expect(
+        Exit.isFailure(
+          yield* Effect.exit(service.start({ sessionId: "too-early", locale: "en-US" }, f.owner)),
+        ),
+      ).toBe(true);
+      child.stdout.write('{"type":"transcript","text":"Final words."}\n');
+      expect(f.events.at(-1)).toEqual({
+        sessionId: "auto-stop",
+        type: "transcript",
+        text: "Final words.",
+      });
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    }).pipe(Effect.provide(f.layer));
+  });
+
+  it.effect("forwards real audio levels only while its owner is recording", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* DesktopDictation.DesktopDictation;
+      yield* service.start({ sessionId: "levels", locale: "en-US" }, f.owner);
+      const child = f.children[0]!;
+      child.stdout.write('{"type":"recording"}\n');
+      for (const audioLevel of [0, 0.42, 1]) {
+        child.stdout.write(JSON.stringify({ type: "recording", audioLevel }) + "\n");
+      }
+      yield* service.stop("levels", 42);
+      child.stdout.write('{"type":"recording","audioLevel":0.7}\n');
+      child.stdout.write('{"type":"transcript","text":"Voice draft."}\n');
+      child.stdout.write('{"type":"recording","audioLevel":0.9}\n');
+      expect(f.events).toEqual([
+        { sessionId: "levels", type: "recording" },
+        { sessionId: "levels", type: "recording", audioLevel: 0 },
+        { sessionId: "levels", type: "recording", audioLevel: 0.42 },
+        { sessionId: "levels", type: "recording", audioLevel: 1 },
+        { sessionId: "levels", type: "transcript", text: "Voice draft." },
+      ]);
+    }).pipe(Effect.provide(f.layer));
+  });
+
+  it.effect("rejects non-finite, out-of-range, or non-numeric audio levels", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* DesktopDictation.DesktopDictation;
+      for (const [index, level] of ["-0.01", "1.01", "1e999", '"0.5"', "null"].entries()) {
+        const sessionId = `invalid-level-${index}`;
+        yield* service.start({ sessionId, locale: "en-US" }, f.owner);
+        f.children.at(-1)!.stdout.write(`{"type":"recording","audioLevel":${level}}\n`);
+        expect(f.events.at(-1)).toMatchObject({ sessionId, type: "error" });
+        expect(f.children.at(-1)!.kill).toHaveBeenCalledWith("SIGTERM");
+      }
+      expect(f.events).toHaveLength(5);
+    }).pipe(Effect.provide(f.layer));
+  });
+
+  it.effect(
+    "fits five minutes of levels and a maximally escaped transcript in the output budget",
+    () => {
+      const f = fixture();
+      return Effect.gen(function* () {
+        const service = yield* DesktopDictation.DesktopDictation;
+        yield* service.start({ sessionId: "long", locale: "en-US" }, f.owner);
+        const transcript = "\u0001".repeat(32_000);
+        const output =
+          '{"type":"recording"}\n' +
+          '{"type":"recording","audioLevel":0.99}\n'.repeat(1_200) +
+          '{"type":"recording","finalizing":true}\n' +
+          JSON.stringify({ type: "transcript", text: transcript }) +
+          "\n";
+        expect(Buffer.byteLength(output)).toBeLessThan(256 * 1024);
+        f.children[0]!.stdout.write(output);
+        expect(f.events).toHaveLength(1_203);
+        expect(f.events.at(-1)).toEqual({
+          sessionId: "long",
+          type: "transcript",
+          text: transcript,
+        });
+      }).pipe(Effect.provide(f.layer));
+    },
+  );
+
   it.effect("emits only to its owner, finalizes text once, and ignores stale child output", () => {
     const f = fixture();
     return Effect.gen(function* () {

@@ -1140,7 +1140,18 @@ export const NativeDictationAvailability = Schema.Struct({
 });
 export type NativeDictationAvailability = typeof NativeDictationAvailability.Type;
 export const NativeDictationEvent = Schema.Union([
-  Schema.Struct({ sessionId: NativeDictationSessionId, type: Schema.Literal("recording") }),
+  Schema.Struct({
+    sessionId: NativeDictationSessionId,
+    type: Schema.Literal("recording"),
+    finalizing: Schema.optional(Schema.Boolean),
+    audioLevel: Schema.optional(
+      Schema.Number.check(
+        Schema.isFinite(),
+        Schema.isGreaterThanOrEqualTo(0),
+        Schema.isLessThanOrEqualTo(1),
+      ),
+    ),
+  }),
   Schema.Struct({
     sessionId: NativeDictationSessionId,
     type: Schema.Literal("transcript"),

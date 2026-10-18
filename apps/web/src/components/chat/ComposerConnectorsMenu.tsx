@@ -53,7 +53,8 @@ function connectionScope(providerKind: ConnectionTargetProps["providerKind"]) {
 
 type ComposerConnectorsMenuProps = ConnectionTargetProps & {
   open: boolean;
-  onManage: () => void;
+  inspectionTarget?: McpServersListInput;
+  onManage: (target: McpServersListInput) => void;
 };
 
 /** Put inside MenuSub. Keep the management dialog outside the parent menu's popup. */
@@ -67,10 +68,16 @@ function ComposerConnectorsMenuTarget({
   providerKind,
   providerLabel,
   open,
+  inspectionTarget,
   onManage,
 }: ComposerConnectorsMenuProps) {
+  // Project status starts an inspection process. Only the explicit Inspect action may do that;
+  // the submenu can read an already-running chat without launching a new provider.
+  const canReadAutomatically = target.threadId !== undefined;
   const query = useEnvironmentQuery(
-    open ? serverEnvironment.mcpServers({ environmentId, input: target }) : null,
+    open && canReadAutomatically
+      ? serverEnvironment.mcpServers({ environmentId, input: target })
+      : null,
   );
   const toggleAllowed = useAtomValue(
     serverEnvironment.setMcpServerEnabled.permissionAtom(environmentId),
@@ -97,8 +104,8 @@ function ComposerConnectorsMenuTarget({
     };
   }, []);
   useEffect(() => {
-    if (open) refresh.current();
-  }, [open]);
+    if (open && canReadAutomatically) refresh.current();
+  }, [open, canReadAutomatically]);
 
   const setEnabled = async (server: McpServerStatusEntry, enabled: boolean) => {
     if (!open || !canManage || server.locked || busyRef.current) return;
@@ -128,6 +135,13 @@ function ComposerConnectorsMenuTarget({
 
   const servers = query.data?.servers ?? [];
   const live = query.data?.live === true;
+  const managementTarget =
+    !canReadAutomatically || query.data?.live === false ? (inspectionTarget ?? target) : target;
+  const inspectsProject = managementTarget.threadId === undefined;
+  const inspectionUnavailable = inspectsProject && !desktopHost;
+  const openManagement = () => {
+    if (!inspectionUnavailable) onManage(managementTarget);
+  };
   return (
     <MenuSubPopup
       {...composerFloatingLayerProps}
@@ -136,18 +150,23 @@ function ComposerConnectorsMenuTarget({
       }}
     >
       <div className="w-80 max-w-[calc(100vw-3rem)]">
-        <MenuItem onClick={onManage}>
+        <MenuItem disabled={inspectionUnavailable} onClick={openManagement}>
           <Settings2Icon />
-          Manage connections
+          {inspectsProject ? "Inspect project connections" : "Manage connections"}
         </MenuItem>
         <div className="space-y-1 px-2 py-2 text-xs text-muted-foreground">
           <p>{mcpDisplayText(providerLabel, 100)} MCP connections</p>
           <p>{connectionScope(providerKind)}</p>
           {query.data ? (
             <p role="status">
-              {servers.length} configured
-              {live ? " · Current provider status" : " · Session not running"}
+              {live
+                ? `${servers.length} configured · Current provider status`
+                : "Connection status unavailable · Session not running"}
             </p>
+          ) : null}
+          {!canReadAutomatically ? <p role="status">Connections have not been checked.</p> : null}
+          {inspectsProject && desktopHost ? (
+            <p>Inspect to load this project's configured tools. No message is sent.</p>
           ) : null}
           {!desktopHost ? <p>Status only. Manage connections on the desktop host.</p> : null}
           {desktopHost && !toggleAllowed ? (
@@ -160,10 +179,10 @@ function ComposerConnectorsMenuTarget({
             {error ?? "Could not read connections. Open Manage connections to refresh."}
           </p>
         ) : null}
-        {!query.data && !query.error ? (
+        {canReadAutomatically && !query.data && !query.error ? (
           <p className="px-2 py-2 text-xs text-muted-foreground">Reading connections…</p>
         ) : null}
-        {query.data && servers.length === 0 ? (
+        {live && servers.length === 0 ? (
           <p className="px-2 py-2 text-xs text-muted-foreground">
             No connections reported. Open Manage connections for setup instructions.
           </p>
@@ -187,7 +206,12 @@ function ComposerConnectorsMenuTarget({
           );
           if (!server.locked && needsAttention) {
             return (
-              <MenuItem key={server.name} onClick={onManage} aria-label={`Manage ${label}`}>
+              <MenuItem
+                key={server.name}
+                disabled={inspectionUnavailable}
+                onClick={openManagement}
+                aria-label={`Manage ${label}`}
+              >
                 {content}
               </MenuItem>
             );

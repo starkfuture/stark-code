@@ -49,7 +49,7 @@ export function ComposerSkillsDialog(props: ComposerSkillsDialogProps) {
         }}
       >
         <DialogHeader>
-          <DialogTitle>Skills &amp; plugins</DialogTitle>
+          <DialogTitle>Skills</DialogTitle>
           <DialogDescription>
             Choose a {props.providerLabel} skill to add to your draft. Nothing is sent until you
             send the message.
@@ -70,7 +70,7 @@ function SkillsContent(props: ComposerSkillsDialogProps) {
     <div className="space-y-4">
       <Input
         type="search"
-        aria-label="Search skills and plugins"
+        aria-label="Search skills"
         placeholder="Search by skill, plugin, or description"
         value={query}
         onChange={(event) => setQuery(event.target.value)}

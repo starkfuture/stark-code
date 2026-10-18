@@ -2,6 +2,7 @@ import { formatProviderSkillDisplayName } from "@starkfuture/shared/inlineSkills
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { useComposerDictation } from "./useComposerDictation";
 import { ComposerDictationControl } from "./ComposerDictationControl";
+import { ComposerDictationStatus } from "./ComposerDictationStatus";
 import { ComposerAddMenu } from "./ComposerAddMenu";
 import { isComposerChatCommand } from "./ComposerSlashCommandsDialog";
 import {
@@ -8010,17 +8011,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               message={providerInputSubmissionError ?? composerSubmissionError}
             />
             {dictation.busy ? (
-              <p
-                role="status"
-                className="px-3 pb-2 text-xs text-muted-foreground sm:px-4"
-                data-composer-dictation-status="true"
-              >
-                {dictation.state.phase === "recording"
-                  ? "Listening. Finish to add your words to the draft."
-                  : dictation.state.phase === "preparing"
-                    ? "Preparing dictation…"
-                    : "Transcribing…"}
-              </p>
+              <ComposerDictationStatus phase={dictation.state.phase} meter={dictation.meter} />
             ) : dictation.state.error ? (
               <div className="flex items-start gap-2 px-3 pb-2 sm:px-4">
                 <p
@@ -8113,13 +8104,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 }
                             : null
                         }
+                        inspectionTarget={
+                          selectedProviderEntry && activeProjectId
+                            ? {
+                                providerInstanceId: selectedProviderEntry.instanceId,
+                                projectId: activeProjectId,
+                              }
+                            : null
+                        }
                         providerKind={selectedProvider}
                         providerLabel={
                           selectedProviderEntry?.displayName ??
                           selectedProviderStatus?.displayName ??
                           "Agent"
                         }
-                        cwd={gitCwd}
                         disabled={
                           !canOperateThread ||
                           dictation.busy ||
@@ -8133,18 +8131,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         commands={addMenuCommands}
                         catalogPending={sessionCatalog.isPending || workspaceSlashCommandsPending}
                         onAttach={() => attachmentInputRef.current?.click()}
-                        onInsertPath={(path) =>
-                          canAddComposerContext &&
-                          insertComposerText(`${serializeComposerFileLink(path)} `, "cursor", {
-                            ensureLeadingBoundary: true,
-                          })
-                        }
-                        onInsertIssue={(link) =>
-                          canAddComposerContext &&
-                          insertComposerText(`${link.markdown} `, "cursor", {
-                            ensureLeadingBoundary: true,
-                          })
-                        }
                         onInsertSkill={(skill) =>
                           insertAddMenuCatalogEntry({ type: "skill", skill })
                         }

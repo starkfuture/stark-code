@@ -38,11 +38,10 @@ it. Very large code blocks are shown without syntax highlighting.
 
 ## Attach files
 
-On web and desktop, open **+ → Add files or photos** to upload files. Use
-**Reference workspace file** or **Add folder** to point the agent to something
-already in the selected workspace, including a remote workspace. Folder references
-do not upload all the files inside them. **Add GitHub issue link** adds a reference;
-it does not download the issue or submit your message.
+On web and desktop, open **+ → Add files or photos** to upload files. Type `@`
+to reference a file or folder already in the selected workspace, including a remote
+workspace. Folder references do not upload their contents. Paste a GitHub issue URL
+directly into your draft to reference an issue.
 
 Attach up to 100 files per message. Each image can be up to 10 MiB, with at most
 80 MiB of images in one message. Other files, including videos, can be up to
@@ -194,8 +193,8 @@ Cancel discards the recording, and switching chats stops it.
 
 Enable **System Settings → Keyboard → Dictation** for your system language if its
 local speech model is not installed. The first recording asks for macOS microphone
-and speech-recognition permission. Speech
-is processed on your Mac, using its system language, without Claude or Codex tokens.
+and speech-recognition permission for **Stark Code Dictation**. Speech is processed
+on your Mac, using its system language, without Claude or Codex tokens.
 If on-device speech is unavailable for that language, the app reports it instead
 of sending audio to a transcription service. You can change denied permissions in
 **System Settings → Privacy & Security → Microphone / Speech Recognition**.
@@ -248,7 +247,7 @@ composer when it is empty, and is discarded otherwise.
 
 ## Commands and skills
 
-The **+** menu also offers searchable **Slash commands** and **Skills & plugins**
+Alongside **Add files or photos** and **Connectors**, the **+** menu offers searchable **Slash commands** and **Skills**
 for the selected provider. Skills and provider commands are added to the draft;
 app commands such as `/model` open the relevant control without sending it. To
 install or manage plugins, use the native agent's manager in Shell mode: `/plugin` for Claude
@@ -259,7 +258,8 @@ For Claude and Codex, **+ → Connectors** shows reported MCP connections. Open
 **Manage connections** for sign-in, reconnection, and reload controls. Changes to
 Claude connections apply to the project; Codex changes are saved in Codex settings
 and can affect other sessions. Remote clients show status; make changes on the
-desktop host. Connection status is unavailable until the agent session is running.
+desktop host. If the session is not running, use **Inspect project connections**
+on the desktop host to load the project's configured tools without sending a message.
 
 Type `/` for commands or `$` to add a skill from the selected environment and
 provider. On mobile, both are also available before starting a thread on

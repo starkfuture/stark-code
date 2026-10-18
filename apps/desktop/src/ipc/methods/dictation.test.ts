@@ -14,20 +14,23 @@ describe("dictation IPC", () => {
   const frame = { url: "starkcode://app/" };
   const window = { webContents: { id: 42, mainFrame: frame } };
   const startSession = vi.fn(() => Effect.void);
+  const checkAvailability = vi.fn(() => ({ available: true }));
   const service = {
-    availability: Effect.succeed({ available: true }),
+    availability: Effect.sync(checkAvailability),
     start: startSession,
     stop: () => Effect.void,
     cancel: () => Effect.void,
   };
-  const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  const run = <A, E, R>(effect: Effect.Effect<A, E, R>, isDevelopment = false) =>
     effect.pipe(
       Effect.provideService(ElectronWindow.ElectronWindow, {
         main: Effect.succeedSome(window),
       } as never),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, {
-        isDevelopment: false,
-        devServerUrl: Option.none(),
+        isDevelopment,
+        devServerUrl: isDevelopment
+          ? Option.some(new URL("http://localhost:5173/"))
+          : Option.none(),
       } as never),
       Effect.provideService(DesktopDictation.DesktopDictation, service),
     );
@@ -75,6 +78,49 @@ describe("dictation IPC", () => {
         ).toBe(true);
       }
       expect(startSession).not.toHaveBeenCalled();
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          frame.url = "starkcode://app/";
+        }),
+      ),
+    ),
+  );
+  it.effect("serves dictation only from the actual renderer scheme for its environment", () =>
+    Effect.gen(function* () {
+      const sender = { sender: { id: 42 }, senderFrame: frame };
+      for (const isDevelopment of [false, true]) {
+        startSession.mockClear();
+        checkAvailability.mockClear();
+        const scheme = isDevelopment ? "starkcode-dev" : "starkcode";
+        frame.url = `${scheme}://app/#/workspace/chat`;
+        expect(yield* run(availability.handler(undefined, sender), isDevelopment)).toEqual({
+          available: true,
+        });
+        yield* run(
+          start.handler({ sessionId: "renderer", locale: "en-US" }, sender),
+          isDevelopment,
+        );
+        expect(checkAvailability).toHaveBeenCalledOnce();
+        expect(startSession).toHaveBeenCalledOnce();
+        for (const url of [
+          `${isDevelopment ? "starkcode" : "starkcode-dev"}://app/`,
+          "http://localhost:5173/",
+          `${scheme}://other/`,
+          `${scheme}://app:5173/`,
+          `${scheme}://name@app/`,
+        ]) {
+          frame.url = url;
+          for (const operation of [
+            availability.handler(undefined, sender),
+            start.handler({ sessionId: "foreign", locale: "en-US" }, sender),
+          ]) {
+            expect(Exit.isFailure(yield* Effect.exit(run(operation, isDevelopment)))).toBe(true);
+          }
+        }
+        expect(checkAvailability).toHaveBeenCalledOnce();
+        expect(startSession).toHaveBeenCalledOnce();
+      }
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {

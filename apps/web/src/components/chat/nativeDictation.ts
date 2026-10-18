@@ -1,5 +1,6 @@
 import type { DesktopBridge } from "@starkfuture/contracts";
 import { randomUUID } from "../../lib/utils";
+import { NativeDictationMeter } from "./nativeDictationMeter";
 import {
   resolveTranscriptCommit,
   type VoiceDraftSnapshot,
@@ -49,6 +50,7 @@ export class NativeDictationController {
     private readonly bridge: NativeDictationBridge,
     private readonly readOwner: () => string,
     private readonly onStateChange: (state: VoiceInputState) => void,
+    readonly meter = new NativeDictationMeter(),
   ) {
     this.unsubscribe = bridge.onEvent((event) => {
       const active = this.active;
@@ -59,7 +61,19 @@ export class NativeDictationController {
       }
       if (event.type === "recording") {
         // A delayed ready event must not turn a finishing recording back on.
-        if (this.state.phase === "preparing") this.update("recording");
+        if (this.state.phase === "preparing") {
+          this.meter.start();
+          this.update("recording");
+        }
+        if (this.state.phase !== "recording") return;
+        if (event.finalizing) {
+          this.meter.stop();
+          this.update("transcribing");
+          return;
+        }
+        if (event.audioLevel !== undefined) {
+          this.meter.sample(event.audioLevel);
+        }
         return;
       }
       this.releaseTarget();
@@ -118,6 +132,7 @@ export class NativeDictationController {
   stop(): void {
     const active = this.active;
     if (!active || this.state.phase !== "recording") return;
+    this.meter.stop();
     this.update("transcribing");
     void this.bridge.stop(active.id).catch(() => {
       if (this.active !== active) return;
@@ -141,6 +156,7 @@ export class NativeDictationController {
   private releaseTarget(): void {
     this.active?.unsubscribe();
     this.active = null;
+    this.meter.reset();
   }
 
   private update(phase: VoiceInputState["phase"]): void {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { NativeDictationEvent } from "@starkfuture/contracts";
 import type { VoiceInputState } from "@starkfuture/client-runtime/voice-input";
 import {
@@ -50,7 +50,12 @@ function setup(initial = "Fix this") {
   );
   const id = () => vi.mocked(bridge.start).mock.calls.at(-1)![0].sessionId;
   const emit = (
-    event: Omit<NativeDictationEvent, "sessionId"> & { text?: string; message?: string },
+    event: Omit<NativeDictationEvent, "sessionId"> & {
+      text?: string;
+      message?: string;
+      audioLevel?: number;
+      finalizing?: boolean;
+    },
     sessionId = id(),
   ) => listener!({ ...event, sessionId } as NativeDictationEvent);
   return {
@@ -75,6 +80,84 @@ function setup(initial = "Fix this") {
 }
 
 describe("native dictation", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("streams bounded microphone history without rerendering the composer for each sample", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+    const h = setup();
+    const meter = h.controller.meter;
+    h.controller.start(h.target, "en-US");
+    expect(meter.getSnapshot().startedAt).toBeNull();
+    h.emit({ type: "recording" });
+    expect(meter.getSnapshot().startedAt).toBe(1000);
+    const phaseUpdates = h.states.length;
+    for (let i = 0; i < 30; i++) h.emit({ type: "recording", audioLevel: i / 100 });
+    expect(meter.getSnapshot().levels).toEqual(Array.from({ length: 24 }, (_, i) => (i + 6) / 100));
+    expect(h.states).toHaveLength(phaseUpdates);
+    expect(meter.getSnapshot().startedAt).toBe(1000);
+    const valid = meter.getSnapshot();
+    for (const audioLevel of [NaN, Infinity, -0.1, 1.1]) {
+      h.emit({ type: "recording", audioLevel });
+    }
+    h.emit({ type: "recording", audioLevel: 1 }, "other-session");
+    expect(meter.getSnapshot()).toBe(valid);
+
+    now.mockReturnValue(4500);
+    h.controller.stop();
+    const stopped = meter.getSnapshot();
+    expect(stopped.stoppedAt).toBe(4500);
+    h.emit({ type: "recording", audioLevel: 1 });
+    expect(meter.getSnapshot()).toBe(stopped);
+    h.emit({ type: "transcript", text: "words" });
+    expect(meter.getSnapshot()).toEqual({ levels: [], startedAt: null, stoppedAt: null });
+  });
+
+  it("clears the meter on cancel and ignores samples from the previous recording", () => {
+    const h = setup();
+    const meter = h.controller.meter;
+    const changed = vi.fn();
+    const unsubscribe = meter.subscribe(changed);
+    h.controller.start(h.target, "en-US");
+    const oldId = h.id();
+    h.emit({ type: "recording", audioLevel: 0.4 });
+    expect(changed).toHaveBeenCalled();
+    h.controller.cancel();
+    expect(meter.getSnapshot().levels).toEqual([]);
+    expect(meter.getSnapshot().startedAt).toBeNull();
+    changed.mockClear();
+    h.controller.start(h.target, "en-US");
+    h.emit({ type: "recording", audioLevel: 0.9 }, oldId);
+    expect(changed).not.toHaveBeenCalled();
+    expect(h.states.at(-1)?.phase).toBe("preparing");
+    h.emit({ type: "recording", audioLevel: 0 });
+    expect(meter.getSnapshot().levels).toEqual([0]);
+    unsubscribe();
+    changed.mockClear();
+    h.emit({ type: "recording", audioLevel: 0.5 });
+    expect(changed).not.toHaveBeenCalled();
+    h.emit({ type: "error", message: "Microphone disconnected." });
+    expect(meter.getSnapshot().startedAt).toBeNull();
+  });
+
+  it("freezes the timer and shows transcription when the native recording limit ends audio", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+    const h = setup();
+    h.controller.start(h.target, "en-US");
+    h.emit({ type: "recording", audioLevel: 0.4 });
+    now.mockReturnValue(301_000);
+    h.emit({ type: "recording", finalizing: true });
+    expect(h.states.at(-1)?.phase).toBe("transcribing");
+    expect(h.controller.meter.getSnapshot().stoppedAt).toBe(301_000);
+    expect(h.controller.busy).toBe(true);
+    expect(h.bridge.stop).not.toHaveBeenCalled();
+    const snapshot = h.controller.meter.getSnapshot();
+    h.emit({ type: "recording", audioLevel: 1 });
+    expect(h.controller.meter.getSnapshot()).toBe(snapshot);
+    h.emit({ type: "transcript", text: "the tests" });
+    expect(h.readText()).toBe("Fix this the tests");
+    expect(h.controller.busy).toBe(false);
+  });
+
   it("normalizes macOS POSIX locale modifiers and falls back from invalid locale values", () => {
     expect(nativeDictationLocale("en_US@rg=gezzzz", "fr-FR")).toBe("en-US");
     expect(nativeDictationLocale("en-US@rg=gezzzz", "fr-FR")).toBe("en-US");

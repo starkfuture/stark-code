@@ -325,6 +325,7 @@ import {
   renderProviderTraitsPicker,
   summarizeProviderTraits,
 } from "./composerProviderState";
+import { composerProviderIdentity } from "./composerProviderIdentity";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
 import {
   providerSupportsManualCompaction,
@@ -1673,6 +1674,8 @@ export interface ChatComposerProps {
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;
   restingControlsHost: HTMLDivElement | null;
+  /** Account, model and usage sit below the expanded writing surface. */
+  detailsControlsHost?: HTMLDivElement | null;
   restingControlsHaveLeadingContext: boolean;
   onRestingControlsVisibilityChange: (visible: boolean) => void;
   getTimelineScrollableNode: () => HTMLElement | null;
@@ -1821,6 +1824,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pullRequestProjectId,
     pullRequestRepository,
     restingControlsHost,
+    detailsControlsHost,
     restingControlsHaveLeadingContext,
     onRestingControlsVisibilityChange,
     getTimelineScrollableNode,
@@ -5672,6 +5676,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const restingHiddenBlockCount = composerControlsCollapsed ? restingControlsHiddenBlockCount : 0;
   const iconOnlyBlockCount = composerControlsCollapsed ? restingControlsIconOnlyBlockCount : 0;
+  const detachComposerDetails = !composerControlsCollapsed && detailsControlsHost != null;
   const restingBlockDefs = [
     {
       id: "mode",
@@ -5693,7 +5698,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
-  const composerControls = showProviderUnavailable ? (
+  const composerModelControls = showProviderUnavailable ? (
     <ComposerControl
       type="button"
       disabled={!providerSetupInstanceId}
@@ -5774,15 +5779,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         instanceEntries={providerInstanceEntries}
         keybindings={keybindings}
         modelOptionsByInstance={modelOptionsByInstance}
-        size={composerControlsCollapsed ? "xs" : "sm"}
+        size={composerControlsCollapsed || detachComposerDetails ? "xs" : "sm"}
         triggerClassName={
-          composerControlsCollapsed
-            ? cn(
-                "min-w-13 shrink text-xs!",
-                !showInlineRestingControls &&
-                  "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
-              )
-            : "-ms-2.5 min-w-13"
+          detachComposerDetails
+            ? "min-w-0 max-w-[min(19rem,50cqw)]"
+            : composerControlsCollapsed
+              ? cn(
+                  "min-w-13 shrink text-xs!",
+                  !showInlineRestingControls &&
+                    "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
+                )
+              : "-ms-2.5 min-w-13"
         }
         terminalOpen={terminalOpen}
         open={isComposerModelPickerOpen}
@@ -5807,69 +5814,84 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           onProviderModelSelect(instanceId, model);
         }}
         onOpenProviderSetup={onOpenProviderSetup}
-        showProviderIdentity
+        showProviderIdentity={!detachComposerDetails}
         modelSettings={providerTraitsPicker}
         {...(providerTraitsSummary ? { modelSettingsSummary: providerTraitsSummary } : {})}
       />
 
       {!providerCatalogPending && (multipleModelSelections?.length ?? 0) < 2 ? (
-        <ComposerUsageRing
-          provider={selectedProviderStatus}
-          connected={props.environmentUnavailable === null}
-          size={composerControlsCollapsed ? "xs" : "sm"}
-          timestampFormat={settings.timestampFormat}
-          compact={composerControlsCollapsed}
-        />
-      ) : null}
-
-      <>
-        {restingBlockDefs.map((def, index) => {
-          const hidden = index >= restingBlockDefs.length - restingHiddenBlockCount;
-          return (
-            <div
-              key={def.id}
-              data-resting-block={def.id}
-              data-composer-block-icon-only={
-                index >= restingBlockDefs.length - iconOnlyBlockCount ? "true" : "false"
-              }
-              aria-hidden={hidden || undefined}
-              inert={hidden || undefined}
-              className={cn(
-                "flex w-max min-w-max shrink-0 items-center gap-1",
-                hidden && "pointer-events-none invisible absolute",
-                index >= restingBlockDefs.length - iconOnlyBlockCount &&
-                  "[&_[data-composer-control-label]]:pointer-events-none [&_[data-composer-control-label]]:invisible [&_[data-composer-control-label]]:absolute [&_[data-composer-control-label]]:w-max [&_[data-composer-control-label]]:max-w-none [&_[data-composer-control-compact-icon]]:[visibility:inherit] [&_[data-composer-control-compact-icon]]:relative",
-              )}
-            >
-              {def.content}
-            </div>
-          );
-        })}
         <div
-          data-resting-controls-overflow
-          aria-hidden={hiddenRestingBlockIds.length === 0 || undefined}
-          inert={hiddenRestingBlockIds.length === 0 || undefined}
-          className={cn(
-            "min-w-0 shrink-0",
-            hiddenRestingBlockIds.length === 0 && "pointer-events-none invisible absolute",
-          )}
+          className={
+            detachComposerDetails
+              ? "col-span-2 justify-self-end @min-[640px]/composer-details:col-span-1"
+              : "contents"
+          }
         >
-          <CompactComposerControlsMenu
-            combinePlanMode={selectedProvider === "claudeAgent"}
-            interactionMode={interactionMode}
-            runtimeMode={compatibleRuntimeMode}
-            runtimeModeOptions={compatibleRuntimeModeOptions}
-            size={composerControlsCollapsed ? "xs" : "sm"}
-            hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
-            showInteractionModeToggle={
-              planModeUiEnabled &&
-              (selectedProvider === "claudeAgent" || hiddenRestingBlockIds.includes("mode"))
-            }
-            onToggleInteractionMode={toggleInteractionMode}
-            onRuntimeModeChange={handleRuntimeModeChange}
+          <ComposerUsageRing
+            provider={selectedProviderStatus}
+            connected={props.environmentUnavailable === null}
+            size={composerControlsCollapsed || detachComposerDetails ? "xs" : "sm"}
+            timestampFormat={settings.timestampFormat}
+            compact={composerControlsCollapsed}
           />
         </div>
-      </>
+      ) : null}
+    </>
+  );
+  const composerModeControls = (
+    <>
+      {restingBlockDefs.map((def, index) => {
+        const hidden = index >= restingBlockDefs.length - restingHiddenBlockCount;
+        return (
+          <div
+            key={def.id}
+            data-resting-block={def.id}
+            data-composer-block-icon-only={
+              index >= restingBlockDefs.length - iconOnlyBlockCount ? "true" : "false"
+            }
+            aria-hidden={hidden || undefined}
+            inert={hidden || undefined}
+            className={cn(
+              "flex w-max min-w-max shrink-0 items-center gap-1",
+              hidden && "pointer-events-none invisible absolute",
+              index >= restingBlockDefs.length - iconOnlyBlockCount &&
+                "[&_[data-composer-control-label]]:pointer-events-none [&_[data-composer-control-label]]:invisible [&_[data-composer-control-label]]:absolute [&_[data-composer-control-label]]:w-max [&_[data-composer-control-label]]:max-w-none [&_[data-composer-control-compact-icon]]:[visibility:inherit] [&_[data-composer-control-compact-icon]]:relative",
+            )}
+          >
+            {def.content}
+          </div>
+        );
+      })}
+      <div
+        data-resting-controls-overflow
+        aria-hidden={hiddenRestingBlockIds.length === 0 || undefined}
+        inert={hiddenRestingBlockIds.length === 0 || undefined}
+        className={cn(
+          "min-w-0 shrink-0",
+          hiddenRestingBlockIds.length === 0 && "pointer-events-none invisible absolute",
+        )}
+      >
+        <CompactComposerControlsMenu
+          combinePlanMode={selectedProvider === "claudeAgent"}
+          interactionMode={interactionMode}
+          runtimeMode={compatibleRuntimeMode}
+          runtimeModeOptions={compatibleRuntimeModeOptions}
+          size={composerControlsCollapsed ? "xs" : "sm"}
+          hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
+          showInteractionModeToggle={
+            planModeUiEnabled &&
+            (selectedProvider === "claudeAgent" || hiddenRestingBlockIds.includes("mode"))
+          }
+          onToggleInteractionMode={toggleInteractionMode}
+          onRuntimeModeChange={handleRuntimeModeChange}
+        />
+      </div>
+    </>
+  );
+  const composerControls = (
+    <>
+      {composerModelControls}
+      {composerModeControls}
     </>
   );
   const showTasksTab =
@@ -6835,14 +6857,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           setIsComposerFocused(true);
         });
         const shell = composerFormRef.current?.closest('[data-slot="composer-shell"]');
-        const trigger = Array.from(
-          shell?.querySelectorAll<HTMLButtonElement>(
-            `button[data-composer-shortcut~="${command}"]:not(:disabled)`,
-          ) ?? [],
-        ).find(
-          (element) =>
-            !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true }),
-        );
+        const trigger = [shell, detailsControlsHost]
+          .flatMap((scope) =>
+            Array.from(
+              scope?.querySelectorAll<HTMLButtonElement>(
+                `button[data-composer-shortcut~="${command}"]:not(:disabled)`,
+              ) ?? [],
+            ),
+          )
+          .find(
+            (element) =>
+              !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true }),
+          );
         if (!trigger) return;
         trigger.focus({ preventScroll: true });
         trigger.click();
@@ -6959,6 +6985,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activeThread,
       addComposerAttachments,
       foldPastedText,
+      detailsControlsHost,
       composerDraftTarget,
       composerCursor,
       activePendingProgress,
@@ -7042,7 +7069,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ) {
           onTypingGuardFocus();
         }
-        if (composerControlsCollapsed && isInsideRestingComposerControlScope(activeElement)) {
+        if (isInsideRestingComposerControlScope(activeElement)) {
           return;
         }
         if (isInsideCollapsedComposerControls(activeElement)) {
@@ -7094,6 +7121,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       data-chat-composer-form="true"
       {...threadContextDropTargetProps()}
     >
+      {detachComposerDetails && !isComposerApprovalState && !dictation.busy
+        ? createPortal(
+            <div
+              data-composer-details="true"
+              data-composer-context-control
+              className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-1 pt-2 text-xs text-muted-foreground @min-[640px]/composer-details:grid-cols-[minmax(0,1fr)_auto_auto]"
+            >
+              {!showProviderUnavailable && selectedProviderStatus ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span data-composer-provider-identity className="min-w-0 truncate" />}
+                  >
+                    {composerProviderIdentity(selectedProviderStatus)}
+                  </TooltipTrigger>
+                  <TooltipPopup>{composerProviderIdentity(selectedProviderStatus)}</TooltipPopup>
+                </Tooltip>
+              ) : null}
+              {composerModelControls}
+            </div>,
+            detailsControlsHost,
+          )
+        : null}
       {composerControlsCollapsed && restingControlsHost
         ? createPortal(
             <div
@@ -7923,7 +7972,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                   ? "Enable a provider in Settings to send a message"
                                   : phase === "disconnected"
                                     ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                    : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                    : "Ask a question or describe a task…"
                     }
                     disabled={
                       dictation.busy ||
@@ -8038,7 +8087,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isComposerResting && "hidden",
                   )}
                 >
-                  {composerControlsCollapsed ? null : composerControls}
+                  {composerControlsCollapsed
+                    ? null
+                    : detachComposerDetails
+                      ? composerModeControls
+                      : composerControls}
                 </div>
 
                 {/* Right side: send / stop button */}

@@ -1072,6 +1072,47 @@ export {
 export { pinOrderKeyBetween } from "@starkfuture/client-runtime/state/thread-sort";
 export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@starkfuture/client-runtime/state/thread-sort";
 
+/** Recent chats follow user sends, so streaming and settlement do not shuffle the list. */
+export function sortRecentSidebarChats<
+  T extends {
+    readonly environmentId: string;
+    readonly id: string;
+    readonly createdAt: string;
+    readonly latestUserMessageAt: string | null;
+    readonly latestUserAuthoredMessageAt?: string | null;
+  },
+>(threads: readonly T[]): T[] {
+  return threads
+    .map((thread) => ({
+      thread,
+      timestamp: firstValidTimestampMs(
+        thread.latestUserAuthoredMessageAt,
+        thread.latestUserMessageAt,
+        thread.createdAt,
+      ),
+    }))
+    .sort(
+      (left, right) =>
+        right.timestamp - left.timestamp ||
+        left.thread.environmentId.localeCompare(right.thread.environmentId) ||
+        left.thread.id.localeCompare(right.thread.id),
+    )
+    .map(({ thread }) => thread);
+}
+
+/** A deep link stays visible without expanding the entire history. */
+export function selectVisibleSidebarChats<
+  T extends { readonly environmentId: EnvironmentId; readonly id: ThreadId },
+>(threads: readonly T[], limit: number, routeKey: string | null): readonly T[] {
+  if (threads.length <= limit) return threads;
+  const visible = threads.slice(0, limit);
+  const current =
+    routeKey === null
+      ? undefined
+      : threads.slice(limit).find((thread) => `${thread.environmentId}:${thread.id}` === routeKey);
+  return current ? [...visible, current] : visible;
+}
+
 const EMPTY_CONTENT_MATCH_KEYS: ReadonlySet<string> = new Set<string>();
 
 /**

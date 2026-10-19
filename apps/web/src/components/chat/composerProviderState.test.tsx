@@ -12,6 +12,7 @@ import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
+  summarizeProviderTraits,
   withImplicitFastModeDefault,
 } from "./composerProviderState";
 
@@ -464,6 +465,17 @@ describe("trait controls fastMode display", () => {
     const descriptors = getProviderOptionDescriptors({ caps, selections: resolved });
     const fastMode = descriptors.find((descriptor) => descriptor.id === "fastMode");
 
+    expect(
+      summarizeProviderTraits({
+        provider,
+        model: MODEL,
+        models,
+        prompt: "",
+        onPromptChange: () => {},
+        modelOptions: undefined,
+        planModeEnabled: true,
+      }),
+    ).toBe("Normal");
     expect(fastMode?.type).toBe("boolean");
     if (fastMode?.type === "boolean") {
       expect(fastMode.currentValue).toBe(false);

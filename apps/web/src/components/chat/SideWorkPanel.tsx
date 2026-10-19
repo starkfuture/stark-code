@@ -9,7 +9,7 @@ import {
   type ThreadId,
 } from "@starkfuture/contracts";
 import { htmlRenderFromToolItem } from "@starkfuture/shared/toolOutput";
-import { ArrowUpRightIcon, SquareIcon, XIcon } from "lucide-react";
+import { ArrowUpRightIcon, BookmarkIcon, SquareIcon, XIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { newMessageId, newThreadId } from "../../lib/utils";
@@ -27,6 +27,8 @@ import { Textarea } from "../ui/textarea";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
+import { useTurnBookmarks } from "./useTurnBookmarks";
+import { useThreadTurnIndex } from "./useThreadTurnIndex";
 import {
   groupWorkspaceThreads,
   readSideWorkRecords,
@@ -38,7 +40,7 @@ import {
   type SideWorkRecord,
 } from "./sideWork.logic";
 
-type SideWorkTab = SideWorkKind | "agents";
+type SideWorkTab = SideWorkKind | "bookmarks" | "agents";
 
 export function SideWorkButton(props: { open: boolean; onToggle: () => void }) {
   return (
@@ -55,6 +57,7 @@ export function SideWorkPanel(props: {
   workspaceRoot: string;
   nativeShellMode: boolean;
   onOpenThread: (threadId: ThreadId) => void;
+  onOpenTurn?: (entryId: string) => void;
   onClose: () => void;
   showHeader?: boolean;
 }) {
@@ -217,6 +220,7 @@ export function SideWorkPanel(props: {
           [
             ["question", "Side chat"],
             ["format", "Reader"],
+            ["bookmarks", "Bookmarks"],
             ["agents", "Agents"],
           ] as const
         ).map(([value, label]) => (
@@ -270,6 +274,8 @@ export function SideWorkPanel(props: {
             }
           />
         </>
+      ) : tab === "bookmarks" ? (
+        <BookmarkedTurns parent={parent} onOpenTurn={props.onOpenTurn} />
       ) : tab === "agents" ? (
         <div className="min-h-0 flex-1 overflow-auto p-3">
           <p className="mb-3 text-xs text-muted-foreground">
@@ -490,6 +496,99 @@ export function SideWorkPanel(props: {
         </p>
       ) : null}
     </aside>
+  );
+}
+
+function BookmarkedTurns({
+  parent,
+  onOpenTurn,
+}: {
+  parent: EnvironmentThreadShell;
+  onOpenTurn?: ((entryId: string) => void) | undefined;
+}) {
+  const ref = scopeThreadRef(parent.environmentId, parent.id);
+  const { bookmarks, toggleBookmark } = useTurnBookmarks(scopedThreadKey(ref));
+  const index = useThreadTurnIndex(ref, bookmarks.size > 0);
+  const [visibleCount, setVisibleCount] = useState(100);
+  const saved = index.items.filter((item) => bookmarks.has(item.entryId));
+  const missing = index.complete
+    ? [...bookmarks].filter((entryId) => !index.items.some((item) => item.entryId === entryId))
+    : [];
+  return (
+    <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+      <p className="text-xs text-muted-foreground">
+        Saved chat turns, kept on this device. Open a turn to return to it in Chat.
+      </p>
+      {index.error ? (
+        <div role="status" className="text-sm text-muted-foreground">
+          {index.error}{" "}
+          <Button size="xs" variant="outline" onClick={index.retry}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+      {index.loading ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          Loading saved turns…
+        </p>
+      ) : null}
+      {bookmarks.size === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No bookmarks yet. Open Turns beside the conversation and select the bookmark beside a turn
+          to save it here.
+        </p>
+      ) : null}
+      <ol className="space-y-1" aria-label="Bookmarked turns">
+        {saved.slice(0, visibleCount).map((item) => (
+          <li key={item.entryId} className="flex min-w-0 items-start gap-1">
+            <div className="min-w-0 flex-1">
+              <Button
+                variant="ghost"
+                size="sm-multiline"
+                className="w-full justify-start"
+                disabled={!onOpenTurn}
+                onClick={() => onOpenTurn?.(item.entryId)}
+              >
+                <span className="block min-w-0 flex-1 py-1 text-left">
+                  <span className="line-clamp-2 break-words">{item.userText || "Saved turn"}</span>
+                  {item.assistantText ? (
+                    <span className="mt-1 line-clamp-3 break-words text-xs font-normal text-muted-foreground">
+                      {item.assistantText}
+                    </span>
+                  ) : null}
+                </span>
+              </Button>
+            </div>
+            <Button
+              size="icon-xs"
+              variant="ghost-muted"
+              aria-label={`Remove bookmark from ${item.userText || "saved turn"}`}
+              onClick={() => toggleBookmark(item.entryId)}
+            >
+              <BookmarkIcon aria-hidden="true" fill="currentColor" />
+            </Button>
+          </li>
+        ))}
+        {missing.map((entryId) => (
+          <li key={entryId} className="flex items-center justify-between gap-2 py-2">
+            <span className="text-xs text-muted-foreground">This saved turn is unavailable.</span>
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              aria-label="Remove unavailable bookmark"
+              onClick={() => toggleBookmark(entryId)}
+            >
+              Remove
+            </Button>
+          </li>
+        ))}
+      </ol>
+      {saved.length > visibleCount ? (
+        <Button size="xs" variant="outline" onClick={() => setVisibleCount((count) => count + 100)}>
+          Show more ({saved.length - visibleCount})
+        </Button>
+      ) : null}
+    </div>
   );
 }
 

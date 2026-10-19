@@ -566,6 +566,23 @@ export function buildTraitsTriggerDisplay(input: {
   return { label: labels.join(" · ") };
 }
 
+/** The same descriptor labels appear in the model trigger and the options menu. */
+export function traitsSummary(input: TraitsMenuContentProps): string {
+  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
+    getTraitsSectionVisibility({ ...input, modelOptions: input.modelOptions });
+  return buildTraitsTriggerDisplay({
+    provider: input.provider,
+    descriptors,
+    primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
+    ultrathinkPromptControlled,
+    modelSelection:
+      input.instanceId && input.model
+        ? { instanceId: input.instanceId, model: input.model, options: input.modelOptions ?? [] }
+        : null,
+    reportedModelSelection: input.reportedModelSelection,
+  }).label;
+}
+
 export const TraitsPicker = memo(function TraitsPicker({
   provider,
   instanceId,

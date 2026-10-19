@@ -184,6 +184,11 @@ vi.mock("../state/entities", () => {
     useThread: () => null,
   };
 });
+vi.mock("../state/environments", () => ({ usePrimaryEnvironmentId: () => null }));
+vi.mock("../sidebarProjectGrouping", () => ({
+  buildSidebarProjectSnapshots: () => [],
+  resolveSidebarProjectScopeKey: () => null,
+}));
 vi.mock("../state/server", () => ({
   environmentServerConfigsAtom: {},
   primaryServerSettingsAtom: "primary-settings",

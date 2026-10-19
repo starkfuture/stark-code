@@ -1,5 +1,12 @@
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
-import { Fragment, type ReactNode } from "react";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  FileTextIcon,
+  LayoutGridIcon,
+  MessageCircleIcon,
+  TerminalIcon,
+} from "lucide-react";
+import { Fragment } from "react";
 
 import { Button } from "../ui/button";
 import {
@@ -9,28 +16,67 @@ import {
   MenuItem,
   MenuPopup,
   MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
 
 export interface WorkspaceToolsMenuAction {
   id: string;
   label: string;
-  description?: string;
+  description?: string | undefined;
   disabled?: boolean;
   active?: boolean;
   onSelect: () => void;
 }
 
 export interface WorkspaceToolsMenuProps {
-  groups: readonly {
+  actions: readonly WorkspaceToolsMenuAction[];
+  moreGroups: readonly {
     label: string;
     actions: readonly WorkspaceToolsMenuAction[];
   }[];
-  connections?: ReactNode;
 }
 
-export function WorkspaceToolsMenu({ groups, connections }: WorkspaceToolsMenuProps) {
-  const visibleGroups = groups.filter((group) => group.actions.length > 0);
+function ToolItem({
+  action,
+  compact = false,
+}: {
+  action: WorkspaceToolsMenuAction;
+  compact?: boolean;
+}) {
+  const Icon =
+    action.id === "pages"
+      ? FileTextIcon
+      : action.id === "conversation"
+        ? MessageCircleIcon
+        : action.id === "terminal"
+          ? TerminalIcon
+          : null;
+  return (
+    <MenuItem
+      aria-label={action.label}
+      aria-current={action.active ? "true" : undefined}
+      disabled={action.disabled}
+      closeOnClick
+      onClick={action.onSelect}
+    >
+      {Icon ? <Icon aria-hidden /> : null}
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
+        <span>{action.label}</span>
+        {action.description && (!compact || action.disabled) ? (
+          <span className="text-xs leading-snug text-muted-foreground">{action.description}</span>
+        ) : null}
+      </span>
+      {action.active ? <CheckIcon aria-hidden /> : null}
+    </MenuItem>
+  );
+}
+
+/** Everyday tools stay one click away; less common tools are revealed on request. */
+export function WorkspaceToolsMenu({ actions, moreGroups }: WorkspaceToolsMenuProps) {
+  const visibleGroups = moreGroups.filter((group) => group.actions.length > 0);
 
   return (
     <Menu>
@@ -39,42 +85,34 @@ export function WorkspaceToolsMenu({ groups, connections }: WorkspaceToolsMenuPr
         <ChevronDownIcon aria-hidden />
       </MenuTrigger>
       <MenuPopup align="end" positionMethod="fixed">
-        <div className="w-80 max-w-[calc(100vw-3rem)]">
-          {visibleGroups.map((group, index) => (
-            <Fragment key={group.label}>
-              {index > 0 ? <MenuSeparator /> : null}
-              <MenuGroup>
-                <MenuGroupLabel>{group.label}</MenuGroupLabel>
-                {group.actions.map((action) => (
-                  <MenuItem
-                    key={action.id}
-                    aria-label={action.label}
-                    aria-current={action.active ? "true" : undefined}
-                    disabled={action.disabled}
-                    closeOnClick
-                    onClick={action.onSelect}
-                  >
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
-                      <span>{action.label}</span>
-                      {action.description ? (
-                        <span className="text-xs leading-snug text-muted-foreground">
-                          {action.description}
-                        </span>
-                      ) : null}
-                    </span>
-                    {action.active ? <CheckIcon aria-hidden /> : null}
-                  </MenuItem>
-                ))}
-              </MenuGroup>
-            </Fragment>
+        <div className="w-56 max-w-[calc(100vw-3rem)]">
+          {actions.map((action) => (
+            <ToolItem key={action.id} action={action} compact />
           ))}
-          {connections ? (
+          {visibleGroups.length > 0 ? (
             <>
-              {visibleGroups.length > 0 ? <MenuSeparator /> : null}
-              <MenuGroup>
-                <MenuGroupLabel>Connections</MenuGroupLabel>
-                <div className="px-2 py-1">{connections}</div>
-              </MenuGroup>
+              <MenuSeparator />
+              <MenuSub>
+                <MenuSubTrigger aria-label="More tools">
+                  <LayoutGridIcon aria-hidden />
+                  More tools
+                </MenuSubTrigger>
+                <MenuSubPopup>
+                  <div className="w-64 max-w-[calc(100vw-3rem)]">
+                    {visibleGroups.map((group, index) => (
+                      <Fragment key={group.label}>
+                        {index > 0 ? <MenuSeparator /> : null}
+                        <MenuGroup>
+                          <MenuGroupLabel>{group.label}</MenuGroupLabel>
+                          {group.actions.map((action) => (
+                            <ToolItem key={action.id} action={action} />
+                          ))}
+                        </MenuGroup>
+                      </Fragment>
+                    ))}
+                  </div>
+                </MenuSubPopup>
+              </MenuSub>
             </>
           ) : null}
         </div>

@@ -7,7 +7,11 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerControl, type ComposerControlSize } from "./ComposerControl";
 import { composerFloatingLayerProps } from "./composerEventScope";
-import { formatComposerUsagePercent, selectComposerUsage } from "./ComposerUsageRing.logic";
+import {
+  formatComposerUsagePercent,
+  formatComposerUsageSummary,
+  selectComposerUsage,
+} from "./ComposerUsageRing.logic";
 
 const weekdayFormatter = new Intl.DateTimeFormat(undefined, { weekday: "short" });
 
@@ -16,11 +20,13 @@ export function ComposerUsageRing({
   connected,
   size = "sm",
   timestampFormat = "locale",
+  compact = false,
 }: {
   provider: ServerProvider | null;
   connected: boolean;
   size?: ComposerControlSize;
   timestampFormat?: TimestampFormat;
+  compact?: boolean;
 }) {
   const nowMinute = useNowMinute();
   const usage = selectComposerUsage(provider, connected, Date.parse(`${nowMinute}:00Z`));
@@ -94,6 +100,7 @@ export function ComposerUsageRing({
                 <ComposerControl
                   size={size}
                   data-composer-usage-ring="true"
+                  className="min-w-0 max-w-full"
                   aria-label={`${title}. Selected profile: ${usage.profile}`}
                 />
               }
@@ -130,6 +137,14 @@ export function ComposerUsageRing({
               </span>
             ) : null}
           </span>
+          {!compact ? (
+            <span
+              className="min-w-0 whitespace-normal text-start text-xs tabular-nums"
+              data-composer-usage-summary
+            >
+              {formatComposerUsageSummary(usage)}
+            </span>
+          ) : null}
         </TooltipTrigger>
         <TooltipPopup {...composerFloatingLayerProps} side="top" align="end">
           {details}

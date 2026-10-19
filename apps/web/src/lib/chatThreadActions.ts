@@ -31,6 +31,8 @@ interface NewThreadHandler {
 }
 
 export interface ChatThreadActionContext {
+  /** An explicit folder selection takes precedence over the open conversation. */
+  readonly selectedProjectRef?: ScopedProjectRef | null;
   readonly activeDraftThread: ThreadContextLike | null;
   readonly activeThread: ThreadContextLike | undefined;
   readonly defaultProjectRef: ScopedProjectRef | null;
@@ -71,6 +73,7 @@ export function hasExplicitComposerModelSelection(
 export function resolveThreadActionProjectRef(
   context: ChatThreadActionContext,
 ): ScopedProjectRef | null {
+  if (context.selectedProjectRef) return context.selectedProjectRef;
   if (context.activeThread) {
     return scopeProjectRef(context.activeThread.environmentId, context.activeThread.projectId);
   }

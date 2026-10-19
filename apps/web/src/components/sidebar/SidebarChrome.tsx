@@ -1,5 +1,9 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import {
+  ArrowLeftIcon,
+  ChartNoAxesColumnIcon,
+  MoreHorizontalIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 
@@ -30,7 +34,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
@@ -121,7 +125,7 @@ export function SidebarBrandWidthProbe({
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     <Link
-      aria-label="Go to threads"
+      aria-label="Go to chats"
       className={cn(
         "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
         onBackdrop ? "text-white" : "text-foreground",
@@ -148,31 +152,6 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
         Code
       </span>
     </span>
-  );
-}
-
-function SidebarUtilityItem({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <SidebarMenuItem className="shrink-0">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
-              {icon}
-            </SidebarMenuButton>
-          }
-        />
-        <TooltipPopup side="top">{label}</TooltipPopup>
-      </Tooltip>
-    </SidebarMenuItem>
   );
 }
 
@@ -224,23 +203,31 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         </SidebarMenuItem>
       ) : (
         <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
-          {pullRequestsSupported ? (
-            <SidebarUtilityItem
-              icon={<PullRequestGlyph.pullRequest />}
-              label="Pull Requests"
-              onClick={handlePullRequestsClick}
-            />
-          ) : null}
-          <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
-            onClick={handleUsageClick}
-          />
+          <SidebarMenuItem className="min-w-0 flex-1">
+            <SidebarMenuButton aria-label="Settings" onClick={handleSettingsClick}>
+              <SettingsIcon />
+              <span>Settings</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem className="shrink-0">
+            <Menu>
+              <MenuTrigger render={<SidebarMenuButton size="icon" aria-label="More app options" />}>
+                <MoreHorizontalIcon />
+              </MenuTrigger>
+              <MenuPopup side="top" align="end">
+                {pullRequestsSupported ? (
+                  <MenuItem onClick={handlePullRequestsClick}>
+                    <PullRequestGlyph.pullRequest />
+                    Pull requests
+                  </MenuItem>
+                ) : null}
+                <MenuItem onClick={handleUsageClick}>
+                  <ChartNoAxesColumnIcon />
+                  Usage
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          </SidebarMenuItem>
         </>
       )}
       <SidebarUpdatePill />
@@ -275,6 +262,7 @@ function SidebarClaudeOrganizations() {
     <ClaudeOrganizationSwitcher
       environmentId={environment.environmentId}
       environmentLabel={environment.label}
+      isConnected={environment.connection.phase === "connected"}
       onManage={() => {
         if (isMobile) setOpenMobile(false);
         void navigate({

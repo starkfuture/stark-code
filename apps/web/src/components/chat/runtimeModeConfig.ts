@@ -46,6 +46,8 @@ export function runtimeModeOptionsForProvider(driver: string): RuntimeModeOption
       : (["approval-required"] as RuntimeMode[]);
   return modes.map((mode) => {
     const option = { mode, ...runtimeModeConfig[mode] };
+    if (driver === "codex" && mode === "approval-required")
+      return { ...option, label: "Ask before changes" };
     if (driver !== "claudeAgent") return option;
     if (mode === "approval-required") return { ...option, label: "Manual" };
     if (mode === "auto")

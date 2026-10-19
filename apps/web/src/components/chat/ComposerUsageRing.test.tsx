@@ -77,6 +77,7 @@ afterEach(async () => {
 });
 it("shows usage on keyboard focus and click, without making requests or exposing the email", async () => {
   await render();
+  expect(trigger().textContent).toContain("Session 12% · Weekly 67%");
   expect(trigger().getAttribute("aria-label")).toContain("Session · all models: 12% used");
   expect(trigger().getAttribute("aria-label")).toContain("Weekly · all models: 67% used");
   await act(() => trigger().focus());
@@ -188,6 +189,7 @@ it("shows a missing Codex session beside reported zero weekly usage", async () =
       windows: [{ id: "secondary", label: "Weekly", kind: "weekly", usedPercent: 0 }],
     },
   });
+  expect(trigger().textContent).toContain("Session — · Weekly 0%");
   await act(() => trigger().click());
   const popup = document.querySelector('[data-slot="popover-popup"]');
   expect(popup?.textContent).toContain("Session");
@@ -217,6 +219,7 @@ it("includes Codex monthly allowance without inventing session or weekly percent
 it("keeps unknown usage distinct from reported zero and full allowance use", async () => {
   await render({ ...claude, usageLimits: undefined });
   expect(trigger().getAttribute("aria-label")).toContain("unavailable");
+  expect(trigger().textContent).toContain("Session — · Weekly —");
   await act(() => trigger().click());
   expect(document.body.textContent).toContain("Usage has not been reported yet.");
   for (const usedPercent of [0, 100]) {
@@ -243,4 +246,19 @@ it("turns a stale or disconnected ring neutral and hides it for unsupported prov
   await render({ ...claude, driver: ProviderDriverKind.make("cursor") });
   expect(container.querySelector("button")).toBeNull();
   expect(document.querySelector('[data-slot="popover-popup"]')).toBeNull();
+});
+
+it("retains complete labelled usage in compact mode", async () => {
+  await act(() =>
+    root.render(
+      <TooltipProvider delay={0}>
+        <ComposerUsageRing provider={claude} connected compact size="xs" />
+      </TooltipProvider>,
+    ),
+  );
+  expect(trigger().querySelector("[data-composer-usage-summary]")).toBeNull();
+  await act(() => trigger().click());
+  const popup = document.querySelector('[data-slot="popover-popup"]');
+  expect(popup?.textContent).toContain("Session · all models: 12% used");
+  expect(popup?.textContent).toContain("Weekly · all models: 67% used");
 });

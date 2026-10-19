@@ -8,7 +8,8 @@ import { WorkspaceToolsMenu } from "./WorkspaceToolsMenu";
 let root: Root;
 let container: HTMLDivElement;
 const showPages = vi.fn();
-const showFiles = vi.fn();
+const showConversation = vi.fn();
+const showAdvanced = vi.fn();
 const showTerminal = vi.fn();
 
 const trigger = () => container.querySelector<HTMLButtonElement>('button[aria-label="Tools"]')!;
@@ -22,34 +23,23 @@ const render = () =>
   act(() =>
     root.render(
       <WorkspaceToolsMenu
-        groups={[
+        actions={[
+          { id: "pages", label: "Pages", active: true, onSelect: showPages },
+          { id: "conversation", label: "Conversation tools", onSelect: showConversation },
           {
-            label: "Read and explore",
-            actions: [
-              {
-                id: "pages",
-                label: "Pages",
-                description: "Read company and folder pages",
-                active: true,
-                onSelect: showPages,
-              },
-            ],
-          },
-          {
-            label: "Workspace",
-            actions: [
-              { id: "files", label: "Files", onSelect: showFiles },
-              {
-                id: "terminal",
-                label: "Terminal",
-                description: "Unavailable while reconnecting",
-                disabled: true,
-                onSelect: showTerminal,
-              },
-            ],
+            id: "terminal",
+            label: "Terminal",
+            description: "Unavailable while reconnecting",
+            disabled: true,
+            onSelect: showTerminal,
           },
         ]}
-        connections={<button>Manage connections</button>}
+        moreGroups={[
+          {
+            label: "Advanced",
+            actions: [{ id: "native", label: "Open Codex CLI", onSelect: showAdvanced }],
+          },
+        ]}
       />,
     ),
   );
@@ -72,18 +62,23 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("opens tools from different groups and closes after a selection", async () => {
+it("keeps everyday tools visible and reveals advanced tools only on request", async () => {
   await render();
   await open();
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain("Read and explore");
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain("Manage connections");
-  await act(() => item("Files").click());
-  expect(showFiles).toHaveBeenCalledOnce();
+  expect(
+    Array.from(document.querySelectorAll('[role="menuitem"]')).map((element) =>
+      element.getAttribute("aria-label"),
+    ),
+  ).toEqual(["Pages", "Conversation tools", "Terminal", "More tools"]);
+  expect(document.querySelector('[aria-label="Open Codex CLI"]')).toBeNull();
+  await act(() => item("More tools").click());
+  await act(() => item("Open Codex CLI").click());
+  expect(showAdvanced).toHaveBeenCalledOnce();
   expect(showPages).not.toHaveBeenCalled();
   expect(trigger().getAttribute("aria-expanded")).toBe("false");
   await open();
-  await act(() => item("Pages").click());
-  expect(showPages).toHaveBeenCalledOnce();
+  await act(() => item("Conversation tools").click());
+  expect(showConversation).toHaveBeenCalledOnce();
   expect(trigger().getAttribute("aria-expanded")).toBe("false");
 });
 
@@ -93,7 +88,7 @@ it("keeps unavailable tools visible without selecting them", async () => {
   expect(item("Terminal").textContent).toContain("Unavailable while reconnecting");
   await act(() => item("Terminal").click());
   expect(showTerminal).not.toHaveBeenCalled();
-  expect(showFiles).not.toHaveBeenCalled();
+  expect(showConversation).not.toHaveBeenCalled();
   expect(showPages).not.toHaveBeenCalled();
 });
 
@@ -107,5 +102,5 @@ it("dismisses with Escape and returns keyboard focus to Tools", async () => {
   expect(trigger().getAttribute("aria-expanded")).toBe("false");
   expect(document.activeElement).toBe(trigger());
   expect(showPages).not.toHaveBeenCalled();
-  expect(showFiles).not.toHaveBeenCalled();
+  expect(showConversation).not.toHaveBeenCalled();
 });

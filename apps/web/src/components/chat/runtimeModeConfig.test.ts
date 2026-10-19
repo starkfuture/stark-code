@@ -15,6 +15,7 @@ describe("Claude's composer modes", () => {
       "Plan",
       "Bypass permissions",
     ]);
+    expect(runtimeModeOptionsForProvider("codex")[0]?.label).toBe("Ask before changes");
     expect(runtimeModeOptionsForProvider("codex").map(({ mode }) => mode)).toEqual([
       "approval-required",
     ]);

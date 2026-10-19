@@ -93,3 +93,23 @@ export function selectComposerUsage(
 export function formatComposerUsagePercent(percent: number): string {
   return `${Number(percent.toFixed(1))}%`;
 }
+
+/** A missing window is unknown, never an implicit zero or a full allowance. */
+export function formatComposerUsageSummary(
+  usage: NonNullable<ReturnType<typeof selectComposerUsage>>,
+): string {
+  const windows =
+    usage.windows.length > 0
+      ? usage.windows
+      : [
+          { id: "session", window: null },
+          { id: "weekly", window: null },
+        ];
+  return windows
+    .map((entry) => {
+      const label =
+        entry.id === "weekly" ? "Weekly" : entry.id === "monthly" ? "Monthly" : "Session";
+      return `${label} ${entry.window ? formatComposerUsagePercent(entry.window.usedPercent) : "—"}`;
+    })
+    .join(" · ");
+}

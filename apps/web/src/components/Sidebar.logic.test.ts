@@ -50,6 +50,8 @@ import {
   resolveSidebarDropTarget,
   planSidebarThreadDrop,
   sortPinnedThreadsForSidebar,
+  sortRecentSidebarChats,
+  selectVisibleSidebarChats,
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
   sortSidebarV2ProjectGroups,
@@ -2342,5 +2344,58 @@ describe("Working shelf (beta)", () => {
         unsnooze: false,
       });
     });
+  });
+});
+
+describe("one recent chats list", () => {
+  const chat = (id: string, sentAt: string, fields = {}) => ({
+    environmentId: localEnvironmentId,
+    id: ThreadId.make(id),
+    createdAt: "2026-10-01T10:00:00.000Z",
+    latestUserMessageAt: sentAt,
+    ...fields,
+  });
+
+  it("keeps settled and snoozed history visible and sorts by user sends rather than background activity", () => {
+    const chats = [
+      chat("active", "2026-10-18T10:00:00.000Z", { updatedAt: "2026-10-19T20:00:00.000Z" }),
+      chat("settled", "2026-10-19T10:00:00.000Z", { settledOverride: "settled" }),
+      chat("snoozed", "2026-10-19T11:00:00.000Z", { snoozedUntil: "2026-10-20T10:00:00.000Z" }),
+    ];
+    expect(sortRecentSidebarChats(chats).map((thread) => thread.id)).toEqual([
+      "snoozed",
+      "settled",
+      "active",
+    ]);
+    expect(chats.map((thread) => thread.id)).toEqual(["active", "settled", "snoozed"]);
+  });
+
+  it("uses the real user send over a generated message and falls back from invalid dates", () => {
+    const chats = [
+      chat("generated", "2026-10-19T12:00:00.000Z", {
+        latestUserAuthoredMessageAt: "2026-10-18T10:00:00.000Z",
+      }),
+      chat("recent", "2026-10-19T10:00:00.000Z", { latestUserAuthoredMessageAt: "invalid" }),
+      chat("new", "invalid", { createdAt: "2026-10-19T11:00:00.000Z" }),
+    ];
+    expect(sortRecentSidebarChats(chats).map((thread) => thread.id)).toEqual([
+      "new",
+      "recent",
+      "generated",
+    ]);
+  });
+
+  it("includes a deep-linked chat past the page boundary without duplicating visible chats", () => {
+    const chats = ["first", "second", "third"].map((id) => chat(id, "2026-10-19T10:00:00.000Z"));
+    expect(
+      selectVisibleSidebarChats(chats, 1, `${localEnvironmentId}:third`).map((thread) => thread.id),
+    ).toEqual(["first", "third"]);
+    expect(
+      selectVisibleSidebarChats(chats, 1, `${localEnvironmentId}:first`).map((thread) => thread.id),
+    ).toEqual(["first"]);
+    expect(
+      selectVisibleSidebarChats(chats, 1, "other-environment:third").map((thread) => thread.id),
+    ).toEqual(["first"]);
+    expect(selectVisibleSidebarChats(chats, 50, null)).toEqual(chats);
   });
 });

@@ -1,16 +1,12 @@
-/**
- * The sidebar header: one row holding search, project scope and new thread.
- *
- * Search owns the row's text and spans it. Project scope collapses to an icon
- * that sits with new-project and new-thread as a segmented group at the end.
- * The scope icon swaps to the project favicon while a project is selected,
- * so the header still names the scope after the row that showed it is gone.
- *
- * The scope picker itself is passed in: its combobox state lives with the rest
- * of the sidebar's scope logic. `searchFieldRef` lands on the search field so
- * the picker's popup can anchor to that width rather than to its 28px trigger.
- */
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+/** Folder, new chat and search stay visible above one compact chat list. */
+import {
+  ArchiveIcon,
+  FolderPlusIcon,
+  ListFilterIcon,
+  SearchIcon,
+  SquarePenIcon,
+  XIcon,
+} from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -23,15 +19,26 @@ import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 
 export interface SidebarThreadHeaderProps {
   /** Lands on the search field so a popup can anchor to its width. */
   searchFieldRef?: RefObject<HTMLDivElement | null>;
   /** Without projects there is nothing to scope, so those controls stay out. */
   hasProjects: boolean;
-  /** The project scope combobox, rendered as the first icon of the group. */
+  /** The folder picker occupies its own labelled row. */
   projectScope: ReactNode;
   onNewProject: () => void;
+  groupByStatus: boolean;
+  onGroupByStatusChange: (grouped: boolean) => void;
+  onOpenArchive: () => void;
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
@@ -54,6 +61,9 @@ export function SidebarThreadHeader({
   hasProjects,
   projectScope,
   onNewProject,
+  groupByStatus,
+  onGroupByStatusChange,
+  onOpenArchive,
   onNewThread,
   newThreadDisabled,
   newThreadShortcutLabel,
@@ -74,11 +84,44 @@ export function SidebarThreadHeader({
   // screen reader on nothing.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
   const newThreadLabel = newThreadShortcutLabel
-    ? `New thread (${newThreadShortcutLabel})`
-    : "New thread";
+    ? `New chat (${newThreadShortcutLabel})`
+    : "New chat";
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex min-w-0 flex-col gap-1">
+      {hasProjects ? (
+        projectScope
+      ) : (
+        <SidebarMenuButton onClick={onNewProject}>
+          <FolderPlusIcon />
+          <span>Open folder</span>
+        </SidebarMenuButton>
+      )}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <SidebarMenuButton
+              aria-label="New chat"
+              disabled={newThreadDisabled}
+              onClick={onNewThread}
+            />
+          }
+        >
+          <SquarePenIcon />
+          <span>New chat</span>
+        </TooltipTrigger>
+        <TooltipPopup side="right">
+          <span className="flex flex-col gap-0.5">
+            <span>{newThreadLabel}</span>
+            {showNewThreadInProjectHint ? (
+              <span className="text-muted-foreground">
+                New chat in current folder: Shift+click
+                {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
+              </span>
+            ) : null}
+          </span>
+        </TooltipPopup>
+      </Tooltip>
       <div
         ref={searchFieldRef}
         className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
@@ -91,8 +134,8 @@ export function SidebarThreadHeader({
           value={searchQuery}
           onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
           onKeyDown={onSearchKeyDown}
-          placeholder="Search"
-          aria-label="Search threads"
+          placeholder="Search chats"
+          aria-label="Search chats"
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={resultsVisible}
@@ -110,7 +153,7 @@ export function SidebarThreadHeader({
             size="icon-micro"
             variant="ghost-muted"
             className="shrink-0"
-            aria-label="Clear thread search"
+            aria-label="Clear chat search"
             onClick={() => {
               onClearSearch();
               searchInputRef.current?.focus();
@@ -120,38 +163,23 @@ export function SidebarThreadHeader({
           </Button>
         ) : null}
       </div>
-      {/* Unfilled like the search field beside it: the buttons carry their own
-          hover states, and a background well reads far louder on themed
-          palettes than on the base light and dark ones. */}
-      <div className="flex shrink-0 items-center">
-        {hasProjects ? (
-          <>
-            {projectScope}
-            <SidebarHeaderIconButton label="Add project" onClick={onNewProject}>
-              <FolderPlusIcon />
-            </SidebarHeaderIconButton>
-          </>
-        ) : null}
-        <SidebarHeaderIconButton
-          label="New thread"
-          tooltip={
-            showNewThreadInProjectHint ? (
-              <span className="flex flex-col gap-0.5">
-                <span>{newThreadLabel}</span>
-                <span className="text-muted-foreground">
-                  New thread in current project: Shift+click
-                  {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
-                </span>
-              </span>
-            ) : (
-              newThreadLabel
-            )
-          }
-          disabled={newThreadDisabled}
-          onClick={onNewThread}
-        >
-          <SquarePenIcon />
-        </SidebarHeaderIconButton>
+      <div className="flex items-center justify-between px-2 pt-2 text-xs text-sidebar-muted-foreground">
+        <span>Chats</span>
+        <Menu>
+          <MenuTrigger render={<SidebarHeaderIconButton label="Chat list options" />}>
+            <ListFilterIcon />
+          </MenuTrigger>
+          <MenuPopup align="start">
+            <MenuCheckboxItem checked={groupByStatus} onCheckedChange={onGroupByStatusChange}>
+              Group by status
+            </MenuCheckboxItem>
+            <MenuSeparator />
+            <MenuItem onClick={onOpenArchive}>
+              <ArchiveIcon />
+              Archived chats
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
       </div>
     </div>
   );

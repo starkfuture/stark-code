@@ -71,8 +71,10 @@ import {
   EyeIcon,
   FolderIcon,
   GitBranchIcon,
-  ListFilterIcon,
+  ChevronDownIcon,
+  FolderPlusIcon,
   MessageCircleQuestionIcon,
+  MoreHorizontalIcon,
   PinIcon,
   PinOffIcon,
   PlusIcon,
@@ -214,6 +216,8 @@ import {
   sidebarMarkerId,
   sidebarThreadKeyAtY,
   sortInboxThreadsByReturn,
+  sortRecentSidebarChats,
+  selectVisibleSidebarChats,
   sortPinnedThreadsForSidebar,
   sortSidebarV2ProjectGroups,
   sortThreadsForSidebar,
@@ -270,9 +274,9 @@ import {
   ComboboxTrigger,
   useComboboxFilter,
 } from "./ui/combobox";
-import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
+import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
-import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
@@ -298,6 +302,10 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "starkcode:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "starkcode:sidebar:snoozed-expanded";
 const WORKING_SHELF_EXPANDED_KEY = "starkcode:sidebar:working-expanded";
+// A separate presentation preference also gives existing installations the simpler list.
+const GROUP_CHATS_BY_STATUS_KEY = "starkcode:sidebar:group-chats-by-status";
+const RECENT_CHATS_PAGE_SIZE = 50;
+const FOLDER_SCOPE_INITIALIZED_KEY = "starkcode:sidebar:folder-scope-initialized";
 
 // Working beta: when this client saw each thread leave the Working shelf.
 // Module scope keeps the inbox order across routes that unmount the sidebar.
@@ -1033,6 +1041,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   variant: "card" | "slim";
   // Settled rows un-settle, snoozed rows wake, and cards settle.
   variantAction: SidebarSweepAction;
+  showChatActions?: boolean;
   // False on environments whose server predates thread.settle/unsettle:
   // the lifecycle affordances hide entirely rather than fail on click.
   settlementSupported: boolean;
@@ -1784,7 +1793,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <span
                   className={cn(
                     "inline-flex justify-end tabular-nums text-secondary-label transition-opacity",
-                    !isWoke && "group-any-hover/sidebar-row:opacity-0",
                   )}
                 >
                   {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
@@ -1827,7 +1835,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       onPointerDown={handleActionPointerDown}
                       className={cn(
                         "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
-                        isWoke && "group-any-hover/sidebar-row:static",
+                        "group-any-hover/sidebar-row:static focus-visible:static",
                       )}
                     >
                       <AlarmClockOffIcon className="mb-px size-3" />
@@ -1844,7 +1852,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                           onPointerDown={handleActionPointerDown}
                           className={cn(
                             "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
-                            isWoke && "group-any-hover/sidebar-row:static",
+                            "group-any-hover/sidebar-row:static focus-visible:static",
                           )}
                         />
                       }
@@ -1861,7 +1869,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     onPointerDown={handleActionPointerDown}
                     className={cn(
                       "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
-                      isWoke && "group-any-hover/sidebar-row:static",
+                      "group-any-hover/sidebar-row:static focus-visible:static",
                     )}
                   >
                     <CheckIcon className="size-3" />
@@ -1920,10 +1928,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             {pinIndicator}
             {terminalStatusIcon}
             {prBadge}
-            {/* The visible state owns this slot's width: status at rest,
-                  actions on hover/keyboard focus or while the popover is open. Keeping
-                  the hidden state out of flow lets the title reclaim
-                  space without either state overlapping it. */}
+            {/* Keep running, approval and error status visible during row interaction. */}
             {sortable?.isDragging ? (
               dragDestination
             ) : (
@@ -1933,16 +1938,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   props.sweepAction !== null && "hidden",
                 )}
               >
-                {/* Read-only status labels yield to the hover actions. Woke is
-                    itself an action, so it stays pointer-enabled and visible
-                    while the other controls appear beside it. */}
+                {/* Status remains visible while quick actions appear alongside it. */}
                 <span
                   className={cn(
-                    isWokeStatus
-                      ? "pointer-events-auto"
-                      : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0 group-any-hover/sidebar-row:opacity-0",
+                    isWokeStatus ? "pointer-events-auto" : "pointer-events-none",
                     "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
-                    snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
                   )}
                 >
                   {topStatus ? (
@@ -2032,6 +2032,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             )}
+            {props.showChatActions ? (
+              <span className="shrink-0 opacity-0 focus-within:opacity-100 group-any-hover/sidebar-row:opacity-100">
+                <Button
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  aria-label={`Actions for ${thread.title}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleContextMenu(event);
+                  }}
+                >
+                  <MoreHorizontalIcon className="size-3.5" />
+                </Button>
+              </span>
+            ) : null}
             {/* A sweep hides the slot rather than unmounting it, so the
                   pressed action button stays connected and a cancelled sweep's
                   release click still fires and is consumed. */}
@@ -2242,6 +2257,11 @@ export default function Sidebar() {
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
+  const [groupChatsByStatus, setGroupChatsByStatus] = useLocalStorage(
+    GROUP_CHATS_BY_STATUS_KEY,
+    false,
+    Schema.Boolean,
+  );
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
     settleThread,
@@ -2453,7 +2473,7 @@ export default function Sidebar() {
   // while the popup search filters the same collection.
   const projectScopeItems = useMemo(
     () => [
-      { value: "all", label: "All projects" },
+      { value: "all", label: "All folders" },
       ...projectGroups.map((project) => ({
         value: project.projectKey,
         label: project.displayName,
@@ -2539,6 +2559,41 @@ export default function Sidebar() {
     projectGroupingSettings,
     setProjectScopeKey,
   ]);
+  const [folderScopeInitialized, setFolderScopeInitialized] = useLocalStorage(
+    FOLDER_SCOPE_INITIALIZED_KEY,
+    false,
+    Schema.Boolean,
+  );
+  useEffect(() => {
+    if (
+      folderScopeInitialized ||
+      !allProjectSnapshotsReady ||
+      !allProjectConfigsReady ||
+      projectGroups.length === 0
+    )
+      return;
+    if (projectScopeKey === null) {
+      const active = newThreadContext.activeThread ?? newThreadContext.activeDraftThread;
+      const currentGroup = projectGroups.find((group) =>
+        group.memberProjectRefs.some(
+          (ref) =>
+            ref.environmentId === active?.environmentId && ref.projectId === active?.projectId,
+        ),
+      );
+      setProjectScopeKey((currentGroup ?? projectGroups[0]!).projectKey);
+    }
+    setFolderScopeInitialized(true);
+  }, [
+    folderScopeInitialized,
+    allProjectSnapshotsReady,
+    allProjectConfigsReady,
+    projectGroups,
+    projectScopeKey,
+    newThreadContext.activeThread,
+    newThreadContext.activeDraftThread,
+    setFolderScopeInitialized,
+    setProjectScopeKey,
+  ]);
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -2569,7 +2624,7 @@ export default function Sidebar() {
   // hidden now, and bulk actions must never count or touch invisible rows.
   useEffect(() => {
     clearSelection();
-  }, [clearSelection, projectScopeKey]);
+  }, [clearSelection, projectScopeKey, groupChatsByStatus]);
 
   const openProjectSettings = useCallback(
     (projectGroup: SidebarProjectSnapshot, projectRef?: ScopedProjectRef) => {
@@ -2590,7 +2645,7 @@ export default function Sidebar() {
     },
     [isMobile, projectGroupingSettings, projects, router, setOpenMobile],
   );
-  // Anchor for the scope popup: the header search field, not its icon trigger.
+  // Search field ref stays available for search focus and layout.
   const headerSearchRef = useRef<HTMLDivElement | null>(null);
   // Safari can send a click after Ctrl+click opens settings. Ignore that one
   // selection, then clear the guard when the picker opens again.
@@ -2769,6 +2824,32 @@ export default function Sidebar() {
     ],
     [activeThreads, pinnedThreads, settledThreads, snoozedThreads, workingThreads],
   );
+  const recentChats = useMemo(
+    () => [
+      ...pinnedThreads,
+      ...sortRecentSidebarChats([
+        ...activeThreads,
+        ...workingThreads,
+        ...snoozedThreads,
+        ...settledThreads,
+      ]),
+    ],
+    [activeThreads, pinnedThreads, settledThreads, snoozedThreads, workingThreads],
+  );
+  const [recentChatsPage, setRecentChatsPage] = useState({
+    scope: projectScopeKey,
+    count: RECENT_CHATS_PAGE_SIZE,
+  });
+  const recentChatsVisibleCount =
+    recentChatsPage.scope === projectScopeKey ? recentChatsPage.count : RECENT_CHATS_PAGE_SIZE;
+  if (recentChatsPage.scope !== projectScopeKey) {
+    setRecentChatsPage({ scope: projectScopeKey, count: RECENT_CHATS_PAGE_SIZE });
+  }
+  const visibleRecentChats = useMemo(
+    () => selectVisibleSidebarChats(recentChats, recentChatsVisibleCount, routeThreadKey),
+    [recentChats, recentChatsVisibleCount, routeThreadKey],
+  );
+  const hiddenRecentChatsCount = recentChats.length - visibleRecentChats.length;
   const searchEnvironmentIds = useConnectedEnvironmentIds();
   // useThreadSearch owns the debounce and the two-character floor.
   const threadSearch = useThreadSearch(searchEnvironmentIds, threadSearchQuery);
@@ -2780,11 +2861,11 @@ export default function Sidebar() {
   const threadSearchResults = useMemo(
     () =>
       searchSidebarThreads(
-        searchableThreads,
+        groupChatsByStatus ? searchableThreads : recentChats,
         threadSearchQuery,
         new Set(threadSearchMatchByKey.keys()),
       ),
-    [searchableThreads, threadSearchQuery, threadSearchMatchByKey],
+    [groupChatsByStatus, recentChats, searchableThreads, threadSearchQuery, threadSearchMatchByKey],
   );
   const threadSearchResultOrderKey = threadSearchResults
     .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
@@ -2920,14 +3001,19 @@ export default function Sidebar() {
   }, [routeThreadKey, workingShelfExpanded, workingThreads]);
 
   const orderedThreads = useMemo(
-    () => [
-      ...pinnedThreads,
-      ...activeThreads,
-      ...visibleWorkingThreads,
-      ...visibleSnoozedThreads,
-      ...renderedSettledThreads,
-    ],
+    () =>
+      groupChatsByStatus
+        ? [
+            ...pinnedThreads,
+            ...activeThreads,
+            ...visibleWorkingThreads,
+            ...visibleSnoozedThreads,
+            ...renderedSettledThreads,
+          ]
+        : visibleRecentChats,
     [
+      groupChatsByStatus,
+      visibleRecentChats,
       pinnedThreads,
       activeThreads,
       visibleWorkingThreads,
@@ -3662,6 +3748,12 @@ export default function Sidebar() {
     ) {
       return [];
     }
+    if (!groupChatsByStatus) {
+      return visibleRecentChats.map((thread) => {
+        const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+        return { kind: "thread", key, section: sectionByThreadKey.get(key) ?? "active" };
+      });
+    }
     const items: SidebarListItem[] = [{ kind: "marker", marker: "pinned-header" }];
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
     items.push(...pinnedRows);
@@ -3684,6 +3776,9 @@ export default function Sidebar() {
     return items;
   }, [
     activeThreads,
+    groupChatsByStatus,
+    visibleRecentChats,
+    sectionByThreadKey,
     pinnedThreads,
     renderedSettledThreads,
     settledThreads.length,
@@ -4816,6 +4911,14 @@ export default function Sidebar() {
   // for multi-project setups.
   const handleNewThreadClick = useCallback(
     (event?: ReactMouseEvent) => {
+      if (newThreadContext.selectedProjectRef) {
+        if (isMobile) setOpenMobile(false);
+        void startNewThreadFromContext({
+          ...newThreadContext,
+          activeThread: newThreadContext.activeThread ?? undefined,
+        });
+        return;
+      }
       // One project: nothing to pick, create immediately. Shift+click creates
       // directly in the current project even with several projects, skipping
       // the palette picker.
@@ -4835,17 +4938,13 @@ export default function Sidebar() {
     [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
   );
 
-  // The button mirrors chat.new: in multi-project setups both route through
-  // the command palette's "New thread in..." picker, and in single-project
-  // setups both create immediately. In multi-project setups the label is only
-  // the picker's shortcut: falling back to chat.newLocal would advertise the
-  // same shortcut for both the picker and direct create. In single-project
-  // setups both commands create directly, so chat.newLocal is a valid
-  // fallback. The second tooltip line (multi-project only) advertises
-  // shift+click and its keyboard twin chat.newLocal for direct create.
+  // New chat uses the selected folder. All folders retains the chooser;
+  // Shift+click in All folders uses the conversation's current folder.
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.new") ??
-    (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
+    (scopedProjectGroup || projectGroups.length <= 1
+      ? shortcutLabelForCommand(keybindings, "chat.newLocal")
+      : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
     <>
@@ -4885,39 +4984,23 @@ export default function Sidebar() {
                     setProjectScopeKey(item.value === "all" ? null : item.value);
                   }}
                 >
-                  <ComboboxTrigger
-                    render={
-                      <SidebarHeaderIconButton
-                        label={
-                          scopedProjectGroup
-                            ? `Filter threads by project: ${scopedProjectGroup.displayName}`
-                            : "Filter threads by project"
-                        }
-                      />
-                    }
-                  >
-                    {scopedProjectGroup ? (
-                      // Wrapped so the button's direct-child svg color rule cannot override
-                      // a project's own icon color.
-                      <span className="flex shrink-0">
-                        <ProjectFavicon project={scopedProjectGroup} className="size-4" />
-                      </span>
-                    ) : (
-                      <ListFilterIcon className="size-4" />
-                    )}
+                  <ComboboxTrigger render={<SidebarMenuButton aria-label="Choose folder" />}>
+                    <FolderIcon />
+                    <span className="min-w-0 flex-1 truncate">
+                      {scopedProjectGroup?.displayName ??
+                        (projectGroups.length === 1
+                          ? projectGroups[0]?.displayName
+                          : "All folders")}
+                    </span>
+                    <ChevronDownIcon />
                   </ComboboxTrigger>
                   <ComboboxPopup
                     align="start"
-                    // Anchored to the search field, not the 28px trigger: the
-                    // popup opens under the field, is at least as wide as it,
-                    // and grows to fit project names up to a cap, past which
-                    // the rows truncate.
-                    anchor={headerSearchRef}
                     className="max-w-[min(18rem,var(--available-width))] overflow-hidden"
                   >
                     <ComboboxSearchInput
-                      aria-label="Search projects"
-                      placeholder="Search projects..."
+                      aria-label="Search folders"
+                      placeholder="Search folders..."
                       value={projectScopeMenuState.query}
                       onKeyDown={(event) => {
                         if (
@@ -4943,7 +5026,7 @@ export default function Sidebar() {
                         })
                       }
                     />
-                    <ComboboxEmpty>No matching projects.</ComboboxEmpty>
+                    <ComboboxEmpty>No matching folders.</ComboboxEmpty>
                     <ComboboxList>
                       {(item: (typeof projectScopeItems)[number]) => {
                         const project = projectGroupByScopeKey.get(item.value) ?? null;
@@ -4989,15 +5072,32 @@ export default function Sidebar() {
                         );
                       }}
                     </ComboboxList>
+                    <div className="border-t border-border p-1">
+                      <SidebarMenuButton
+                        onClick={() => {
+                          dispatchProjectScopeMenu({ type: "open-changed", open: false });
+                          openAddProjectCommandPalette();
+                        }}
+                      >
+                        <FolderPlusIcon />
+                        <span>Open another folder</span>
+                      </SidebarMenuButton>
+                    </div>
                   </ComboboxPopup>
                 </Combobox>
               }
               onNewProject={openAddProjectCommandPalette}
+              groupByStatus={groupChatsByStatus}
+              onGroupByStatusChange={setGroupChatsByStatus}
+              onOpenArchive={() => {
+                if (isMobile) setOpenMobile(false);
+                void router.navigate({ to: "/settings/archived" });
+              }}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              showNewThreadInProjectHint={projectGroups.length > 1}
+              showNewThreadInProjectHint={scopedProjectGroup === null && projectGroups.length > 1}
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {
@@ -5078,7 +5178,7 @@ export default function Sidebar() {
                 role="status"
                 className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                {threadSearch.isPending ? "Searching thread messages…" : "No threads found"}
+                {threadSearch.isPending ? "Searching chat messages…" : "No chats found"}
               </p>
             )
           ) : null}
@@ -5133,26 +5233,31 @@ export default function Sidebar() {
                         // wake/un-settle. Both share the same compact height.
                         const isCard =
                           section === "active" || section === "pinned" || section === "working";
-                        const rowVariant = isCard ? "card" : "slim";
+                        const rowVariant = !groupChatsByStatus || isCard ? "card" : "slim";
                         return (
                           <SidebarThreadRow
                             // The sortable wrapper keeps its identity across shelves.
                             key={`${threadKey}:${rowVariant}`}
                             thread={thread}
                             variant={rowVariant}
+                            showChatActions={!groupChatsByStatus}
                             // Snoozed rows wake, settled rows un-settle, and cards settle.
                             variantAction={
-                              section === "snoozed"
-                                ? "unsnooze"
-                                : section === "settled"
-                                  ? "unsettle"
-                                  : "settle"
+                              !groupChatsByStatus
+                                ? "settle"
+                                : section === "snoozed"
+                                  ? "unsnooze"
+                                  : section === "settled"
+                                    ? "unsettle"
+                                    : "settle"
                             }
                             settlementSupported={
+                              groupChatsByStatus &&
                               serverConfigs.get(thread.environmentId)?.environment.capabilities
                                 .threadSettlement === true
                             }
                             snoozeSupported={
+                              groupChatsByStatus &&
                               serverConfigs.get(thread.environmentId)?.environment.capabilities
                                 .threadSnooze === true
                             }
@@ -5248,6 +5353,7 @@ export default function Sidebar() {
                             contextDrag={isContextDrag}
                             environmentId={thread.environmentId}
                             disabled={
+                              !groupChatsByStatus ||
                               renamingThreadKey === threadKey ||
                               section === "working" ||
                               !draggableThreadKeys.has(threadKey) ||
@@ -5396,7 +5502,25 @@ export default function Sidebar() {
                       }
                       return items;
                     })()}
-                    {settledShelfExpanded && hiddenSettledCount > 0 ? (
+                    {!groupChatsByStatus && hiddenRecentChatsCount > 0 ? (
+                      <li className="list-none">
+                        <SidebarMenuButton
+                          onClick={() =>
+                            setRecentChatsPage((page) => ({
+                              scope: projectScopeKey,
+                              count: page.count + RECENT_CHATS_PAGE_SIZE,
+                            }))
+                          }
+                        >
+                          <PlusIcon />
+                          <span>
+                            Show {Math.min(hiddenRecentChatsCount, RECENT_CHATS_PAGE_SIZE)} more
+                            chats
+                          </span>
+                        </SidebarMenuButton>
+                      </li>
+                    ) : null}
+                    {groupChatsByStatus && settledShelfExpanded && hiddenSettledCount > 0 ? (
                       <li className="list-none">
                         <button
                           type="button"
@@ -5424,7 +5548,7 @@ export default function Sidebar() {
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               {projects.length === 0 ? (
                 <>
-                  <span>No projects yet</span>
+                  <span>No folders yet</span>
                   <button
                     type="button"
                     onClick={openAddProjectCommandPalette}

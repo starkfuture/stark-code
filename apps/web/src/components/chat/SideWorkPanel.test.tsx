@@ -13,6 +13,7 @@ import {
   type OrchestrationV2ThreadProjection,
 } from "@starkfuture/contracts";
 import type { EnvironmentThreadShell } from "@starkfuture/client-runtime/state/models";
+import { scopeThreadRef, scopedThreadKey } from "@starkfuture/client-runtime/environment";
 import * as DateTime from "effect/DateTime";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../../test-fixtures";
 
@@ -26,7 +27,15 @@ const state = vi.hoisted(() => ({
   child: null as EnvironmentThreadShell | null,
   projection: null as OrchestrationV2ThreadProjection | null,
   shells: [] as EnvironmentThreadShell[],
+  turnIndex: {
+    items: [] as { entryId: string; runId: null; userText: string; assistantText: string | null }[],
+    complete: true,
+    loading: false,
+    error: null as string | null,
+    retry: vi.fn(),
+  },
 }));
+vi.mock("./useThreadTurnIndex", () => ({ useThreadTurnIndex: () => state.turnIndex }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => state.allowed }));
 vi.mock("../../state/responseVisuals", () => ({
   responseVisualsEnvironment: { format: { permissionAtom: () => "visual-permission" } },
@@ -69,6 +78,7 @@ let root: Root;
 let container: HTMLDivElement;
 const parent = makeThreadFixture({ runtimeMode: "full-access" });
 const onOpen = vi.fn();
+const onOpenTurn = vi.fn();
 const now = DateTime.makeUnsafe("2026-10-15T00:00:00Z");
 function answer(text: string, threadId = parent.id): OrchestrationV2ConversationMessage {
   return {
@@ -99,6 +109,7 @@ async function render(nativeShellMode = false, messages = projection.messages) {
         workspaceRoot="/work"
         nativeShellMode={nativeShellMode}
         onOpenThread={onOpen}
+        onOpenTurn={onOpenTurn}
         onClose={() => undefined}
       />,
     ),
@@ -134,6 +145,7 @@ beforeEach(async () => {
   state.nativeReplies = [];
   state.projection = null;
   state.shells = [parent];
+  state.turnIndex = { items: [], complete: true, loading: false, error: null, retry: vi.fn() };
   state.start.mockReset().mockResolvedValue({ _tag: "Success" });
   state.interrupt.mockReset().mockResolvedValue({ _tag: "Success" });
   state.approve.mockReset().mockResolvedValue({ _tag: "Success" });
@@ -151,6 +163,7 @@ beforeEach(async () => {
     },
   });
   onOpen.mockClear();
+  onOpenTurn.mockClear();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -255,6 +268,39 @@ it("reads a captured shell reply without starting a side chat", async () => {
   expect(container.textContent).not.toContain("Main answer to visualize");
   expect(state.start).not.toHaveBeenCalled();
   expect(state.visual).not.toHaveBeenCalled();
+});
+
+it("opens and removes the existing chat bookmarks without starting an agent or duplicating storage", async () => {
+  const storageKey = `stark-code:turn-bookmarks:${scopedThreadKey(scopeThreadRef(parent.environmentId, parent.id))}`;
+  localStorage.setItem(storageKey, JSON.stringify(["old", "unavailable"]));
+  state.turnIndex.items = [
+    {
+      entryId: "old",
+      runId: null,
+      userText: "Earlier architecture",
+      assistantText: "A saved answer",
+    },
+    { entryId: "recent", runId: null, userText: "Unbookmarked turn", assistantText: null },
+  ];
+  await click("Bookmarks");
+  const list = container.querySelector('[aria-label="Bookmarked turns"]')!;
+  expect(list.textContent).toContain("Earlier architecture");
+  expect(list.textContent).not.toContain("Unbookmarked turn");
+  expect(list.textContent).toContain("This saved turn is unavailable.");
+  await act(() => list.querySelector<HTMLButtonElement>("button")!.click());
+  expect(onOpenTurn).toHaveBeenCalledExactlyOnceWith("old");
+  expect(state.start).not.toHaveBeenCalled();
+  expect(onOpen).not.toHaveBeenCalled();
+  await act(() =>
+    container
+      .querySelector<HTMLButtonElement>('[aria-label="Remove bookmark from Earlier architecture"]')!
+      .click(),
+  );
+  expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual(["unavailable"]);
+  expect(list.textContent).not.toContain("Earlier architecture");
+  await click("Remove");
+  expect(container.textContent).toContain("No bookmarks yet.");
+  expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual([]);
 });
 
 it("keeps side work unavailable to a connection without thread permissions", async () => {

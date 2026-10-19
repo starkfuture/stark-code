@@ -1,7 +1,7 @@
-import { act, useLayoutEffect } from "react";
+import { act, StrictMode, useLayoutEffect } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
-import { useTurnNavigation } from "./useTurnNavigation";
+import { useTurnNavigation, type TurnNavigationRequest } from "./useTurnNavigation";
 import { toastManager } from "../ui/toast";
 import type { TimelineMinimapItem } from "./timelineMinimapItems";
 vi.mock("../ui/toast", () => ({ toastManager: { add: vi.fn() } }));
@@ -10,6 +10,7 @@ let navigation: ReturnType<typeof useTurnNavigation>;
 const load = vi.fn();
 const scroll = vi.fn();
 const manual = vi.fn();
+const consumed = vi.fn();
 const recent = {
   id: "recent",
   entryId: "recent",
@@ -31,12 +32,14 @@ function Probe({
   loading = false,
   threadKey = "a",
   error = null,
+  request = null,
 }: {
   items?: TimelineMinimapItem[];
   cursor?: string;
   loading?: boolean;
   threadKey?: string;
   error?: string | null;
+  request?: TurnNavigationRequest | null;
 }) {
   const state = useTurnNavigation({
     threadKey,
@@ -45,6 +48,8 @@ function Probe({
     onManualNavigation: manual,
     scrollToTurn: scroll,
     history: { hasMoreHistory: true, loading, error, onLoadEarlier: load },
+    request,
+    onRequestConsumed: consumed,
   });
   useLayoutEffect(() => {
     navigation = state;
@@ -99,4 +104,61 @@ it("cancels pending jumps and does not scroll another conversation after a switc
   expect(toastManager.add).toHaveBeenCalledWith(
     expect.objectContaining({ description: "Connection lost" }),
   );
+});
+
+it("opens a bookmarked turn once and does not repeat it on render or return to the chat", async () => {
+  const request = { threadKey: "a", entryId: "recent", requestId: 1 };
+  await act(() => {
+    renderer = create(
+      <StrictMode>
+        <Probe request={request} />
+      </StrictMode>,
+    );
+  });
+  expect(scroll).toHaveBeenCalledExactlyOnceWith(10, false);
+  expect(consumed).toHaveBeenCalledExactlyOnceWith(1);
+  await act(() =>
+    renderer!.update(
+      <StrictMode>
+        <Probe request={{ ...request }} items={[recent]} />
+      </StrictMode>,
+    ),
+  );
+  await act(() => renderer!.update(<Probe threadKey="b" request={null} />));
+  await act(() => renderer!.update(<Probe request={null} />));
+  expect(scroll).toHaveBeenCalledOnce();
+  expect(manual).toHaveBeenCalledOnce();
+});
+
+it("loads an older bookmark through existing history navigation and ignores another chat's request", async () => {
+  await act(() => {
+    renderer = create(<Probe request={{ threadKey: "b", entryId: "old", requestId: 1 }} />);
+  });
+  expect(load).not.toHaveBeenCalled();
+  expect(consumed).not.toHaveBeenCalled();
+  const request = { threadKey: "a", entryId: "old", requestId: 2 };
+  await act(() => renderer!.update(<Probe request={request} />));
+  expect(load).toHaveBeenCalledExactlyOnceWith("old");
+  expect(consumed).toHaveBeenCalledExactlyOnceWith(2);
+  await act(() =>
+    renderer!.update(<Probe request={null} items={[{ ...indexed, rowIndex: 0 }, recent]} />),
+  );
+  expect(scroll).toHaveBeenCalledExactlyOnceWith(0, false);
+});
+
+it("does not finish an older pending jump after a newer bookmark request wins", async () => {
+  await act(() => {
+    renderer = create(<Probe />);
+  });
+  await act(() => navigation.selectItem(indexed));
+  await act(() =>
+    renderer!.update(
+      <Probe
+        items={[{ ...indexed, rowIndex: 0 }, recent]}
+        request={{ threadKey: "a", entryId: "recent", requestId: 1 }}
+      />,
+    ),
+  );
+  expect(scroll).toHaveBeenCalledExactlyOnceWith(10, false);
+  expect(navigation.pending).toBe(false);
 });

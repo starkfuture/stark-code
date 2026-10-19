@@ -5,7 +5,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@starkfuture/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Badge } from "../ui/badge";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -26,6 +26,7 @@ import {
 } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
 import { shortcutLabelForCommand } from "../../keybindings";
+import { composerProviderIdentity } from "./composerProviderIdentity";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   environmentId: EnvironmentId | null;
@@ -55,6 +56,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /** Aggregate settings can show a neutral value without claiming one provider is selected. */
   triggerLabel?: string;
   triggerAriaLabel?: string;
+  /** Composer-only identity and settings stay attached to the selected model. */
+  showProviderIdentity?: boolean;
+  modelSettings?: ReactNode;
+  modelSettingsSummary?: string;
   onOpenChange?: (open: boolean) => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
@@ -122,7 +127,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     }
 
     const shouldAllowOverlayScroll = (target: EventTarget | null) => {
-      return target instanceof Element && target.closest("[data-model-picker-content]");
+      return (
+        target instanceof Element &&
+        target.closest("[data-model-picker-content], [data-slot=menu-popup]")
+      );
     };
     const preventBackgroundWheel = (event: WheelEvent) => {
       if (shouldAllowOverlayScroll(event.target)) {
@@ -189,9 +197,20 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const allModelNames = selectedEntries
     ? selectedEntries.map((selection) => selection.label).join(", ") || "Choose models"
     : undefined;
+  const identity =
+    props.showProviderIdentity && activeEntry && !selectedEntries
+      ? composerProviderIdentity(activeEntry.snapshot)
+      : null;
+  const modelDescription = [
+    identity,
+    props.triggerLabel ?? allModelNames ?? triggerLabel,
+    props.modelSettingsSummary,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const triggerTooltipContent = shortcutLabel
-    ? `${props.triggerLabel ?? allModelNames ?? triggerLabel} · ${shortcutLabel}`
-    : (props.triggerLabel ?? allModelNames ?? triggerLabel);
+    ? `${modelDescription} · ${shortcutLabel}`
+    : modelDescription;
 
   return (
     <Popover
@@ -207,14 +226,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverTrigger
         render={
           <ComposerControl
-            aria-label={props.triggerAriaLabel ?? allModelNames}
+            aria-label={props.triggerAriaLabel ?? modelDescription}
             size={size}
             data-chat-provider-model-picker="true"
+            data-composer-shortcut={props.modelSettings ? "composer.effort" : undefined}
             className={cn(
               "min-w-0 shrink justify-between whitespace-nowrap",
               props.compact
                 ? "max-w-42 shrink-0"
                 : !props.isComposerOwned && "max-w-48 sm:max-w-56",
+              identity && size !== "xs" && "h-11 max-w-[min(18rem,100%)]",
               props.triggerClassName,
             )}
             disabled={props.disabled}
@@ -267,12 +288,28 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             <TooltipTrigger
               render={
                 <span
-                  className="min-w-0 flex-1 overflow-hidden truncate"
+                  className="min-w-0 flex-1 overflow-hidden text-start"
                   data-chat-provider-model-picker-label="true"
                 />
               }
             >
-              {props.triggerLabel ?? multipleLabel ?? triggerTitle}
+              {identity && size !== "xs" ? (
+                <span
+                  className="block truncate text-xs font-normal text-muted-foreground"
+                  data-composer-provider-identity
+                >
+                  {identity}
+                </span>
+              ) : null}
+              <span className="block truncate">
+                {props.triggerLabel ?? multipleLabel ?? triggerTitle}
+                {props.modelSettingsSummary ? (
+                  <span className="font-normal text-muted-foreground">
+                    {" "}
+                    · {props.modelSettingsSummary}
+                  </span>
+                ) : null}
+              </span>
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
           </Tooltip>
@@ -317,6 +354,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             : {})}
           onInstanceModelChange={handleInstanceModelChange}
         />
+        {props.modelSettings && props.selectedModels === undefined ? (
+          <div
+            className="flex items-center justify-between gap-3 border-t px-3 py-2"
+            data-model-picker-content
+            data-composer-model-settings
+          >
+            <span className="text-xs text-muted-foreground">Effort and model options</span>
+            {props.modelSettings}
+          </div>
+        ) : null}
         {props.selectedModels === undefined ? (
           <ChatGptSharingControl provider={activeEntry?.snapshot ?? null} />
         ) : null}

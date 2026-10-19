@@ -9,7 +9,7 @@ import { useStarkPagesPublishCapability } from "../hooks/useStarkPagesPublishCap
 import { SideWorkPanel } from "./chat/SideWorkPanel";
 import { ConversationToolsPanel } from "./chat/ConversationToolsPanel";
 import { WorkspaceToolsMenu } from "./chat/WorkspaceToolsMenu";
-import { McpServersChip } from "./chat/McpServersPanel";
+import type { TurnNavigationRequest } from "./chat/useTurnNavigation";
 import { McpHealthBanner } from "./chat/McpHealthBanner";
 import { CheckpointRestoreChoices } from "./chat/CheckpointRestoreChoices";
 import {
@@ -2292,6 +2292,16 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadKnownSessions]);
   const activeThreadRef = useActiveThreadRef(activeThread);
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const [turnNavigationRequest, setTurnNavigationRequest] = useState<TurnNavigationRequest | null>(
+    null,
+  );
+  const turnNavigationRequestId = useRef(0);
+  if (turnNavigationRequest && turnNavigationRequest.threadKey !== activeThreadKey) {
+    setTurnNavigationRequest(null);
+  }
+  const consumeTurnNavigationRequest = useCallback((requestId: number) => {
+    setTurnNavigationRequest((request) => (request?.requestId === requestId ? null : request));
+  }, []);
   const [nativeShellThreadKey, setNativeShellThreadKey] = useState<string | null>(null);
   const [nativeShellPreparing, setNativeShellPreparing] = useState(false);
   const [nativeShellFocusRequest, setNativeShellFocusRequest] = useState(1);
@@ -2796,6 +2806,20 @@ export default function ChatView(props: ChatViewProps) {
   }, [pageWorkspaceKey, rightPanelOpen, auxiliaryPanel]);
   const pagesInline = !shouldUsePlanSidebarSheet;
   const sideWorkInline = !shouldUsePlanSidebarSheet;
+  const openBookmarkedTurn = useCallback(
+    (entryId: string) => {
+      if (!activeThreadKey) return;
+      selectConversationTab("chat");
+      closeAuxiliaryPanel();
+      setNativeShellThreadKey(null);
+      setTurnNavigationRequest({
+        threadKey: activeThreadKey,
+        entryId,
+        requestId: ++turnNavigationRequestId.current,
+      });
+    },
+    [activeThreadKey, selectConversationTab, closeAuxiliaryPanel],
+  );
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
   const activeEnvironmentUnavailable =
     activeEnvironment !== null && activeEnvironmentConnectionPhase !== "connected";
@@ -11893,36 +11917,55 @@ export default function ChatView(props: ChatViewProps) {
   };
   const panelToggleControls = (
     <WorkspaceToolsMenu
-      connections={
-        !nativeShellMode && isServerThread && activeThreadRef ? (
-          <McpServersChip
-            threadRef={activeThreadRef}
-            sessionBusy={isWorking || !latestRunSettled}
-          />
-        ) : undefined
-      }
-      groups={[
+      actions={[
         {
-          label: "Open beside chat",
+          id: "pages",
+          label: "Pages",
+          disabled: !pagesAvailable,
+          description: pagesAvailable ? undefined : "Pages is unavailable on this connection",
+          active: pagesOpen,
+          onSelect: () => {
+            if (activeThreadRef && pagesAvailable)
+              useRightPanelStore.getState().openAuxiliary(activeThreadRef, "pages");
+          },
+        },
+        {
+          id: "conversation",
+          label: "Conversation tools",
+          disabled: !activeProject || !isServerThread,
+          description: !isServerThread ? "Start a chat to use conversation tools" : undefined,
+          active: sideWorkOpen,
+          onSelect: () => {
+            if (activeThreadRef && activeProject && isServerThread)
+              useRightPanelStore.getState().openAuxiliary(activeThreadRef, "side-work");
+          },
+        },
+        {
+          id: "terminal",
+          label: "Terminal",
+          disabled: !activeProject || !canOperateTerminal,
+          description: !activeProject
+            ? "Choose a folder to open a terminal"
+            : !canOperateTerminal
+              ? "Terminal access is unavailable on this connection"
+              : undefined,
+          active: activeRightPanelSurface?.kind === "terminal",
+          onSelect: () => {
+            const existing = rightPanelState.surfaces.find(
+              (surface) => surface.kind === "terminal",
+            );
+            if (existing) activateRightPanelSurface(existing);
+            else addTerminalSurface();
+          },
+        },
+      ]}
+      moreGroups={[
+        {
+          label: "Workspace",
           actions: [
-            ...(pagesAvailable
-              ? [
-                  {
-                    id: "pages",
-                    label: "Pages",
-                    description: "Read company and folder pages",
-                    active: pagesOpen,
-                    onSelect: () => {
-                      if (activeThreadRef)
-                        useRightPanelStore.getState().openAuxiliary(activeThreadRef, "pages");
-                    },
-                  },
-                ]
-              : []),
             {
               id: "files",
-              label: "Files",
-              description: "Browse this folder",
+              label: "Browse workspace files",
               disabled: !activeProject,
               active:
                 activeRightPanelSurface?.kind === "files" ||
@@ -11933,45 +11976,29 @@ export default function ChatView(props: ChatViewProps) {
               ? [
                   {
                     id: "changes",
-                    label: "Changes",
-                    description: "Review code changes",
+                    label: "Review changes",
                     active: diffOpen,
                     onSelect: addDiffSurface,
                   },
                 ]
               : []),
-            ...(activeProject && isServerThread
-              ? [
-                  {
-                    id: "conversation",
-                    label: "Conversation tools",
-                    description: "Reader, side chat, and agents",
-                    active: sideWorkOpen,
-                    onSelect: () => {
-                      if (activeThreadRef)
-                        useRightPanelStore.getState().openAuxiliary(activeThreadRef, "side-work");
-                    },
-                  },
-                ]
-              : []),
             {
-              id: "terminal",
-              label: "Terminal",
-              description: "Run shell commands beside chat",
-              disabled: !activeProject || !canOperateTerminal,
-              active: activeRightPanelSurface?.kind === "terminal",
+              id: "details",
+              label: "Chat details",
+              description: "Branch, working folder, and run commands",
+              active: threadPanelOpen,
               onSelect: () => {
-                const existing = rightPanelState.surfaces.find(
-                  (surface) => surface.kind === "terminal",
-                );
-                if (existing) activateRightPanelSurface(existing);
-                else addTerminalSurface();
+                closeAuxiliaryPanel();
+                toggleThreadPanel();
               },
             },
+            ...(!rightPanelOpen && !auxiliaryPanel && rightPanelState.surfaces.length
+              ? [{ id: "reopen", label: "Reopen tool tabs", onSelect: toggleRightPanel }]
+              : []),
           ],
         },
         {
-          label: "More tools",
+          label: "Advanced",
           actions: [
             {
               id: "browser",
@@ -12016,8 +12043,12 @@ export default function ChatView(props: ChatViewProps) {
             },
             {
               id: "agent-shell",
-              label: nativeShellMode ? "Return to chat" : "Agent shell",
-              description: "Use the native Claude or Codex terminal",
+              label: nativeShellMode
+                ? "Return to chat"
+                : selectedProvider === "claudeAgent"
+                  ? "Open Claude Code"
+                  : "Open Codex CLI",
+              description: "Use the provider’s original command-line interface",
               active: nativeShellMode,
               disabled:
                 !nativeShellMode &&
@@ -12036,39 +12067,15 @@ export default function ChatView(props: ChatViewProps) {
           ],
         },
         {
-          label: "Layout",
+          label: "Connections",
           actions: [
             {
-              id: "details",
-              label: "Chat details",
-              description: "Branch, working folder, and run commands",
-              active: threadPanelOpen,
+              id: "connections",
+              label: "Manage connections",
               onSelect: () => {
-                closeAuxiliaryPanel();
-                toggleThreadPanel();
+                void navigate({ to: "/settings/mcp-servers", search: { machine: environmentId } });
               },
             },
-            {
-              id: "terminal-drawer",
-              label: "Terminal below chat",
-              description: "Show or hide the bottom terminal",
-              active: terminalUiState.terminalOpen,
-              disabled: !activeProject,
-              onSelect: () => {
-                closeAuxiliaryPanel();
-                toggleTerminalVisibility();
-              },
-            },
-            ...(!rightPanelOpen && !auxiliaryPanel && rightPanelState.surfaces.length
-              ? [
-                  {
-                    id: "reopen",
-                    label: "Reopen tools",
-                    description: "Return to your open tool tabs",
-                    onSelect: toggleRightPanel,
-                  },
-                ]
-              : []),
           ],
         },
       ]}
@@ -12342,6 +12349,8 @@ export default function ChatView(props: ChatViewProps) {
               <div className="relative flex min-h-0 flex-1 flex-col bg-background">
                 {/* Messages — LegendList handles virtualization and scrolling internally */}
                 <MessagesTimeline
+                  turnNavigationRequest={paintOnlyDisplayedTimeline ? null : turnNavigationRequest}
+                  onTurnNavigationRequestConsumed={consumeTurnNavigationRequest}
                   showAllHookActivity={showAllHookActivity}
                   citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
                   citationHistoryLoading={threadDetailLoading}
@@ -12933,6 +12942,7 @@ export default function ChatView(props: ChatViewProps) {
                 projection={serverProjection}
                 workspaceRoot={activeProject.workspaceRoot}
                 nativeShellMode={nativeShellMode}
+                onOpenTurn={openBookmarkedTurn}
                 onOpenThread={onOpenRelatedThread}
                 onClose={closeAuxiliaryPanel}
               />

@@ -322,8 +322,8 @@ import {
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
-  renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
+  summarizeProviderTraits,
 } from "./composerProviderState";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
 import {
@@ -1338,8 +1338,6 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
   return (
     <>
-      <ComposerControlSeparator size={size} />
-
       <Tooltip>
         <Select
           open={open}
@@ -3121,19 +3119,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   );
 
-  const providerTraitsMenuContent = renderProviderTraitsMenuContent({
-    provider: selectedProvider,
-    instanceId: selectedInstanceId,
-    ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-    ...(routeKind === "draft" && draftId ? { draftId } : {}),
-    model: selectedModel,
-    models: selectedProviderModels,
-    modelOptions: composerModelOptions?.[selectedInstanceId],
-    reportedModelSelection,
-    prompt,
-    onPromptChange: setPromptFromTraits,
-    planModeEnabled: settings.planModeEnabled,
-  });
   const providerTraitsPickerInput = {
     provider: selectedProvider,
     instanceId: selectedInstanceId,
@@ -3149,6 +3134,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isComposerOwned: true,
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
   const providerTraitsPicker = renderProviderTraitsPicker(providerTraitsPickerInput);
+  const providerTraitsSummary = providerTraitsPicker
+    ? summarizeProviderTraits(providerTraitsPickerInput)
+    : undefined;
   const [inlineRestingControlsHost, setInlineRestingControlsHost] = useState<HTMLDivElement | null>(
     null,
   );
@@ -3159,7 +3147,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     iconOnlyBlockCount: restingControlsIconOnlyBlockCount,
     controlsVisible: restingControlsVisible,
   } = useRestingComposerControlsLayout(restingControlsHost ?? inlineRestingControlsHost);
-  const expandedControlsLayout = useRestingComposerControlsLayout(null, true);
   const pendingPrimaryAction = useMemo(
     () =>
       activePendingProgress
@@ -5683,31 +5670,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsComposerScrollCollapsed,
   ]);
 
-  const restingHiddenBlockCount = composerControlsCollapsed
-    ? restingControlsHiddenBlockCount
-    : expandedControlsLayout.hiddenBlockCount;
-  const iconOnlyBlockCount = composerControlsCollapsed
-    ? restingControlsIconOnlyBlockCount
-    : expandedControlsLayout.iconOnlyBlockCount;
-  const restingProviderTraitsPicker = renderProviderTraitsPicker({
-    ...providerTraitsPickerInput,
-    size: composerControlsCollapsed ? "xs" : "sm",
-    hidden: composerControlsHidden || restingHiddenBlockCount > 1,
-  });
+  const restingHiddenBlockCount = composerControlsCollapsed ? restingControlsHiddenBlockCount : 0;
+  const iconOnlyBlockCount = composerControlsCollapsed ? restingControlsIconOnlyBlockCount : 0;
   const restingBlockDefs = [
-    ...(providerTraitsPicker
-      ? [
-          {
-            id: "traits",
-            content: (
-              <>
-                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
-                {restingProviderTraitsPicker}
-              </>
-            ),
-          },
-        ]
-      : []),
     {
       id: "mode",
       content: (
@@ -5842,6 +5807,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           onProviderModelSelect(instanceId, model);
         }}
         onOpenProviderSetup={onOpenProviderSetup}
+        showProviderIdentity
+        modelSettings={providerTraitsPicker}
+        {...(providerTraitsSummary ? { modelSettingsSummary: providerTraitsSummary } : {})}
       />
 
       {!providerCatalogPending && (multipleModelSelections?.length ?? 0) < 2 ? (
@@ -5850,6 +5818,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           connected={props.environmentUnavailable === null}
           size={composerControlsCollapsed ? "xs" : "sm"}
           timestampFormat={settings.timestampFormat}
+          compact={composerControlsCollapsed}
         />
       ) : null}
 
@@ -5895,9 +5864,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             showInteractionModeToggle={
               planModeUiEnabled &&
               (selectedProvider === "claudeAgent" || hiddenRestingBlockIds.includes("mode"))
-            }
-            traitsMenuContent={
-              hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
             }
             onToggleInteractionMode={toggleInteractionMode}
             onRuntimeModeChange={handleRuntimeModeChange}
@@ -8065,11 +8031,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 )}
               >
                 <div
-                  ref={expandedControlsLayout.attachControls}
                   data-chat-composer-controls="left"
                   data-chat-composer-footer-controls="true"
                   className={cn(
-                    "relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+                    "relative -m-1 -ms-3.5 flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1 ps-3.5",
                     isComposerResting && "hidden",
                   )}
                 >

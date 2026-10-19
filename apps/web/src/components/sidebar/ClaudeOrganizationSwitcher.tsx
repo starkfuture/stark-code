@@ -14,6 +14,7 @@ import { SidebarMenuButton } from "../ui/sidebar";
 interface ClaudeOrganizationSwitcherProps {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
+  readonly isConnected: boolean;
   readonly onManage: () => void;
 }
 
@@ -47,6 +48,7 @@ export function ClaudeOrganizationSwitcher(props: ClaudeOrganizationSwitcherProp
 function ClaudeOrganizationSwitcherContent({
   environmentId,
   environmentLabel,
+  isConnected,
   onManage,
 }: ClaudeOrganizationSwitcherProps) {
   const canRead = useAtomValue(claudeAccountsEnvironment.snapshot.permissionAtom(environmentId));
@@ -61,6 +63,7 @@ function ClaudeOrganizationSwitcherContent({
   const [notice, setNotice] = useState<string | null>(null);
   const inFlight = useRef(false);
   const mounted = useRef(false);
+  const lastSuccessfulRefreshAt = useRef<number | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -70,7 +73,7 @@ function ClaudeOrganizationSwitcherContent({
   }, []);
 
   async function refresh() {
-    if (!canRead || inFlight.current) return;
+    if (!canRead || !isConnected || inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     setNotice(null);
@@ -78,6 +81,7 @@ function ClaudeOrganizationSwitcherContent({
       const result = await readSnapshot({ environmentId, input: undefined });
       if (!mounted.current) return;
       if (result._tag === "Success") {
+        lastSuccessfulRefreshAt.current = Date.now();
         setSnapshot(result.value);
         setError(null);
       } else throw squashAtomCommandFailure(result);
@@ -91,21 +95,39 @@ function ClaudeOrganizationSwitcherContent({
   }
 
   const refreshVisible = useEffectEvent(() => {
-    if (document.visibilityState === "visible") void refresh();
+    const stale =
+      lastSuccessfulRefreshAt.current === null ||
+      Date.now() - lastSuccessfulRefreshAt.current >= 60_000;
+    if (document.visibilityState === "visible" && (stale || error !== null)) void refresh();
   });
+  // The footer is identity, not a generic account launcher: load it before the menu opens.
   useEffect(() => {
-    if (!open || !canRead) return;
+    if (!isConnected) {
+      lastSuccessfulRefreshAt.current = null;
+      return;
+    }
+    if (!canRead) return;
+    refreshVisible();
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => document.removeEventListener("visibilitychange", refreshVisible);
+  }, [canRead, isConnected]);
+  useEffect(() => {
+    if (!open || !canRead || !isConnected) return;
     refreshVisible();
     const timer = window.setInterval(refreshVisible, 60_000);
-    document.addEventListener("visibilitychange", refreshVisible);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", refreshVisible);
-    };
-  }, [open, canRead]);
+    return () => window.clearInterval(timer);
+  }, [open, canRead, isConnected]);
 
   async function switchOrganization(account: ClaudeAccount) {
-    if (!canRead || !canWrite || inFlight.current || !snapshot?.available || account.active) return;
+    if (
+      !canRead ||
+      !canWrite ||
+      !isConnected ||
+      inFlight.current ||
+      !snapshot?.available ||
+      account.active
+    )
+      return;
     inFlight.current = true;
     setBusy(true);
     setSwitching(account.number);
@@ -171,7 +193,7 @@ function ClaudeOrganizationSwitcherContent({
             {active ? organizationLabel(active) : "Claude organizations"}
           </span>
           <span className="truncate text-xs text-muted-foreground">
-            {active?.email ?? environmentLabel}
+            Claude organization · {environmentLabel}
           </span>
         </span>
         <ChevronsUpDownIcon />
@@ -189,7 +211,7 @@ function ClaudeOrganizationSwitcherContent({
             <Button
               size="xs"
               variant="ghost"
-              disabled={!canRead || busy}
+              disabled={!canRead || !isConnected || busy}
               onClick={() => void refresh()}
             >
               {busy && switching === null ? "Refreshing…" : "Refresh"}
@@ -199,6 +221,11 @@ function ClaudeOrganizationSwitcherContent({
             Shared Claude login on {environmentLabel}. Running sessions may need restarting to use
             the new organization.
           </p>
+          {!isConnected ? (
+            <p role="status" className="text-xs text-muted-foreground">
+              Waiting for {environmentLabel} to connect.
+            </p>
+          ) : null}
           {!canRead ? (
             <p className="text-xs text-muted-foreground">
               Provider management permission is needed to view organizations.
@@ -250,7 +277,7 @@ function ClaudeOrganizationSwitcherContent({
                         <button
                           type="button"
                           aria-pressed={account.active}
-                          disabled={!canWrite || busy || account.active}
+                          disabled={!canWrite || !isConnected || busy || account.active}
                           className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-60"
                           onClick={() => void switchOrganization(account)}
                         >

@@ -34,8 +34,14 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
-    useHandleNewThread();
+  const {
+    activeDraftThread,
+    activeThread,
+    selectedProjectRef,
+    defaultProjectRef,
+    handleNewThread,
+    routeThreadRef,
+  } = useHandleNewThread();
   const canOperatePreview = useEnvironmentScope(
     routeThreadRef?.environmentId ?? null,
     AuthPreviewOperateScope,
@@ -106,6 +112,7 @@ function ChatRouteGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         void startNewThreadFromContext({
+          selectedProjectRef,
           activeDraftThread,
           activeThread: activeThread ?? undefined,
           defaultProjectRef,
@@ -128,14 +135,14 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        // The default sidebar routes creation through the command palette
-        // whenever there is a real choice to make; the legacy sidebar (and
-        // single-project setups) keep the immediate contextual create.
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
+        // A selected folder has already resolved the choice. All folders
+        // keeps the chooser when more than one folder is available.
+        if (!legacySidebarEnabled && selectedProjectRef === null && projectGroupCount > 1) {
           openCommandPalette({ open: "new-thread-in" });
           return;
         }
         void startNewThreadFromContext({
+          selectedProjectRef,
           activeDraftThread,
           activeThread: activeThread ?? undefined,
           defaultProjectRef,
@@ -207,6 +214,7 @@ function ChatRouteGlobalShortcuts() {
     routeThreadRef,
     scratchEnvironmentId,
     selectedThreadKeysSize,
+    selectedProjectRef,
     startScratchThread,
     legacySidebarEnabled,
     terminalOpen,

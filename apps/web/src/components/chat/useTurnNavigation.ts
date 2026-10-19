@@ -3,6 +3,12 @@ import { toastManager } from "../ui/toast";
 import type { MessagesTimelineHistoryControls } from "./MessagesTimeline";
 import type { TimelineMinimapItem } from "./timelineMinimapItems";
 
+export interface TurnNavigationRequest {
+  readonly threadKey: string;
+  readonly entryId: string;
+  readonly requestId: number;
+}
+
 /** Materializes an indexed turn through existing history pages before asking the list to jump. */
 export function useTurnNavigation({
   threadKey,
@@ -11,6 +17,8 @@ export function useTurnNavigation({
   historyCursor,
   onManualNavigation,
   scrollToTurn,
+  request,
+  onRequestConsumed,
 }: {
   threadKey: string;
   items: ReadonlyArray<TimelineMinimapItem>;
@@ -18,15 +26,24 @@ export function useTurnNavigation({
   historyCursor?: string | null | undefined;
   onManualNavigation: () => void;
   scrollToTurn: (rowIndex: number, animated: boolean) => void;
+  request?: TurnNavigationRequest | null | undefined;
+  onRequestConsumed?: ((requestId: number) => void) | undefined;
 }) {
-  const [target, setTarget] = useState<{ key: string; entryId: string } | null>(null);
+  const [target, setTarget] = useState<{
+    key: string;
+    entryId: string;
+    selection: number;
+  } | null>(null);
   const requestedPages = useRef(new Set<string>());
+  const consumedRequest = useRef<string | null>(null);
+  const currentSelection = useRef(0);
   const selectItem = useCallback(
     (item: TimelineMinimapItem, animated = true) => {
+      const selection = ++currentSelection.current;
       onManualNavigation();
       requestedPages.current.clear();
       if (item.rowIndex < 0) {
-        setTarget({ key: threadKey, entryId: item.entryId ?? item.id });
+        setTarget({ key: threadKey, entryId: item.entryId ?? item.id, selection });
       } else {
         setTarget(null);
         scrollToTurn(item.rowIndex, animated);
@@ -35,7 +52,24 @@ export function useTurnNavigation({
     [threadKey, onManualNavigation, scrollToTurn],
   );
   useEffect(() => {
-    if (!target) return;
+    if (!request || request.threadKey !== threadKey) return;
+    const key = `${request.threadKey}:${request.requestId}`;
+    if (consumedRequest.current === key) return;
+    consumedRequest.current = key;
+    selectItem(
+      items.find((item) => (item.entryId ?? item.id) === request.entryId) ?? {
+        id: request.entryId,
+        entryId: request.entryId,
+        rowIndex: -1,
+        userText: null,
+        assistantText: null,
+      },
+      false,
+    );
+    onRequestConsumed?.(request.requestId);
+  }, [request, threadKey, items, selectItem, onRequestConsumed]);
+  useEffect(() => {
+    if (!target || target.selection !== currentSelection.current) return;
     if (target.key !== threadKey) {
       setTarget(null);
       return;
@@ -61,6 +95,9 @@ export function useTurnNavigation({
     requestedPages.current.add(cursor);
     history.onLoadEarlier(target.entryId);
   }, [target, threadKey, items, history, historyCursor, scrollToTurn]);
-  const cancel = useCallback(() => setTarget(null), []);
+  const cancel = useCallback(() => {
+    currentSelection.current += 1;
+    setTarget(null);
+  }, []);
   return { selectItem, pending: target?.key === threadKey, cancel };
 }

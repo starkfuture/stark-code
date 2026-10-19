@@ -8,6 +8,7 @@ import { EnvironmentId, type ClaudeAccountsSnapshot } from "@starkfuture/contrac
 
 const state = vi.hoisted(() => ({
   canRead: true,
+  isConnected: true,
   canWrite: true,
   read: vi.fn(),
   command: vi.fn(),
@@ -92,6 +93,7 @@ async function render(id: EnvironmentId = environmentId) {
         <ClaudeOrganizationSwitcher
           environmentId={id}
           environmentLabel="Work Mac"
+          isConnected={state.isConnected}
           onManage={state.manage}
         />
       </SidebarProvider>,
@@ -119,6 +121,7 @@ async function open() {
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   state.canRead = true;
+  state.isConnected = true;
   state.canWrite = true;
   state.read.mockReset().mockResolvedValue(success());
   state.command.mockReset().mockResolvedValue(success(switched));
@@ -135,10 +138,11 @@ afterEach(async () => {
 });
 
 describe("quick Claude organization switcher", () => {
-  it("reads on opening and refreshes without changing the login or enabling automatic switching", async () => {
+  it("shows the current organization before opening and refreshes without changing the login", async () => {
     await render();
-    expect(state.read).not.toHaveBeenCalled();
-    expect(button("Switch Claude organization").textContent).toContain("Claude organizations");
+    expect(state.read).toHaveBeenCalledExactlyOnceWith({ environmentId, input: undefined });
+    expect(button("Switch Claude organization").textContent).toContain("Stark Future 1");
+    expect(button("Switch Claude organization").textContent).toContain("Claude organization");
     await click("Switch Claude organization");
     expect(state.read).toHaveBeenCalledExactlyOnceWith({ environmentId, input: undefined });
     expect(
@@ -154,6 +158,35 @@ describe("quick Claude organization switcher", () => {
     expect(state.command).not.toHaveBeenCalled();
     await click("Manage organizations");
     expect(state.manage).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it("waits for the connection before loading the footer and retries on reconnect", async () => {
+    state.isConnected = false;
+    await render();
+    expect(state.read).not.toHaveBeenCalled();
+    state.isConnected = true;
+    await render();
+    expect(state.read).toHaveBeenCalledExactlyOnceWith({ environmentId, input: undefined });
+    expect(button("Switch Claude organization").textContent).toContain("Stark Future 1");
+    state.isConnected = false;
+    await render();
+    state.read.mockResolvedValueOnce(success(switched));
+    state.isConnected = true;
+    await render();
+    expect(state.read).toHaveBeenCalledTimes(2);
+    expect(button("Switch Claude organization").textContent).toContain("Stark Future 2");
+    expect(state.command).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed initial load when opened without waiting for the cache interval", async () => {
+    state.read.mockRejectedValueOnce(new Error("Work Mac is not connected."));
+    await render();
+    expect(state.read).toHaveBeenCalledTimes(1);
+    await click("Switch Claude organization");
+    expect(state.read).toHaveBeenCalledTimes(2);
+    expect(button("Switch Claude organization").textContent).toContain("Stark Future 1");
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(state.command).not.toHaveBeenCalled();
   });
 
   it("switches directly between same-email organizations, including one excluded from auto-switching", async () => {
@@ -233,7 +266,9 @@ describe("quick Claude organization switcher", () => {
   });
 
   it("handles rejected reads and commands without losing the last known selection", async () => {
-    state.read.mockRejectedValueOnce(new Error("Connection unavailable."));
+    state.read
+      .mockRejectedValueOnce(new Error("Connection unavailable."))
+      .mockRejectedValueOnce(new Error("Connection unavailable."));
     await open();
     expect(document.querySelector('[role="alert"]')?.textContent).toContain(
       "Connection unavailable.",
@@ -291,12 +326,13 @@ describe("quick Claude organization switcher", () => {
           resolve = complete;
         }),
     );
+    state.read.mockResolvedValueOnce(success(switched));
     await open();
     await render(EnvironmentId.make("different-machine"));
     await act(() => resolve(success()));
-    expect(button("Switch Claude organization").textContent).toContain("Claude organizations");
+    expect(button("Switch Claude organization").textContent).toContain("Stark Future 2");
     expect(document.querySelector('[aria-label="Claude organizations"][role="dialog"]')).toBeNull();
-    expect(state.read).toHaveBeenCalledTimes(1);
+    expect(state.read).toHaveBeenCalledTimes(2);
     await click("Switch Claude organization");
     expect(state.read).toHaveBeenLastCalledWith({
       environmentId: EnvironmentId.make("different-machine"),

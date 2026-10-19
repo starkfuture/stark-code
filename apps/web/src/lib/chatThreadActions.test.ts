@@ -102,6 +102,22 @@ describe("chatThreadActions", () => {
     ).toBe(false);
   });
 
+  it("starts in the selected folder even when a different conversation remains open", async () => {
+    const selectedProjectRef = scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID);
+    const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+    const context = createContext({
+      selectedProjectRef,
+      activeThread: { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID },
+      handleNewThread,
+    });
+    expect(resolveThreadActionProjectRef(context)).toEqual(selectedProjectRef);
+    expect(await startNewThreadFromContext(context)).toBe(true);
+    expect(handleNewThread).toHaveBeenCalledExactlyOnceWith(selectedProjectRef);
+    expect(resolveThreadActionProjectRef({ ...context, selectedProjectRef: null })).toEqual(
+      scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID),
+    );
+  });
+
   it("prefers the active thread project when resolving thread actions", () => {
     const projectRef = resolveThreadActionProjectRef(
       createContext({

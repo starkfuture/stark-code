@@ -47,7 +47,12 @@ import { readStarkProjectFile } from "../lib/starkProjectFileDefaults";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
-import { useClientSettings } from "./useSettings";
+import { useClientSettings, useLegacySidebarEnabled } from "./useSettings";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import {
+  buildSidebarProjectSnapshots,
+  resolveSidebarProjectScopeKey,
+} from "../sidebarProjectGrouping";
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
@@ -491,10 +496,46 @@ export function useHandleNewThread() {
     });
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadHandler();
+  const sidebarScopeKey = useUiStateStore((store) => store.sidebarProjectScopeKey);
+  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const legacySidebarEnabled = useLegacySidebarEnabled();
+  const selectedProjectRef = useMemo(() => {
+    if (legacySidebarEnabled || sidebarScopeKey === null) return null;
+    const groups = buildSidebarProjectSnapshots({
+      projects: orderedProjects,
+      settings: projectGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: () => null,
+    });
+    const key = resolveSidebarProjectScopeKey({
+      groups,
+      key: sidebarScopeKey,
+      settings: projectGroupingSettings,
+    });
+    const selected = groups.find((group) => group.projectKey === key);
+    if (!selected) return null;
+    const active = activeThread ?? activeDraftThread;
+    const member =
+      selected.memberProjects.find(
+        (project) =>
+          project.environmentId === active?.environmentId && project.id === active?.projectId,
+      ) ?? selected;
+    return scopeProjectRef(member.environmentId, member.id);
+  }, [
+    legacySidebarEnabled,
+    sidebarScopeKey,
+    orderedProjects,
+    projectGroupingSettings,
+    primaryEnvironmentId,
+    activeThread,
+    activeDraftThread,
+  ]);
 
   return {
     activeDraftThread,
     activeThread,
+    selectedProjectRef,
     defaultProjectRef: orderedProjects[0]
       ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
       : null,

@@ -1,4 +1,4 @@
-import { useTurnNavigation } from "./useTurnNavigation";
+import { useTurnNavigation, type TurnNavigationRequest } from "./useTurnNavigation";
 import { useTurnBookmarks } from "./useTurnBookmarks";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@starkfuture/shared/markdownPipeline";
@@ -459,6 +459,8 @@ export interface MessagesTimelineHistoryControls {
 }
 
 interface MessagesTimelineProps {
+  turnNavigationRequest?: TurnNavigationRequest | null;
+  onTurnNavigationRequestConsumed?: (requestId: number) => void;
   citationRequest?: AssistantCitationRequest | null;
   citationHistoryLoading?: boolean;
   onCiteAssistantText?: (
@@ -579,6 +581,8 @@ export function MessagesTimeline(props: MessagesTimelineProps) {
 }
 
 const ConversationTimeline = memo(function ConversationTimeline({
+  turnNavigationRequest,
+  onTurnNavigationRequestConsumed,
   citationRequest = null,
   citationHistoryLoading = false,
   onCiteAssistantText,
@@ -1636,6 +1640,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     historyCursor: loadEarlier?.cursor,
     onManualNavigation,
     scrollToTurn,
+    request: paintOnly ? null : turnNavigationRequest,
+    onRequestConsumed: onTurnNavigationRequestConsumed,
   });
 
   if (

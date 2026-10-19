@@ -646,8 +646,13 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
-    useHandleNewThread();
+  const {
+    activeDraftThread,
+    activeThread,
+    selectedProjectRef,
+    defaultProjectRef,
+    handleNewThread,
+  } = useHandleNewThread();
   const paletteRouteTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -878,12 +883,13 @@ function OpenCommandPaletteDialog(props: {
   const contextualProjectRef = useMemo(
     () =>
       resolveThreadActionProjectRef({
+        selectedProjectRef,
         activeDraftThread,
         activeThread: activeThread ?? undefined,
         defaultProjectRef,
         handleNewThread,
       }),
-    [activeDraftThread, activeThread, defaultProjectRef, handleNewThread],
+    [activeDraftThread, activeThread, selectedProjectRef, defaultProjectRef, handleNewThread],
   );
   const projectPickerEntries = useMemo(
     () =>
@@ -1830,13 +1836,14 @@ function OpenCommandPaletteDialog(props: {
         searchTerms: ["new thread", "chat", "create", "draft"],
         title: (
           <>
-            New thread in <span className="font-semibold">{activeProjectTitle}</span>
+            New chat in <span className="font-semibold">{activeProjectTitle}</span>
           </>
         ),
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "chat.newLocal",
         run: async () => {
           await startNewThreadFromContext({
+            selectedProjectRef,
             activeDraftThread,
             activeThread: activeThread ?? undefined,
             defaultProjectRef,

@@ -316,8 +316,10 @@ In the local Mac app, choose **Tools → Pages** from a thread. The chooser swit
 the current folder. It remembers your choice and keeps your open page and reading
 position when you switch.
 
-Company Pages sign-in opens in your main browser and returns to Stark Code. The
-app keeps its own connection; it does not copy another browser's login. Find a
+Connect Company Pages during setup, after connecting your agents, or later from
+**Tools → Pages**. Setup checks read access before marking Pages ready. Sign-in
+opens in your main browser and returns to Stark Code. The app keeps its own
+connection; it does not copy another browser's login. Find a
 project, open its home page or search for a page inside it. Related page links
 stay in the reader; other links open in your main browser.
 

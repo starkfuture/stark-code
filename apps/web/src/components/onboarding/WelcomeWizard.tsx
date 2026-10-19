@@ -76,20 +76,26 @@ import { Dialog } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { FolderStep } from "./FolderStep";
+import { PagesStep } from "./PagesStep";
 
 /**
  * First-run welcome wizard. Rendered over the workspace at `/welcome` on a
  * fresh install (no completed-onboarding flag, empty workspace). Flow per the
  * onboarding overhaul spec: connection choice → sign-in/pair (remote paths) →
- * managed Codex setup or an inline CLI terminal → main folder → main screen.
+ * managed Codex setup or an inline CLI terminal → Pages (desktop) → main folder → main screen.
  * Every step past the connection gate is skippable; the whole wizard is
  * re-runnable by clearing the flag.
  */
 
-type WizardStep = "connection" | "agents" | "folder";
+type WizardStep = "connection" | "agents" | "pages" | "folder";
 
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
-const ONBOARDING_STAGES = ["Connect", "Agents", "Folder"] as const;
+const ONBOARDING_LABELS: Record<WizardStep, string> = {
+  connection: "Connect",
+  agents: "Agents",
+  pages: "Pages",
+  folder: "Folder",
+};
 
 export function WelcomeWizard({
   localAvailable,
@@ -102,6 +108,10 @@ export function WelcomeWizard({
   readonly onDone: (projectRef?: ScopedProjectRef) => void | Promise<void>;
 }) {
   const completeOnboarding = useCompleteOnboarding();
+  const hasPages = typeof window !== "undefined" && !!window.desktopBridge?.publishedPages;
+  const steps: readonly WizardStep[] = hasPages
+    ? ["connection", "agents", "pages", "folder"]
+    : ["connection", "agents", "folder"];
   const [step, setStep] = useState<WizardStep>(resumeEnvironmentId ? "agents" : "connection");
   const { environments } = useEnvironments();
   const [selection, setSelection] = useState<ReadonlySet<EnvironmentId> | null>(null);
@@ -139,7 +149,7 @@ export function WelcomeWizard({
     setSetupIds(ids);
     setStep("agents");
   };
-  const stageIndex = step === "agents" ? 1 : step === "folder" ? 2 : 0;
+  const stageIndex = steps.indexOf(step);
   const finish = useCallback(
     (projectRef?: ScopedProjectRef) => {
       if (finishingPromiseRef.current !== null) return finishingPromiseRef.current;
@@ -201,12 +211,13 @@ export function WelcomeWizard({
           }
         >
           <WizardSteps
-            steps={ONBOARDING_STAGES}
+            steps={steps.map((stage) => ONBOARDING_LABELS[stage])}
             currentStep={stageIndex}
             isStepDisabled={(index) => isOpeningFolder || index >= stageIndex}
             onStepChange={(index) => {
               if (isOpeningFolder || index > stageIndex) return;
-              setStep(index === 0 ? "connection" : "agents");
+              const previousStep = steps[index];
+              if (previousStep) setStep(previousStep);
             }}
           />
         </WizardHeader>
@@ -234,7 +245,12 @@ export function WelcomeWizard({
               }}
             />
           ) : step === "agents" ? (
-            <AgentsStep environmentIds={setupIds} onContinue={() => setStep("folder")} />
+            <AgentsStep
+              environmentIds={setupIds}
+              onContinue={() => setStep(hasPages ? "pages" : "folder")}
+            />
+          ) : step === "pages" ? (
+            <PagesStep onContinue={() => setStep("folder")} />
           ) : (
             <FolderStep
               environmentIds={setupIds}

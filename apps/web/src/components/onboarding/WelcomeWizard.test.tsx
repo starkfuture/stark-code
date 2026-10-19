@@ -103,6 +103,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  delete window.desktopBridge;
 });
 
 async function click(label: string) {
@@ -140,4 +141,25 @@ it("keeps setup open when saving completion fails and retries without duplicate 
   expect(onDone).toHaveBeenCalledOnce();
   expect(mocks.createProject).not.toHaveBeenCalled();
   expect(mocks.importThreads).not.toHaveBeenCalled();
+});
+
+it("offers Pages after agents on desktop and can revisit it from the folder step", async () => {
+  const status = vi.fn().mockResolvedValue({ state: "signed-out", message: null });
+  const connect = vi.fn();
+  window.desktopBridge = {
+    publishedPages: { status, connect },
+  } as unknown as NonNullable<Window["desktopBridge"]>;
+  await act(async () => root.render(<WelcomeWizard localAvailable onDone={vi.fn()} />));
+  await click("Continue");
+  expect(document.body.textContent).toContain("Connect your agents");
+  await click("Continue");
+  expect(document.body.textContent).toContain("Connect Stark Pages");
+  expect(connect).not.toHaveBeenCalled();
+  await click("Skip for now");
+  expect(document.body.textContent).toContain("Choose your main folder");
+  const pagesStep = document.querySelector<HTMLButtonElement>('button[aria-label="Pages, step 3"]');
+  expect(pagesStep).not.toBeNull();
+  await act(async () => pagesStep!.click());
+  expect(document.body.textContent).toContain("Connect Stark Pages");
+  expect(connect).not.toHaveBeenCalled();
 });

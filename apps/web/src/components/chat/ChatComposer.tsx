@@ -5785,7 +5785,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         size={composerControlsCollapsed || detachComposerDetails ? "xs" : "sm"}
         triggerClassName={
           detachComposerDetails
-            ? "min-w-0 max-w-[min(19rem,50cqw)]"
+            ? "w-fit min-w-0 max-w-[min(19rem,50cqw,100%)] justify-self-start"
             : composerControlsCollapsed
               ? cn(
                   "min-w-13 shrink text-xs!",

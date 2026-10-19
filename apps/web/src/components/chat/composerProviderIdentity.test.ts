@@ -4,7 +4,7 @@ import {
   ProviderInstanceId,
   type ServerProvider,
 } from "@starkfuture/contracts";
-import { composerProviderIdentity } from "./composerProviderIdentity";
+import { composerAccountIdentity, composerProviderIdentity } from "./composerProviderIdentity";
 
 function provider(
   driver: string,
@@ -28,6 +28,29 @@ function provider(
 }
 
 describe("composerProviderIdentity", () => {
+  it("shows a named profile while keeping subscription boilerplate out of the composer", () => {
+    expect(
+      composerAccountIdentity(
+        provider("claudeAgent", "Claude", {
+          status: "authenticated",
+          label: "Claude Team Subscription",
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      composerAccountIdentity(
+        provider("codex", "Codex", {
+          status: "authenticated",
+          label: "ChatGPT Pro 20x Subscription",
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      composerAccountIdentity(
+        provider("claudeAgent", "Stark Future 2", { status: "authenticated" }),
+      ),
+    ).toBe("Claude · Stark Future 2");
+  });
   it("keeps the selected provider alongside its reported profile", () => {
     expect(
       composerProviderIdentity(

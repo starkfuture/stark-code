@@ -325,7 +325,7 @@ import {
   renderProviderTraitsPicker,
   summarizeProviderTraits,
 } from "./composerProviderState";
-import { composerProviderIdentity } from "./composerProviderIdentity";
+import { composerAccountIdentity } from "./composerProviderIdentity";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
 import {
   providerSupportsManualCompaction,
@@ -5677,6 +5677,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const restingHiddenBlockCount = composerControlsCollapsed ? restingControlsHiddenBlockCount : 0;
   const iconOnlyBlockCount = composerControlsCollapsed ? restingControlsIconOnlyBlockCount : 0;
   const detachComposerDetails = !composerControlsCollapsed && detailsControlsHost != null;
+  const accountIdentity = selectedProviderStatus
+    ? composerAccountIdentity(selectedProviderStatus)
+    : null;
   const restingBlockDefs = [
     {
       id: "mode",
@@ -5822,9 +5825,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       {!providerCatalogPending && (multipleModelSelections?.length ?? 0) < 2 ? (
         <div
           className={
-            detachComposerDetails
+            detachComposerDetails && accountIdentity
               ? "col-span-2 justify-self-end @min-[640px]/composer-details:col-span-1"
-              : "contents"
+              : detachComposerDetails
+                ? "justify-self-end"
+                : "contents"
           }
         >
           <ComposerUsageRing
@@ -7126,16 +7131,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             <div
               data-composer-details="true"
               data-composer-context-control
-              className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-1 pt-2 text-xs text-muted-foreground @min-[640px]/composer-details:grid-cols-[minmax(0,1fr)_auto_auto]"
+              className={cn(
+                "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-1 pt-2 text-xs text-muted-foreground",
+                accountIdentity &&
+                  "@min-[640px]/composer-details:grid-cols-[minmax(0,1fr)_auto_auto]",
+              )}
             >
-              {!showProviderUnavailable && selectedProviderStatus ? (
+              {!showProviderUnavailable && accountIdentity ? (
                 <Tooltip>
                   <TooltipTrigger
                     render={<span data-composer-provider-identity className="min-w-0 truncate" />}
                   >
-                    {composerProviderIdentity(selectedProviderStatus)}
+                    {accountIdentity}
                   </TooltipTrigger>
-                  <TooltipPopup>{composerProviderIdentity(selectedProviderStatus)}</TooltipPopup>
+                  <TooltipPopup>{accountIdentity}</TooltipPopup>
                 </Tooltip>
               ) : null}
               {composerModelControls}

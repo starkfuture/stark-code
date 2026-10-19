@@ -100,6 +100,8 @@ export const BrowserImportSource = Schema.Struct({
   id: BrowserImportSourceId,
   name: TrimmedNonEmptyString,
   profiles: Schema.Array(BrowserImportSourceProfile),
+  /** The OS's HTTPS handler, when it can be identified. Does not choose a profile. */
+  isDefault: Schema.optional(Schema.Boolean),
   /** Absent when the source is importable. */
   unavailable: Schema.optional(BrowserImportUnavailableReason),
 });

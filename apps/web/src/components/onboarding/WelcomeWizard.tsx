@@ -76,24 +76,24 @@ import { Dialog } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { FolderStep } from "./FolderStep";
-import { PagesStep } from "./PagesStep";
+import { BrowserStep } from "./BrowserStep";
 
 /**
  * First-run welcome wizard. Rendered over the workspace at `/welcome` on a
  * fresh install (no completed-onboarding flag, empty workspace). Flow per the
  * onboarding overhaul spec: connection choice → sign-in/pair (remote paths) →
- * managed Codex setup or an inline CLI terminal → Pages (desktop) → main folder → main screen.
+ * managed Codex setup or an inline CLI terminal → browser import (desktop) → main folder → main screen.
  * Every step past the connection gate is skippable; the whole wizard is
  * re-runnable by clearing the flag.
  */
 
-type WizardStep = "connection" | "agents" | "pages" | "folder";
+type WizardStep = "connection" | "agents" | "browser" | "folder";
 
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
 const ONBOARDING_LABELS: Record<WizardStep, string> = {
   connection: "Connect",
   agents: "Agents",
-  pages: "Pages",
+  browser: "Browser",
   folder: "Folder",
 };
 
@@ -108,9 +108,10 @@ export function WelcomeWizard({
   readonly onDone: (projectRef?: ScopedProjectRef) => void | Promise<void>;
 }) {
   const completeOnboarding = useCompleteOnboarding();
-  const hasPages = typeof window !== "undefined" && !!window.desktopBridge?.publishedPages;
-  const steps: readonly WizardStep[] = hasPages
-    ? ["connection", "agents", "pages", "folder"]
+  const hasBrowserImport =
+    typeof window !== "undefined" && !!window.desktopBridge?.preview?.listBrowserImportSources;
+  const steps: readonly WizardStep[] = hasBrowserImport
+    ? ["connection", "agents", "browser", "folder"]
     : ["connection", "agents", "folder"];
   const [step, setStep] = useState<WizardStep>(resumeEnvironmentId ? "agents" : "connection");
   const { environments } = useEnvironments();
@@ -247,10 +248,10 @@ export function WelcomeWizard({
           ) : step === "agents" ? (
             <AgentsStep
               environmentIds={setupIds}
-              onContinue={() => setStep(hasPages ? "pages" : "folder")}
+              onContinue={() => setStep(hasBrowserImport ? "browser" : "folder")}
             />
-          ) : step === "pages" ? (
-            <PagesStep onContinue={() => setStep("folder")} />
+          ) : step === "browser" ? (
+            <BrowserStep onContinue={() => setStep("folder")} />
           ) : (
             <FolderStep
               environmentIds={setupIds}

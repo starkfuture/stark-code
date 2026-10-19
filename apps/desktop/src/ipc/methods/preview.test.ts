@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import * as ElectronApp from "../../electron/ElectronApp.ts";
 import * as PreviewIpc from "./preview.ts";
 
 const { fromPartition } = vi.hoisted(() => ({
@@ -111,6 +112,51 @@ describe("preview IPC methods", () => {
       expect(received[0]?.namespace).toBe("profile");
       expect(received[1]?.namespace).toBeUndefined();
     }).pipe(Effect.provideService(BrowserImport.BrowserImport, browserImport));
+  });
+
+  effectIt.effect("marks the default source without importing or choosing its profile", () => {
+    const importCookies = vi.fn();
+    const sources = [
+      { id: "chrome" as const, name: "Chrome", profiles: [] },
+      {
+        id: "firefox" as const,
+        name: "Firefox",
+        profiles: [],
+        unavailable: "browserRunning" as const,
+      },
+    ];
+    return Effect.gen(function* () {
+      const listed = yield* PreviewIpc.listBrowserImportSources.handler(undefined);
+      expect(listed).toEqual([sources[0], { ...sources[1], isDefault: true }]);
+      expect(importCookies).not.toHaveBeenCalled();
+    }).pipe(
+      Effect.provideService(BrowserImport.BrowserImport, {
+        listSources: Effect.succeed(sources),
+        importCookies,
+      }),
+      Effect.provideService(ElectronApp.ElectronApp, {
+        ...ElectronApp.make,
+        applicationForProtocol: () =>
+          Effect.succeed({ name: "Firefox", path: "/Applications/Firefox.app" }),
+      }),
+    );
+  });
+
+  effectIt.effect("keeps sources usable when the default handler is unknown", () => {
+    const sources = [{ id: "chrome" as const, name: "Chrome", profiles: [] }];
+    return Effect.gen(function* () {
+      expect(yield* PreviewIpc.listBrowserImportSources.handler(undefined)).toEqual(sources);
+    }).pipe(
+      Effect.provideService(BrowserImport.BrowserImport, {
+        listSources: Effect.succeed(sources),
+        importCookies: vi.fn(),
+      }),
+      Effect.provideService(ElectronApp.ElectronApp, {
+        ...ElectronApp.make,
+        applicationForProtocol: () =>
+          Effect.succeed({ name: "Browser Selector", path: "/Applications/Browser Selector.app" }),
+      }),
+    );
   });
 
   effectIt.effect("rejects invalid webContents ids before resolving the preview service", () =>

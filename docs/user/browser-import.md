@@ -3,12 +3,17 @@
 The desktop app can import cookies from another browser so you can reuse its signed-in sessions
 in the preview browser.
 
-Open **Settings → Integrations → Browser profiles → Add profile**, then choose a browser under
-**Import from**. Close the source browser before importing, and allow an operating-system keyring
-unlock prompt if one appears.
+During setup, choose **Browser** after connecting your agents. Your default browser is selected
+when it is recognized. Choose **Review import**, select the browser profile, then choose **Import**.
+Setup imports into your current default Stark Code browser profile.
+
+To import later or create a separate profile, open **Settings → Integrations → Browser profiles →
+Add profile**, then choose a browser under **Import from**. Close the source browser before
+importing, and allow an operating-system keyring unlock prompt if one appears.
 
 This is a one-time copy. Later login changes stay separate between the two browsers, and some
 sites may still require you to sign in again.
+Saved passwords, bookmarks and browsing history are not imported.
 
 On macOS, Safari imports need Full Disk Access. Choose **Allow**, drag Stark Code into the
 System Settings permission list, and turn access on. **Continue** becomes available when access

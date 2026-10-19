@@ -8,6 +8,7 @@ const {
   autoUpdaterRemoveListenerMock,
   exitMock,
   getAppPathMock,
+  getApplicationInfoForProtocolMock,
   getSystemLocaleMock,
   getVersionMock,
   onMock,
@@ -29,6 +30,11 @@ const {
   autoUpdaterRemoveListenerMock: vi.fn(),
   exitMock: vi.fn(),
   getAppPathMock: vi.fn(() => "/app"),
+  getApplicationInfoForProtocolMock: vi.fn(async () => ({
+    name: "Safari",
+    path: "/Applications/Safari.app",
+    icon: { privateNativeObject: true },
+  })),
   getSystemLocaleMock: vi.fn(() => "en-GB"),
   getVersionMock: vi.fn(() => "1.2.3"),
   onMock: vi.fn(),
@@ -60,6 +66,7 @@ vi.mock("electron", () => ({
       setIcon: setDockIconMock,
     },
     getAppPath: getAppPathMock,
+    getApplicationInfoForProtocol: getApplicationInfoForProtocolMock,
     getSystemLocale: getSystemLocaleMock,
     getVersion: getVersionMock,
     isPackaged: true,
@@ -88,6 +95,7 @@ describe("ElectronApp", () => {
     autoUpdaterOnMock.mockClear();
     autoUpdaterRemoveListenerMock.mockClear();
     exitMock.mockClear();
+    getApplicationInfoForProtocolMock.mockClear();
     onMock.mockClear();
     quitMock.mockClear();
     relaunchMock.mockClear();
@@ -116,6 +124,29 @@ describe("ElectronApp", () => {
       const electronApp = yield* ElectronApp.ElectronApp;
 
       assert.strictEqual(yield* electronApp.systemLocale, "en-GB");
+    }).pipe(Effect.provide(ElectronApp.layer)),
+  );
+
+  it.effect("returns handler metadata without forwarding its native icon", () =>
+    Effect.gen(function* () {
+      const electronApp = yield* ElectronApp.ElectronApp;
+      assert.deepEqual(yield* electronApp.applicationForProtocol("https://"), {
+        name: "Safari",
+        path: "/Applications/Safari.app",
+      });
+      assert.deepEqual(getApplicationInfoForProtocolMock.mock.calls, [["https://"]]);
+    }).pipe(Effect.provide(ElectronApp.layer)),
+  );
+
+  it.effect("leaves unsupported or failed handler lookups unknown", () =>
+    Effect.gen(function* () {
+      getApplicationInfoForProtocolMock.mockRejectedValueOnce(new Error("No handler"));
+      const electronApp = yield* ElectronApp.ElectronApp;
+      assert.isUndefined(yield* electronApp.applicationForProtocol("https://"));
+      getApplicationInfoForProtocolMock.mockImplementationOnce(() => {
+        throw new Error("Unsupported platform");
+      });
+      assert.isUndefined(yield* electronApp.applicationForProtocol("https://"));
     }).pipe(Effect.provide(ElectronApp.layer)),
   );
 

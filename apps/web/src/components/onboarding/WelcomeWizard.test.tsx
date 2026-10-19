@@ -143,23 +143,29 @@ it("keeps setup open when saving completion fails and retries without duplicate 
   expect(mocks.importThreads).not.toHaveBeenCalled();
 });
 
-it("offers Pages after agents on desktop and can revisit it from the folder step", async () => {
-  const status = vi.fn().mockResolvedValue({ state: "signed-out", message: null });
+it("offers browser import after agents and can revisit it without importing or signing into Pages", async () => {
+  const listBrowserImportSources = vi.fn().mockResolvedValue([]);
+  const importBrowserCookies = vi.fn();
   const connect = vi.fn();
   window.desktopBridge = {
-    publishedPages: { status, connect },
+    preview: { listBrowserImportSources, importBrowserCookies },
+    publishedPages: { connect },
   } as unknown as NonNullable<Window["desktopBridge"]>;
   await act(async () => root.render(<WelcomeWizard localAvailable onDone={vi.fn()} />));
   await click("Continue");
   expect(document.body.textContent).toContain("Connect your agents");
   await click("Continue");
-  expect(document.body.textContent).toContain("Connect Stark Pages");
+  expect(document.body.textContent).toContain("Bring your browser sign-ins");
+  expect(importBrowserCookies).not.toHaveBeenCalled();
   expect(connect).not.toHaveBeenCalled();
   await click("Skip for now");
   expect(document.body.textContent).toContain("Choose your main folder");
-  const pagesStep = document.querySelector<HTMLButtonElement>('button[aria-label="Pages, step 3"]');
-  expect(pagesStep).not.toBeNull();
-  await act(async () => pagesStep!.click());
-  expect(document.body.textContent).toContain("Connect Stark Pages");
+  const browserStep = document.querySelector<HTMLButtonElement>(
+    'button[aria-label="Browser, step 3"]',
+  );
+  expect(browserStep).not.toBeNull();
+  await act(async () => browserStep!.click());
+  expect(document.body.textContent).toContain("Bring your browser sign-ins");
+  expect(importBrowserCookies).not.toHaveBeenCalled();
   expect(connect).not.toHaveBeenCalled();
 });

@@ -50,6 +50,10 @@ export class ElectronApp extends Context.Service<
      * pinned to `en-US` however the machine is configured.
      */
     readonly systemLocale: Effect.Effect<string>;
+    /** OS handler metadata only; this does not open the URL or read browser data. */
+    readonly applicationForProtocol: (
+      url: string,
+    ) => Effect.Effect<{ readonly name: string; readonly path: string } | undefined>;
     readonly whenReady: Effect.Effect<void, ElectronAppWhenReadyError>;
     readonly quit: Effect.Effect<void>;
     readonly exit: (code: number) => Effect.Effect<void>;
@@ -130,6 +134,12 @@ export const make = ElectronApp.of({
   // (`en_GB`). `Intl` rejects those outright rather than normalizing them, so
   // the tag is normalized here rather than in the renderer that consumes it.
   systemLocale: Effect.sync(() => Electron.app.getSystemLocale().replace(/_/g, "-")),
+  applicationForProtocol: (url) =>
+    Effect.tryPromise(() => Electron.app.getApplicationInfoForProtocol(url)).pipe(
+      Effect.map(({ name, path }) => ({ name, path })),
+      Effect.timeout("2 seconds"),
+      Effect.orElseSucceed(() => undefined),
+    ),
   whenReady: Effect.gen(function* () {
     const isPackaged = Electron.app.isPackaged;
     yield* Effect.tryPromise({

@@ -30,7 +30,9 @@ import * as Option from "effect/Option";
 import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as ElectronApp from "../../electron/ElectronApp.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import { defaultBrowserSourceId } from "../../preview/BrowserImport/DefaultBrowser.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
@@ -333,7 +335,15 @@ export const listBrowserImportSources = DesktopIpc.makeIpcMethod({
   result: Schema.Array(BrowserImportSource),
   handler: Effect.fn("desktop.ipc.preview.listBrowserImportSources")(function* () {
     const browserImport = yield* BrowserImport.BrowserImport;
-    return yield* browserImport.listSources;
+    const app = yield* ElectronApp.ElectronApp;
+    const [sources, application] = yield* Effect.all(
+      [browserImport.listSources, app.applicationForProtocol("https://")],
+      { concurrency: "unbounded" },
+    );
+    const defaultSourceId = defaultBrowserSourceId(application);
+    return sources.map((source) =>
+      source.id === defaultSourceId ? { ...source, isDefault: true } : source,
+    );
   }),
 });
 

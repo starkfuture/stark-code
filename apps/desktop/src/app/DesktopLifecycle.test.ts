@@ -34,6 +34,7 @@ function layerElectronApp(
     metadata: Effect.die("unexpected metadata read"),
     name: Effect.succeed("Stark Code"),
     systemLocale: Effect.succeed("en-US"),
+    applicationForProtocol: () => Effect.die("unexpected protocol handler lookup"),
     whenReady: Effect.void,
     quit,
     exit: () => Effect.void,

@@ -25,6 +25,7 @@ const setup = Effect.fn(function* (
     scope?: "server" | "all";
     reconnect?: (name: string) => Effect.Effect<void, ProviderAdapter.ProviderAdapterV2Error>;
     network?: McpRecovery.NetworkState;
+    reload?: ProviderAdapter.ProviderAdapterV2McpServers["reload"];
   } = {},
 ) {
   const rows = yield* Ref.make(initial);
@@ -41,6 +42,7 @@ const setup = Effect.fn(function* (
     startSignIn: () => Effect.succeed({ callbackExpected: false, completed: true }),
     submitCallback: () => Effect.void,
     signOut: () => Effect.void,
+    ...(options.reload ? { reload: options.reload } : {}),
   };
   const recovery = yield* McpRecovery.make({
     api,
@@ -111,13 +113,15 @@ it.effect("turn reservation and direct tool calls wait for an in-flight reconnec
   }).pipe(Effect.scoped),
 );
 
-it.effect.each(["vpn-off", "network-unavailable"] as const)("suspends reconnects for %s", (state) =>
-  Effect.gen(function* () {
-    const s = yield* setup([row("broken", "failed")], { network: state });
-    const result = yield* s.recovery.check;
-    assert.equal(result[0]?.recovery?.state, state);
-    assert.deepEqual(s.calls, []);
-  }).pipe(Effect.scoped),
+it.effect.each(["vpn-off", "network-unavailable"] as const)(
+  "reports known network conditions for %s",
+  (state) =>
+    Effect.gen(function* () {
+      const s = yield* setup([row("broken", "failed")], { network: state });
+      const result = yield* s.recovery.check;
+      assert.equal(result[0]?.recovery?.state, state);
+      assert.deepEqual(s.calls, state === "vpn-off" ? [] : ["broken"]);
+    }).pipe(Effect.scoped),
 );
 
 it.effect("rechecks immediately before reconnect and preserves an already recovered server", () =>
@@ -146,13 +150,13 @@ it.effect("rechecks immediately before reconnect and preserves an already recove
   }).pipe(Effect.scoped),
 );
 
-it.effect("bounds retries across repeated observations and stops on authentication failure", () =>
+it.effect("backs off progressively without exhausting and stops on authentication failure", () =>
   Effect.gen(function* () {
     const s = yield* setup([row("broken", "failed")]);
     yield* s.recovery.check;
     yield* s.recovery.check;
     assert.equal(s.calls.length, 1);
-    yield* TestClock.adjust("8 seconds");
+    yield* TestClock.adjust("30 seconds");
     yield* s.recovery.check;
     assert.equal(s.calls.length, 2);
     yield* Ref.set(s.rows, [row("broken", "needs-auth")]);
@@ -164,7 +168,10 @@ it.effect("bounds retries across repeated observations and stops on authenticati
     yield* TestClock.adjust("60 seconds");
     const result = yield* s.recovery.check;
     assert.equal(s.calls.length, 3);
-    assert.equal(result[0]?.recovery?.state, "exhausted");
+    assert.equal(result[0]?.recovery?.state, "waiting");
+    yield* TestClock.adjust("120 seconds");
+    yield* s.recovery.check;
+    assert.equal(s.calls.length, 4);
   }).pipe(Effect.scoped),
 );
 
@@ -223,13 +230,14 @@ it.effect("an RPC timeout never releases new work while the provider is still re
         ran = true;
       }),
     );
-    assert.equal((yield* start.pipe(Effect.result))._tag, "Failure");
+    const queued = yield* start.pipe(Effect.forkChild);
+    yield* TestClock.adjust("30 seconds");
     assert.equal(ran, false);
     yield* s.recovery.check;
     assert.equal(s.calls.length, 1);
     yield* Deferred.succeed(finish, undefined);
     yield* Effect.yieldNow;
-    yield* start;
+    yield* Fiber.join(queued);
     assert.equal(ran, true);
   }).pipe(Effect.scoped),
 );
@@ -248,10 +256,77 @@ it.effect("a cancelled caller cannot release maintenance during a native tool re
     yield* Fiber.interrupt(caller);
     yield* s.recovery.check;
     assert.equal(s.calls.length, 0);
-    assert.equal((yield* s.recovery.withActivity(Effect.void).pipe(Effect.result))._tag, "Failure");
+    assert.equal(yield* s.recovery.hasPendingWork, true);
     yield* Deferred.succeed(finish, undefined);
     yield* Effect.yieldNow;
     yield* s.recovery.check;
     assert.equal(s.calls.length, 1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("gives a new failure a fresh budget after a sustained healthy spell", () =>
+  Effect.gen(function* () {
+    const s = yield* setup([row("service", "failed")]);
+    yield* s.recovery.check;
+    yield* TestClock.adjust("30 seconds");
+    yield* s.recovery.check;
+    assert.equal(s.calls.length, 2);
+    yield* Ref.set(s.rows, [row("service", "connected")]);
+    yield* s.recovery.check;
+    yield* TestClock.adjust("70 seconds");
+    yield* Ref.set(s.rows, [row("service", "failed")]);
+    const result = yield* s.recovery.check;
+    assert.equal(s.calls.length, 3);
+    assert.equal(result[0]?.recovery?.attempts, 1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("keeps independent Codex requests concurrent but makes global reload exclusive", () =>
+  Effect.gen(function* () {
+    const firstEntered = yield* Deferred.make<void>();
+    const secondEntered = yield* Deferred.make<void>();
+    const releaseFirst = yield* Deferred.make<void>();
+    const releaseReload = yield* Deferred.make<void>();
+    const reloadEntered = yield* Deferred.make<void>();
+    const s = yield* setup([row("service", "connected")], {
+      scope: "all",
+      reload: () =>
+        Deferred.succeed(reloadEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseReload)),
+          Effect.as({ status: "reloaded" as const, failedServers: [] }),
+        ),
+    });
+    const first = yield* s.recovery
+      .withToolActivity(
+        Deferred.succeed(firstEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseFirst)),
+        ),
+      )
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(firstEntered);
+    yield* s.recovery.withToolActivity(Deferred.succeed(secondEntered, undefined));
+    assert.isTrue(yield* Deferred.isDone(secondEntered));
+    assert.equal(
+      (yield* s.recovery.api.reload!({ force: false }).pipe(Effect.result))._tag,
+      "Failure",
+    );
+    yield* Deferred.succeed(releaseFirst, undefined);
+    yield* Fiber.join(first);
+    const reload = yield* s.recovery.api.reload!({ force: false }).pipe(Effect.forkChild);
+    yield* Deferred.await(reloadEntered);
+    let started = false;
+    const next = yield* s.recovery
+      .withActivity(
+        Effect.sync(() => {
+          started = true;
+        }),
+      )
+      .pipe(Effect.forkChild);
+    yield* Effect.yieldNow;
+    assert.isFalse(started);
+    yield* Deferred.succeed(releaseReload, undefined);
+    yield* Fiber.join(reload);
+    yield* Fiber.join(next);
+    assert.isTrue(started);
   }).pipe(Effect.scoped),
 );

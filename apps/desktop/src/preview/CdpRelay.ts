@@ -75,6 +75,9 @@ export function createCdpRelayConnection(
    * page's events; other ids are the page's own child sessions, such as iframes.
    */
   const sessions = new Map<string, "browser" | "page">([[PAGE_SESSION_ID, "page"]]);
+  // Only sessions announced by this guest's own debugger belong to its child
+  // frames/workers. Never forward an arbitrary server-supplied session id.
+  const childSessions = new Set<string>();
   let sessionSequence = 0;
   const newSession = (kind: "browser" | "page") => {
     const sessionId = `stark-preview-${kind}-${++sessionSequence}`;
@@ -159,6 +162,19 @@ export function createCdpRelayConnection(
 
   const pageCommand = (command: CdpCommand): Promise<unknown> => {
     const child = sessions.get(command.sessionId!) === "page" ? undefined : command.sessionId;
+    if (child !== undefined && !childSessions.has(child)) {
+      return Promise.reject(
+        new Error("Only this preview tab's known child sessions are accessible."),
+      );
+    }
+    // A page-session wrapper must not bypass the one-target browser facade.
+    // Only auto-attaching this page's own descendants needs real Target CDP.
+    if (
+      command.method.startsWith("Browser.") ||
+      (command.method.startsWith("Target.") && command.method !== "Target.setAutoAttach")
+    ) {
+      return browserCommand(command);
+    }
     // The page itself is already running, but its child frames are not:
     // Playwright auto-attaches with waitForDebuggerOnStart, so Chromium pauses
     // every new cross-site iframe and worker until this reaches it. Swallowing
@@ -207,6 +223,14 @@ export function createCdpRelayConnection(
     },
     event: (method, params, sessionId) => {
       if (!attached) return;
+      if (method === "Target.attachedToTarget" && typeof params === "object" && params !== null) {
+        const childId = (params as { sessionId?: unknown }).sessionId;
+        if (typeof childId === "string") childSessions.add(childId);
+      }
+      if (method === "Target.detachedFromTarget" && typeof params === "object" && params !== null) {
+        const childId = (params as { sessionId?: unknown }).sessionId;
+        if (typeof childId === "string") childSessions.delete(childId);
+      }
       // Download events are the browser's; Playwright listens on its root session.
       if (method.startsWith("Browser.download")) {
         send({ method, params });

@@ -17,13 +17,19 @@ export function FoldedSettingsSection({
   summary,
   control,
   headerPlacement = "inside",
+  revealForTargets,
+  openRequest = 0,
   children,
 }: {
   readonly id: string;
   readonly title: string;
   readonly summary?: string | null;
   readonly control?: ReactNode;
-  readonly headerPlacement?: "inside" | "outside";
+  readonly headerPlacement?: "inside" | "outside" | "footer";
+  /** Search aliases reveal the fold while the actual target owns scrolling. */
+  readonly revealForTargets?: ReadonlyArray<string>;
+  /** Incremented by an action elsewhere on this page to reveal the section. */
+  readonly openRequest?: number;
   readonly children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -31,23 +37,45 @@ export function FoldedSettingsSection({
   const targetRef = useSettingsSearchTarget<HTMLElement>(id);
   // A search jump lands inside the fold, so open it before the scroll runs.
   const [openedForTarget, setOpenedForTarget] = useState<string | null>(null);
-  if (searchTargetId === id && openedForTarget !== id) {
-    setOpenedForTarget(id);
+  const [handledOpenRequest, setHandledOpenRequest] = useState(openRequest);
+  if (openRequest !== handledOpenRequest) {
+    setHandledOpenRequest(openRequest);
+    if (!open) setOpen(true);
+  }
+  // Handling a target clears the URL hash. A later search for the same setting
+  // is a new request, even if the user closed this fold in between.
+  if (searchTargetId === null && openedForTarget !== null) {
+    setOpenedForTarget(null);
+  }
+  if (
+    searchTargetId !== null &&
+    (searchTargetId === id || revealForTargets?.includes(searchTargetId)) &&
+    openedForTarget !== searchTargetId
+  ) {
+    setOpenedForTarget(searchTargetId);
     if (!open) setOpen(true);
   }
 
-  if (headerPlacement === "outside") {
+  if (headerPlacement === "outside" || headerPlacement === "footer") {
     return (
-      <section id={id} ref={targetRef} tabIndex={-1} className="outline-none">
+      <section
+        id={id}
+        ref={targetRef}
+        tabIndex={-1}
+        className={cn("outline-none", headerPlacement === "footer" && "stark-runtime-fold")}
+      >
         <Collapsible open={open} onOpenChange={setOpen}>
           <div className="space-y-2.5">
             <div
               data-settings-scroll-target
-              className="flex min-h-7 items-start justify-between gap-4 px-3 sm:px-4"
+              className={
+                headerPlacement === "footer"
+                  ? "stark-runtime-fold-heading"
+                  : "flex min-h-7 items-start justify-between gap-4 px-3 sm:px-4"
+              }
             >
               <h2>
                 <CollapsibleTrigger className="flex min-h-7 items-center gap-2 rounded-md text-sm font-normal text-foreground/70 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-                  {title}
                   <ChevronRightIcon
                     aria-hidden
                     className={cn(
@@ -55,8 +83,10 @@ export function FoldedSettingsSection({
                       open && "rotate-90",
                     )}
                   />
+                  {title}
                 </CollapsibleTrigger>
               </h2>
+              {summary ? <span className="stark-runtime-summary">{summary}</span> : null}
               {control}
             </div>
             <CollapsiblePanel>

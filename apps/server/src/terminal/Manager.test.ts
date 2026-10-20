@@ -5,6 +5,7 @@ import {
   type TerminalAttachStreamEvent,
   type TerminalEvent,
   type NativeAgentReply,
+  type NativeAgentAttention,
   type TerminalMetadataStreamEvent,
   type TerminalOpenInput,
   type TerminalRestartInput,
@@ -61,6 +62,7 @@ class FakePtyProcess implements PtyAdapter.PtyProcess {
   readonly resizeCalls: Array<{ cols: number; rows: number }> = [];
   readonly killSignals: Array<string | undefined> = [];
   readonly pid: number;
+  readonly registeredDataCallbacks: Array<(data: string) => void> = [];
   writeFailure: unknown | undefined;
   resizeFailure: unknown | undefined;
   private readonly dataListeners = new Set<(data: string) => void>();
@@ -92,6 +94,7 @@ class FakePtyProcess implements PtyAdapter.PtyProcess {
   }
 
   onData(callback: (data: string) => void): () => void {
+    this.registeredDataCallbacks.push(callback);
     this.dataListeners.add(callback);
     return () => {
       this.dataListeners.delete(callback);
@@ -2478,6 +2481,152 @@ it.layer(
   );
 
   it.effect(
+    "tracks only managed native Codex lifecycle, preserving output and clearing resolved attention",
+    () =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          resolveProviderInstanceEnvironment: () => Effect.succeed({}),
+          resolveAgentShellLaunch: () =>
+            Effect.succeed({ shell: "/installed/codex", nativeProvider: "codex" as const }),
+        });
+        const input = openInput({
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          agentShell: true,
+        });
+        const snapshots: ReadonlyArray<NativeAgentAttention>[] = [];
+        const unsubscribe = yield* manager.observeNativeAttention((rows) =>
+          Effect.sync(() => snapshots.push(rows)),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+        const emit = (process: FakePtyProcess, data: string) =>
+          Effect.gen(function* () {
+            const delivered = yield* Deferred.make<void>();
+            const stop = yield* manager.subscribe((event) =>
+              event.type === "output" && event.data === data
+                ? Deferred.succeed(delivered, undefined)
+                : Effect.void,
+            );
+            yield* Effect.sync(() => process.emitData(data));
+            yield* Deferred.await(delivered);
+            stop();
+          });
+        const blocked = "\x1b]7501;state=blocked:app=codex\x1b\\";
+        // An ordinary shell cannot opt itself into native attention.
+        yield* manager.open(openInput({ threadId: "ordinary" }));
+        yield* emit(ptyAdapter.processes[0]!, blocked);
+        expect(snapshots).toEqual([[]]);
+
+        yield* manager.open(input);
+        const process = ptyAdapter.processes[1]!;
+        yield* emit(process, blocked.slice(0, -1));
+        expect(snapshots).toEqual([[]]);
+        yield* emit(process, blocked.slice(-1));
+        expect(snapshots.at(-1)).toMatchObject([
+          {
+            threadId: input.threadId,
+            terminalId: input.terminalId,
+            provider: "codex",
+            kind: "input",
+          },
+        ]);
+        expect(snapshots.at(-1)?.[0]).not.toHaveProperty("sessionId");
+        const snapshotCount = snapshots.length;
+        yield* emit(process, blocked);
+        expect(snapshots).toHaveLength(snapshotCount);
+        for (const state of ["working", "idle", "done", "error", "clear"]) {
+          yield* emit(process, blocked);
+          yield* emit(
+            process,
+            state === "clear"
+              ? "\x1b]7501;state=clear\x07"
+              : `\x1b]7501;state=${state}:app=codex\x07`,
+          );
+          expect(snapshots.at(-1)).toEqual([]);
+        }
+        yield* emit(process, "\x1b]7501;state=blocked:app=codex:kind=auth\x07");
+        expect(snapshots.at(-1)?.[0]?.kind).toBe("auth");
+        const exited = yield* Deferred.make<void>();
+        yield* manager.subscribe((event) =>
+          event.type === "exited" ? Deferred.succeed(exited, undefined) : Effect.void,
+        );
+        yield* Effect.sync(() => process.emitExit({ exitCode: 0, signal: null }));
+        yield* Deferred.await(exited);
+        expect(snapshots.at(-1)).toEqual([]);
+        yield* manager.open(input);
+        expect(snapshots.at(-1)).toEqual([]);
+        yield* emit(ptyAdapter.processes[2]!, blocked);
+        yield* manager.close(input);
+        expect(snapshots.at(-1)).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "does not replay native status or let an old drain discard replacement lifecycle controls",
+    () =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          resolveProviderInstanceEnvironment: () => Effect.succeed({}),
+          resolveAgentShellLaunch: () =>
+            Effect.succeed({ shell: "/installed/codex", nativeProvider: "codex" as const }),
+        });
+        const input = openInput({
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          agentShell: true,
+        });
+        const oldSeen = yield* Deferred.make<void>();
+        const releaseOld = yield* Deferred.make<void>();
+        const oldDelivered = yield* Deferred.make<void>();
+        const newSeen = yield* Deferred.make<void>();
+        const releaseNew = yield* Deferred.make<void>();
+        const blockedSeen = yield* Deferred.make<void>();
+        const blocked = "\x1b]7501;state=blocked:app=codex\x1b\\";
+        yield* manager.subscribe((event) =>
+          Effect.gen(function* () {
+            if (event.type !== "output") return;
+            if (event.data === "old-held") {
+              yield* Deferred.succeed(oldSeen, undefined);
+              yield* Deferred.await(releaseOld);
+              yield* Deferred.succeed(oldDelivered, undefined);
+            } else if (event.data === "new-held") {
+              yield* Deferred.succeed(newSeen, undefined);
+              yield* Deferred.await(releaseNew);
+            } else if (event.data === blocked) {
+              yield* Deferred.succeed(blockedSeen, undefined);
+            }
+          }),
+        );
+        const snapshots: ReadonlyArray<NativeAgentAttention>[] = [];
+        yield* manager.observeNativeAttention((rows) => Effect.sync(() => snapshots.push(rows)));
+        yield* manager.open(input);
+        const oldProcess = ptyAdapter.processes[0]!;
+        yield* Effect.sync(() => oldProcess.emitData("old-held"));
+        yield* Deferred.await(oldSeen);
+        yield* manager.restart({ ...input, cols: 100, rows: 24 });
+        const newProcess = ptyAdapter.processes[1]!;
+        yield* Effect.sync(() => newProcess.emitData("new-held"));
+        yield* Deferred.await(newSeen);
+        yield* Effect.sync(() => {
+          newProcess.emitData(blocked);
+          // Simulate callbacks already queued before unsubscription.
+          oldProcess.registeredDataCallbacks[0]!(blocked);
+        });
+        yield* Deferred.succeed(releaseOld, undefined);
+        yield* Deferred.await(oldDelivered);
+        // Clearing scrollback cannot discard the queued, single blocked signal.
+        yield* manager.clear(input);
+        yield* Deferred.succeed(releaseNew, undefined);
+        yield* Deferred.await(blockedSeen);
+        expect(snapshots.at(-1)?.[0]?.kind).toBe("input");
+        yield* manager.restart({ ...input, cols: 100, rows: 24 });
+        expect(snapshots.at(-1)).toEqual([]);
+        const count = snapshots.length;
+        yield* manager.open(input);
+        expect(snapshots).toHaveLength(count);
+        expect(ptyAdapter.processes).toHaveLength(3);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
     "keeps completed replies off legacy terminal streams and restores the dedicated reader",
     () =>
       Effect.gen(function* () {
@@ -2506,6 +2655,14 @@ it.layer(
         );
         yield* Effect.addFinalizer(() => Effect.sync(stopAttach));
         const readerSnapshots: ReadonlyArray<NativeAgentReply>[] = [];
+        const attentionSnapshots: ReadonlyArray<NativeAgentAttention>[] = [];
+        const stopAttention = yield* manager.observeNativeAttention((rows) =>
+          Effect.sync(() => {
+            attentionSnapshots.push(rows);
+          }),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(stopAttention));
+        expect(attentionSnapshots).toEqual([[]]);
         const stopReader = yield* manager.observeNativeReplies(
           { threadId: input.threadId },
           (rows) => Effect.sync(() => readerSnapshots.push(rows)),
@@ -2513,7 +2670,49 @@ it.layer(
         yield* Effect.addFinalizer(() => Effect.sync(stopReader));
         const beforeCaptureEvents = (yield* getEvents).length;
         const env = ptyAdapter.spawnInputs[0]!.env;
+        const notification = yield* Effect.promise(async () => {
+          // @effect-diagnostics-next-line globalFetchInEffect:off -- Exercise the native hook's authenticated delivery.
+          const response = await fetch(env.STARK_NATIVE_REPLY_ENDPOINT!, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${env.STARK_NATIVE_REPLY_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body: encodeUnknownJson({
+              deliveryId: "22222222-2222-4222-8222-222222222222",
+              hook_event_name: "Notification",
+              session_id: "claude-session",
+              attention: "permission",
+              occurred_at: 1,
+            }),
+          });
+          await response.text();
+          return response.status;
+        });
+        expect(notification).toBe(200);
+        expect(attentionSnapshots.at(-1)?.[0]).toMatchObject({
+          threadId: input.threadId,
+          terminalId: input.terminalId,
+          kind: "permission",
+        });
         const result = yield* Effect.promise(async () => {
+          // @effect-diagnostics-next-line globalFetchInEffect:off -- Stop clears attention synchronously; reply capture follows independently.
+          const clear = await fetch(env.STARK_NATIVE_REPLY_ENDPOINT!, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${env.STARK_NATIVE_REPLY_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body: encodeUnknownJson({
+              deliveryId: "33333333-3333-4333-8333-333333333333",
+              hook_event_name: "Stop",
+              session_id: "claude-session",
+              attention: "clear",
+              occurred_at: 2,
+            }),
+          });
+          await clear.text();
+          expect(clear.status).toBe(200);
           // @effect-diagnostics-next-line globalFetchInEffect:off -- Exercise the real local hook delivery through the manager's owned endpoint.
           const response = await fetch(env.STARK_NATIVE_REPLY_ENDPOINT!, {
             method: "POST",
@@ -2528,12 +2727,14 @@ it.layer(
               turn_id: null,
               last_assistant_message: "Native completed reply",
               stop_hook_active: false,
+              occurred_at: 2,
             }),
           });
           await response.text();
           return response.status;
         });
         expect(result).toBe(200);
+        expect(attentionSnapshots.at(-1)).toEqual([]);
         const yieldedEvents = yield* getEvents;
         const oldClientEvents = Schema.Array(
           Schema.Struct({

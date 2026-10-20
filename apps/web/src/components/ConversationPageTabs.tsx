@@ -136,14 +136,16 @@ export function ConversationPageTabs({
         tabIndex={tabStopId === tab.id ? 0 : -1}
         className={cn(
           "flex h-8 min-w-0 cursor-pointer items-center gap-2 rounded-md border px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          isChat ? "shrink-0 font-medium" : "max-w-56 border-transparent font-medium",
+          isChat
+            ? "shrink-0 font-medium"
+            : "max-w-[min(470px,60vw)] border-transparent font-medium",
           isChat &&
             (selected
               ? "border-stark-gold/40 bg-stark-gold/10 text-foreground"
               : "border-stark-gold/20 bg-stark-gold-surface text-muted-foreground hover:bg-stark-gold/10 hover:text-foreground"),
           !isChat &&
             (selected
-              ? "bg-accent text-foreground"
+              ? "text-foreground"
               : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"),
         )}
         onFocus={() => setFocusState({ selectedId, focusedId: tab.id })}
@@ -192,7 +194,14 @@ export function ConversationPageTabs({
         >
           <div role="presentation" className="flex w-max items-center gap-1 py-0.5">
             {tabs.slice(1).map((page) => (
-              <div key={page.id} role="presentation" className="flex shrink-0 items-center gap-0.5">
+              <div
+                key={page.id}
+                role="presentation"
+                className={cn(
+                  "flex shrink-0 items-center gap-1 rounded-md pr-1",
+                  selectedId === page.id && "bg-accent",
+                )}
+              >
                 {renderTab(page)}
                 <Button
                   variant="ghost-muted"

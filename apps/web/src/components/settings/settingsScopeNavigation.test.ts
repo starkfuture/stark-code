@@ -28,7 +28,7 @@ function createSettingsRouter(initialEntry = "/settings/general") {
     search: { middlewares: [retainSettingsScope] },
     beforeLoad: ({ location }) => {
       if (location.pathname === "/settings") {
-        throw redirect({ to: "/settings/general", replace: true });
+        throw redirect({ to: "/settings/providers", replace: true });
       }
     },
   });
@@ -260,7 +260,7 @@ describe("settings scope navigation", () => {
     await router.navigate({ to: "/settings", search: { machine: "remote-server" } });
     expect(router.state.redirect).not.toBeUndefined();
     await router.navigate(router.state.redirect!.options);
-    expect(router.state.location.pathname).toBe("/settings/general");
+    expect(router.state.location.pathname).toBe("/settings/providers");
     expect(router.state.location.search).toEqual({ machine: "remote-server" });
   });
 });

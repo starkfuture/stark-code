@@ -235,6 +235,16 @@ describe("native agent shell launch", () => {
         expect(hooks.PreToolUse[0].hooks[0].shell).toBe("bash");
         expect(hooks.PreToolUse[0].hooks[0].onFailure).toBe("block");
         expect(hooks.Stop[0].hooks[0].shell).toBe("bash");
+        expect(hooks.Notification[0].matcher).toBe("permission_prompt|elicitation_dialog");
+        expect(hooks.Notification[0].hooks[0]).toMatchObject({
+          shell: "bash",
+          command: "ELECTRON_RUN_AS_NODE=1 '/capture node' '/capture script'",
+        });
+        expect(hooks.Stop[0].hooks[0]).toMatchObject({
+          async: false,
+          command: `${hooks.UserPromptSubmit[0].hooks[0].command} --attention-only`,
+        });
+        expect(hooks.UserPromptSubmit[0].hooks[0].command).toBe(hooks.Stop[0].hooks[1].command);
         const result = NodeChildProcess.execFileSync(
           "/bin/bash",
           ["-c", hooks.PreToolUse[0].hooks[0].command],

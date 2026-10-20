@@ -25,6 +25,7 @@ const BROWSER_IMPORT_SOURCE_IDS = [
   "arc",
   "helium",
   "firefox",
+  "zen",
   "safari",
 ] as const;
 
@@ -64,6 +65,10 @@ export const BrowserImportFailureReason = Schema.Literals([
   "unknownSource",
   /** The requested profile directory is not one the source reported. */
   "unknownSourceProfile",
+  /** Import is restricted to the personal profile and explicitly selected sites. */
+  "unsafeTarget",
+  /** Import requires an encrypted packaged runtime and an OS-backed keyring. */
+  "storageNotEncrypted",
   /** The target profile's Electron session could not be opened. */
   "sessionUnavailable",
   /**
@@ -93,6 +98,8 @@ export const BrowserImportSourceProfile = Schema.Struct({
    * Disk Access is granted).
    */
   cookieCount: Schema.optional(Schema.Int),
+  /** Cookie hosts only; no cookie values are read to build the site picker. */
+  domains: Schema.optional(Schema.Array(Schema.String)),
 });
 export type BrowserImportSourceProfile = typeof BrowserImportSourceProfile.Type;
 
@@ -112,15 +119,20 @@ export const BrowserImportInput = Schema.Struct({
   sourceProfileDirectory: TrimmedNonEmptyString,
   /** Stark Code profile the cookies are written into. */
   targetProfileId: BrowserProfileId,
+  /** Exact cookie hostnames, selected by the person. No wildcard or parent-domain expansion. */
+  selectedDomains: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(253))).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(100),
+  ),
+  /** Explicit acknowledgement that importing sessions grants account access. */
+  consent: Schema.Literal(true),
 });
 export type BrowserImportInput = typeof BrowserImportInput.Type;
 
 /** IPC payload: the import input plus the environment the partition belongs to. */
 export const DesktopPreviewImportCookiesInputSchema = Schema.Struct({
   environmentId: TrimmedNonEmptyString,
-  sourceId: BrowserImportSourceId,
-  sourceProfileDirectory: TrimmedNonEmptyString,
-  targetProfileId: BrowserProfileId,
+  ...BrowserImportInput.fields,
 });
 
 export const BrowserImportResult = Schema.Struct({
@@ -159,6 +171,9 @@ export const BROWSER_IMPORT_FAILURE_COPY: Readonly<Record<BrowserImportFailureRe
     "The system keyring could not be accessed. Make sure your desktop keyring is running and unlocked, then retry.",
   unknownSource: "That browser is no longer available to import from.",
   unknownSourceProfile: "That browser profile no longer exists.",
+  unsafeTarget: "Choose sites and confirm the import into your personal browser profile.",
+  storageNotEncrypted:
+    "Browser session import requires an encrypted packaged build of Stark Code and an available OS keyring. Imports are disabled in development builds. You can still browse signed out.",
   sessionUnavailable: "The target profile could not be opened.",
   profileNotSaved: "The cookies were imported, but the new profile couldn't be saved. Try again.",
   profileLimitReached:

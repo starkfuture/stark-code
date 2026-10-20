@@ -10,7 +10,7 @@ import type {
   BrowserImportSource,
   BrowserImportUnavailableReason,
 } from "@starkfuture/contracts";
-import { BrowserImportFailureReason } from "@starkfuture/contracts";
+import { BrowserImportFailureReason, IMPORTED_BROWSER_PROFILE_ID } from "@starkfuture/contracts";
 import * as Context from "effect/Context";
 import type { Session } from "electron";
 import * as Effect from "effect/Effect";
@@ -117,11 +117,21 @@ const cookieHost = (url: string): string => {
 export const writeCookies = Effect.fn("BrowserImport.writeCookies")(function* (
   session: { readonly cookies: Pick<Session["cookies"], "set" | "flushStore"> },
   read: CookieReadResult,
+  selectedDomains: ReadonlyArray<string>,
 ) {
+  const selected = new Set(selectedDomains.map((domain) => domain.toLowerCase()));
   let imported = 0;
   let skipped = read.undecryptable;
   const skippedDomains = new Set(read.undecryptableHosts);
   for (const cookie of read.cookies) {
+    // Match the cookie's own scope exactly. Selecting docs.example.com must
+    // never also import .example.com, which could grant every sibling account.
+    const host = cookieHost(cookie.url).toLowerCase();
+    if (!selected.has(host)) {
+      skipped += 1;
+      skippedDomains.add(host);
+      continue;
+    }
     const written = yield* Effect.tryPromise({
       try: () =>
         session.cookies.set({
@@ -200,6 +210,24 @@ export const make = Effect.gen(function* BrowserImportMake() {
     readonly persistent: boolean;
     readonly namespace?: BrowserSession.BrowserSessionPartitionNamespace;
   }) {
+    if (
+      input.input.targetProfileId !== IMPORTED_BROWSER_PROFILE_ID ||
+      input.namespace !== "profile" ||
+      !input.persistent ||
+      input.input.consent !== true ||
+      input.input.selectedDomains.length === 0 ||
+      input.input.selectedDomains.length > 100 ||
+      input.input.selectedDomains.some(
+        (domain) =>
+          domain.length > 253 ||
+          !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(domain),
+      )
+    ) {
+      return yield* new BrowserImportFailedError({
+        sourceId: input.input.sourceId,
+        reason: "unsafeTarget",
+      });
+    }
     const definition = BROWSER_IMPORT_SOURCES.find(
       (candidate) => candidate.id === input.input.sourceId,
     );
@@ -328,7 +356,7 @@ export const make = Effect.gen(function* BrowserImportMake() {
 
     // Written one at a time rather than in parallel: Chromium's cookie store
     // serialises writes anyway, and a rejected cookie should only cost itself.
-    return yield* writeCookies(session, result);
+    return yield* writeCookies(session, result, input.input.selectedDomains);
   });
 
   return BrowserImport.of({ listSources, importCookies });

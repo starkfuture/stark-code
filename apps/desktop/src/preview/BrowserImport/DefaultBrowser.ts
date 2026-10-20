@@ -9,6 +9,7 @@ const APPLICATION_IDS: Readonly<Record<string, BrowserImportSourceId>> = {
   "arc.app": "arc",
   "helium.app": "helium",
   "firefox.app": "firefox",
+  "zen.app": "zen",
   "safari.app": "safari",
   "google-chrome": "chrome",
   "google-chrome-stable": "chrome",

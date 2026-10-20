@@ -11,7 +11,10 @@ import * as Schema from "effect/Schema";
 import { useRef, useState } from "react";
 import { useNativeReplies } from "../state/nativeReplies";
 import { ResponseVisualPanel } from "./chat/ResponseVisualPanel";
+import { FinishEvidenceCard } from "./chat/FinishEvidenceCard";
+import { deriveNativeFinishEvidence } from "./chat/nativeFinishEvidence";
 import { NativeMcpReloadControl } from "./NativeMcpReloadControl";
+import { NativeVoiceControl } from "./NativeVoiceControl";
 import { TerminalViewport } from "./ThreadTerminalDrawer";
 import { Button } from "./ui/button";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -29,16 +32,18 @@ export function NativeAgentShell(props: {
   readonly threadRef: ScopedThreadRef;
   readonly providerInstanceId: ProviderInstanceId;
   readonly driver: string;
+  readonly existingOnly?: boolean | undefined;
   readonly cwd: string;
   readonly worktreePath: string | null;
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly focusRequestId?: number;
+  readonly voiceRequestId?: number;
+  readonly onVoiceRequestConsumed?: ((requestId: number) => void) | undefined;
   readonly onBackToChat: () => void;
 }) {
   const [ended, setEnded] = useState(false);
   const [view, setView] = useState<"terminal" | "reader" | "both">("terminal");
   const [expanded, setExpanded] = useState(false);
-  const [readerVisited, setReaderVisited] = useState(false);
   const [portalHost, setPortalHost] = useState<HTMLDivElement | null>(null);
   const expandButton = useRef<HTMLButtonElement>(null);
   const [resizeEpoch, setResizeEpoch] = useState(0);
@@ -46,7 +51,6 @@ export function NativeAgentShell(props: {
   const [mcpWarning, setMcpWarning] = useState<NativeMcpWarning | null>(null);
   const chooseView = (next: typeof view) => {
     setView(next);
-    if (next !== "terminal") setReaderVisited(true);
     setResizeEpoch((epoch) => epoch + 1);
   };
   const expand = (next: boolean) => {
@@ -60,7 +64,8 @@ export function NativeAgentShell(props: {
   );
   const restart = useAtomCommand(terminalEnvironment.restart, "restart native agent shell");
   const terminalId = nativeAgentTerminalId(props.providerInstanceId);
-  const replies = useNativeReplies(props.threadRef, readerVisited, terminalId);
+  const replies = useNativeReplies(props.threadRef, true, terminalId);
+  const latestReply = replies.data?.at(-1);
   const label = props.driver === "codex" ? "Codex" : "Claude";
   const showTerminal = () => {
     if (view === "reader") chooseView("terminal");
@@ -117,6 +122,15 @@ export function NativeAgentShell(props: {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                <NativeVoiceControl
+                  driver={props.driver}
+                  threadRef={props.threadRef}
+                  terminalId={terminalId}
+                  requestId={props.voiceRequestId}
+                  onRequestConsumed={props.onVoiceRequestConsumed}
+                  ended={ended}
+                  onShowTerminal={showTerminal}
+                />
                 <NativeMcpReloadControl driver={props.driver} onShowTerminal={showTerminal} />
                 <Button
                   ref={expandButton}
@@ -189,6 +203,13 @@ export function NativeAgentShell(props: {
                 </span>
               ) : null}
             </div>
+            {view === "terminal" && latestReply?.evidence ? (
+              <div className="max-h-64 shrink-0 overflow-auto px-3">
+                <FinishEvidenceCard
+                  evidence={deriveNativeFinishEvidence(latestReply.id, latestReply.evidence)}
+                />
+              </div>
+            ) : null}
             <div
               className="flex min-h-0 min-w-0 flex-1 flex-col @min-[52rem]/native-shell:flex-row"
               data-native-shell-layout={view}
@@ -208,6 +229,7 @@ export function NativeAgentShell(props: {
                   worktreePath={props.worktreePath}
                   providerInstanceId={props.providerInstanceId}
                   agentShell
+                  existingOnly={props.existingOnly}
                   onSessionExited={() => setEnded(true)}
                   onMcpWarning={setMcpWarning}
                   focusRequestId={(props.focusRequestId ?? 1) + terminalFocusRequest}
@@ -241,6 +263,7 @@ export function NativeAgentShell(props: {
                       id: reply.id,
                       text: reply.text,
                       truncated: reply.truncated === true,
+                      evidence: reply.evidence,
                       label: `${reply.provider === "claude" ? "Claude" : "Codex"} · ${reply.text.replace(/\s+/g, " ").slice(0, 90)}`,
                     }))}
                     emptyMessage="Completed replies from new native sessions appear here. Restart a session opened before Reader was added. For Codex, review and approve the capture hook in its terminal when prompted. Interrupted replies may not be captured."

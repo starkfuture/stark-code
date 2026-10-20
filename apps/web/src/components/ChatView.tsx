@@ -1,4 +1,11 @@
-import { NATIVE_AGENT_SHELL_TOGGLE_EVENT, toggleNativeAgentShell } from "../nativeAgentShell";
+import {
+  NATIVE_AGENT_SHELL_TOGGLE_EVENT,
+  NATIVE_AGENT_VOICE_OPEN_EVENT,
+  openNativeAgentVoice,
+  toggleNativeAgentShell,
+} from "../nativeAgentShell";
+import { prioritizePendingRequest } from "../needsYou";
+import { useNeedsYouSelection } from "../needsYouSelection";
 import { requestConfirmDialog } from "../confirmDialog";
 import { NativeAgentShell, nativeAgentTerminalId } from "./NativeAgentShell";
 import { StarkPagesPanel } from "./StarkPagesPanel";
@@ -6,6 +13,8 @@ import { StarkPageTabContent } from "./StarkPageTabContent";
 import { ConversationPageTabs, conversationPageTabElementId } from "./ConversationPageTabs";
 import { selectStarkPageTabs, useStarkPageTabs, type StarkPageTarget } from "../starkPageTabs";
 import { useStarkPagesPublishCapability } from "../hooks/useStarkPagesPublishCapability";
+import { FinishEvidenceCard } from "./chat/FinishEvidenceCard";
+import { deriveFinishEvidence } from "./chat/finishEvidence";
 import { SideWorkPanel } from "./chat/SideWorkPanel";
 import { ConversationToolsPanel } from "./chat/ConversationToolsPanel";
 import { WorkspaceToolsMenu } from "./chat/WorkspaceToolsMenu";
@@ -244,6 +253,10 @@ import {
 } from "../pendingUserInput";
 import { seedUserInputDraftAnswers } from "@starkfuture/client-runtime/state/thread-requests";
 import { useUiStateStore } from "../uiStateStore";
+import {
+  sidebarAccountContextKey,
+  usePublishSidebarAccountContext,
+} from "./sidebar/sidebarAccountContext";
 import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
 import {
   buildPlanImplementationThreadTitle,
@@ -2293,6 +2306,11 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadKnownSessions]);
   const activeThreadRef = useActiveThreadRef(activeThread);
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const needsYouTarget = useNeedsYouSelection((state) =>
+    state.target?.environmentId === environmentId && state.target.threadId === activeThreadId
+      ? state.target
+      : null,
+  );
   const [turnNavigationRequest, setTurnNavigationRequest] = useState<TurnNavigationRequest | null>(
     null,
   );
@@ -2306,6 +2324,17 @@ export default function ChatView(props: ChatViewProps) {
   const [nativeShellThreadKey, setNativeShellThreadKey] = useState<string | null>(null);
   const [nativeShellPreparing, setNativeShellPreparing] = useState(false);
   const [nativeShellFocusRequest, setNativeShellFocusRequest] = useState(1);
+  const [nativeVoiceRequest, setNativeVoiceRequest] = useState<{
+    id: number;
+    threadKey: string;
+  } | null>(null);
+  const nextNativeVoiceRequestId = useRef(0);
+  const requestNativeVoice = useCallback((threadKey: string) => {
+    setNativeVoiceRequest({ id: ++nextNativeVoiceRequestId.current, threadKey });
+  }, []);
+  const consumeNativeVoiceRequest = useCallback((requestId: number) => {
+    setNativeVoiceRequest((request) => (request?.id === requestId ? null : request));
+  }, []);
   const auxiliaryPanel = useRightPanelStore((state) =>
     selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, activeThreadRef),
   );
@@ -2342,6 +2371,7 @@ export default function ChatView(props: ChatViewProps) {
   const [nativeShellSelection, setNativeShellSelection] = useState<{
     instanceId: ProviderInstanceId;
     driver: string;
+    existingOnly?: boolean;
   } | null>(null);
   const nativeShellMode = activeThreadKey !== null && nativeShellThreadKey === activeThreadKey;
   const activeEnvironmentServerBrowser = useEnvironmentSupportsServerBrowser(
@@ -2784,6 +2814,38 @@ export default function ChatView(props: ChatViewProps) {
   const pageTabs = useStarkPageTabs((state) => selectStarkPageTabs(state, pageWorkspaceKey));
   const pagePanelId = useId();
   const pageTabActive = pagesAvailable && pageTabs.activeTabId !== "chat";
+  const handledNeedsYouSelection = useRef(0);
+  useEffect(() => {
+    if (!needsYouTarget || handledNeedsYouSelection.current === needsYouTarget.sequence) return;
+    if (needsYouTarget.terminalId && activeThreadKnownSessionsRaw === null) return;
+    handledNeedsYouSelection.current = needsYouTarget.sequence;
+    setNativeVoiceRequest(null);
+    if (pageWorkspaceKey) useStarkPageTabs.getState().select(pageWorkspaceKey, "chat");
+    if (needsYouTarget.terminalId) {
+      const terminalId = needsYouTarget.terminalId;
+      const live = activeThreadKnownSessions.find(
+        (session) =>
+          session.target.terminalId === terminalId &&
+          session.state.status === "running" &&
+          session.state.summary?.agentShell === true,
+      );
+      if (live && terminalId.startsWith("native-agent-")) {
+        setNativeShellSelection({
+          instanceId: ProviderInstanceId.make(terminalId.slice("native-agent-".length)),
+          driver: needsYouTarget.nativeProvider === "codex" ? "codex" : "claudeAgent",
+          existingOnly: true,
+        });
+        setNativeShellThreadKey(activeThreadKey);
+        setNativeShellFocusRequest((value) => value + 1);
+      }
+    } else setNativeShellThreadKey(null);
+  }, [
+    needsYouTarget,
+    pageWorkspaceKey,
+    activeThreadKnownSessionsRaw,
+    activeThreadKnownSessions,
+    activeThreadKey,
+  ]);
   const selectConversationTab = useCallback(
     (id: string) => {
       if (!pageWorkspaceKey) return;
@@ -3482,13 +3544,38 @@ export default function ChatView(props: ChatViewProps) {
     [serverProjection],
   );
   const pendingApprovals = useMemo(
-    () => derivePendingApprovals(pendingRequests.approvals),
-    [pendingRequests.approvals],
+    () =>
+      prioritizePendingRequest(
+        derivePendingApprovals(pendingRequests.approvals),
+        needsYouTarget?.requestId ?? null,
+      ),
+    [pendingRequests.approvals, needsYouTarget],
   );
   const pendingUserInputs = useMemo(
-    () => derivePendingUserInputs(pendingRequests.userInputs),
-    [pendingRequests.userInputs],
+    () =>
+      prioritizePendingRequest(
+        derivePendingUserInputs(pendingRequests.userInputs),
+        needsYouTarget?.requestId ?? null,
+      ),
+    [pendingRequests.userInputs, needsYouTarget],
   );
+  const focusedNeedsYouSelection = useRef(0);
+  useEffect(() => {
+    if (!needsYouTarget?.requestId || focusedNeedsYouSelection.current === needsYouTarget.sequence)
+      return;
+    const requestId = needsYouTarget.requestId;
+    const frame = requestAnimationFrame(() => {
+      const request = document.querySelector<HTMLElement>(
+        `[data-runtime-request-id="${CSS.escape(requestId)}"]`,
+      );
+      if (request) {
+        focusedNeedsYouSelection.current = needsYouTarget.sequence;
+        request.scrollIntoView({ block: "nearest" });
+        request.focus({ preventScroll: true });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [needsYouTarget, pendingApprovals, pendingUserInputs, pageTabActive]);
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingRequestKey = JSON.stringify([
     environmentId,
@@ -7882,6 +7969,17 @@ export default function ChatView(props: ChatViewProps) {
   // message clears it as a side effect of the send path.
   // Memoized: it is the timeline's list footer, and a new element re-renders that footer.
   // nowMinute keeps the relative time fresh.
+  const finishEvidence = useMemo(
+    () =>
+      nativeShellMode || paintOnlyDisplayedTimeline || !serverProjection
+        ? null
+        : deriveFinishEvidence(
+            latestExecutedRun(serverProjection.runs),
+            serverProjection.turnItems,
+          ),
+    [nativeShellMode, paintOnlyDisplayedTimeline, serverProjection],
+  );
+
   const threadStatusLine = useMemo(() => {
     void nowMinute;
     return activeThreadSnoozed ? (
@@ -9096,9 +9194,11 @@ export default function ChatView(props: ChatViewProps) {
   };
 
   useEffect(() => {
-    const toggle = async () => {
+    const toggle = async (forVoice = false) => {
+      if (!forVoice) setNativeVoiceRequest(null);
       if (nativeShellMode) {
-        setNativeShellThreadKey(null);
+        if (forVoice && activeThreadKey) requestNativeVoice(activeThreadKey);
+        else setNativeShellThreadKey(null);
         return;
       }
       if (
@@ -9127,6 +9227,7 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
       if (isServerThread) {
+        if (forVoice) requestNativeVoice(activeThreadKey);
         setNativeShellSelection(selection);
         setNativeShellThreadKey(activeThreadKey);
         return;
@@ -9188,6 +9289,7 @@ export default function ChatView(props: ChatViewProps) {
         }
         if (currentRouteThreadKeyRef.current !== routeAtStart) return;
         const threadRef = scopeThreadRef(environmentId, result.value.threadId);
+        if (forVoice) requestNativeVoice(scopedThreadKey(threadRef));
         setNativeShellSelection(selection);
         setNativeShellThreadKey(scopedThreadKey(threadRef));
         await navigate({
@@ -9199,13 +9301,18 @@ export default function ChatView(props: ChatViewProps) {
         setNativeShellPreparing(false);
       }
     };
-    const handler = () => {
-      void toggle();
+    const handler = (event: Event) => {
+      void toggle(event.type === NATIVE_AGENT_VOICE_OPEN_EVENT);
     };
     window.addEventListener(NATIVE_AGENT_SHELL_TOGGLE_EVENT, handler);
-    return () => window.removeEventListener(NATIVE_AGENT_SHELL_TOGGLE_EVENT, handler);
+    window.addEventListener(NATIVE_AGENT_VOICE_OPEN_EVENT, handler);
+    return () => {
+      window.removeEventListener(NATIVE_AGENT_SHELL_TOGGLE_EVENT, handler);
+      window.removeEventListener(NATIVE_AGENT_VOICE_OPEN_EVENT, handler);
+    };
   }, [
     nativeShellMode,
+    requestNativeVoice,
     activeThread,
     activeProject,
     activeThreadKey,
@@ -11463,6 +11570,26 @@ export default function ChatView(props: ChatViewProps) {
       settings,
     ],
   );
+  usePublishSidebarAccountContext(
+    sidebarAccountContextKey(
+      draftId ? { kind: "draft", draftId } : { kind: "server", threadRef: routeThreadRef },
+    ),
+    {
+      environmentId,
+      instanceId: nativeShellMode
+        ? (nativeShellSelection?.instanceId ?? null)
+        : activeProviderInstanceId,
+      entries: providerInstanceEntries,
+      unavailableReason: nativeShellMode
+        ? "Choose the account before opening a native session."
+        : isSendBusy || !canOperateThread
+          ? "Account selection is unavailable while this chat is busy or read-only."
+          : null,
+      getModelDisabledReason,
+      onSelect: onProviderModelSelect,
+    },
+  );
+
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
       if (multipleModelSelections !== null) return;
@@ -12164,6 +12291,7 @@ export default function ChatView(props: ChatViewProps) {
           ref={threadPanelPopoverAnchorRef}
           data-chat-header
           className={cn(
+            pageTabActive && "stark-review-surface",
             "relative border-b border-border/70 bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
             isElectron
               ? cn(
@@ -12296,11 +12424,19 @@ export default function ChatView(props: ChatViewProps) {
                     threadRef={activeThreadRef}
                     providerInstanceId={nativeShellSelection.instanceId}
                     driver={nativeShellSelection.driver}
+                    existingOnly={nativeShellSelection.existingOnly}
                     cwd={activeThreadWorktreePath ?? activeProject.workspaceRoot}
                     worktreePath={activeThreadWorktreePath ?? null}
                     keybindings={keybindings}
                     focusRequestId={nativeShellFocusRequest}
-                    onBackToChat={() => setNativeShellThreadKey(null)}
+                    voiceRequestId={
+                      nativeVoiceRequest?.threadKey === activeThreadKey ? nativeVoiceRequest.id : 0
+                    }
+                    onVoiceRequestConsumed={consumeNativeVoiceRequest}
+                    onBackToChat={() => {
+                      setNativeVoiceRequest(null);
+                      setNativeShellThreadKey(null);
+                    }}
                   />
                 </div>
               ) : null}
@@ -12385,7 +12521,12 @@ export default function ChatView(props: ChatViewProps) {
                   isPreparingWorktree={!paintOnlyDisplayedTimeline && isPreparingWorktree}
                   footer={
                     paintOnlyDisplayedTimeline ? null : pendingHandoff === null ? (
-                      threadStatusLine
+                      <>
+                        <div className="chat-content-lane">
+                          <FinishEvidenceCard evidence={finishEvidence} />
+                        </div>
+                        {threadStatusLine}
+                      </>
                     ) : (
                       <>
                         <div className="chat-content-lane">
@@ -12394,6 +12535,9 @@ export default function ChatView(props: ChatViewProps) {
                             providers={providerStatuses}
                             pending
                           />
+                        </div>
+                        <div className="chat-content-lane">
+                          <FinishEvidenceCard evidence={finishEvidence} />
                         </div>
                         {threadStatusLine}
                       </>
@@ -12571,6 +12715,14 @@ export default function ChatView(props: ChatViewProps) {
                             ) : null}
                             {!composerMounted ? null : (
                               <ChatComposer
+                                onOpenProviderVoice={
+                                  canOperateTerminal &&
+                                  !isWorking &&
+                                  !nativeShellPreparing &&
+                                  serverConfig?.environment.capabilities.nativeAgentShell === true
+                                    ? openNativeAgentVoice
+                                    : undefined
+                                }
                                 userShellCommandAvailable={userShellCommandAvailable}
                                 shellHistoryProjectKey={shellHistoryProjectKey}
                                 canOperateThread={canOperateThread}

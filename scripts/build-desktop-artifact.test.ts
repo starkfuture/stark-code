@@ -769,10 +769,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "NSLocalNetworkUsageDescription",
         "Stark Code connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
       );
-      for (const config of [linux, win]) {
+      for (const config of [mac, linux, win]) {
         assert.deepStrictEqual(config.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
+        assert.deepStrictEqual(config.electronFuses, { enableCookieEncryption: true });
       }
-      assert.deepStrictEqual(mac.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
@@ -1092,9 +1092,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
               readonly command: string;
               readonly args: ReadonlyArray<string>;
             };
-            const fails =
-              childProcess.command === "rustc" ||
-              (childProcess.command === "xcrun" && childProcess.args.includes("iconutil"));
+            const fails = childProcess.command === "rustc" || childProcess.command === "sips";
             return Effect.succeed(mockProcess(fails ? 1 : 0));
           }),
         );
@@ -1104,7 +1102,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         );
 
         assert.instanceOf(error, MacDesktopBuildPrerequisitesMissingError);
-        assert.deepStrictEqual(error.missing, ["rust", "iconutil"]);
+        assert.deepStrictEqual(error.missing, ["rust", "sips"]);
         assert.deepStrictEqual(error.rustTargets, ["aarch64-apple-darwin", "x86_64-apple-darwin"]);
         assert.include(error.message, "xcode-select --install");
         assert.include(error.message, "rustup target add aarch64-apple-darwin x86_64-apple-darwin");

@@ -138,12 +138,13 @@ thread. Remote clients can view cached status but cannot start a cold inspection
 session or change server connections.
 
 Stark Code checks MCP health when a chat session starts and between turns. It
-reconnects only failed servers, with at most three automatic attempts per failure.
-Healthy connections keep their prompt cache. Recovery waits for active turns,
-background work, and direct tool calls to finish. Sign-in failures show a sign-in
-action instead of retrying; network failures ask you to check your network or VPN.
-On macOS, it checks FortiClient's connection state when a server reports a network
-failure. It also recognizes disconnected Tailscale connections for tailnet servers.
+reconnects only failed servers, spacing repeated attempts up to five minutes apart.
+Healthy connections keep their prompt cache. Recovery waits for active turns and
+tool calls; detached background shells can keep running. A message sent during a
+reconnect waits for it to finish. Sign-in failures show a sign-in action instead
+of retrying. For remote servers, Stark Code checks Tailscale first for tailnet
+addresses and FortiClient on macOS for other network failures. A confirmed
+disconnected VPN pauses reconnection; other network failures retry slowly.
 
 In the conversation's **Tools → MCP** panel, choose **Reload MCPs** to pick up plugin changes.
 Its follow-up reconnects only failed servers. Disabled servers stay disabled. If Claude
@@ -198,3 +199,12 @@ config directory and put the router's endpoint and credential variables in that
 instance's **Environment variables**. The router must run where the environment
 can reach it. Follow the [Claude Code Router instructions](https://github.com/musistudio/claude-code-router)
 for its installation and routing configuration.
+
+## Setup diagnostics
+
+In **Settings → Agents & accounts → Setup doctor**, existing provider reports show
+which profiles are installed, enabled and signed in. Choose **Inspect connections**
+to inspect MCP status for the selected folder and check the Pages kit and sign-in
+on this desktop. These checks do not install software, sign in, reload connections
+or request a model response. A Pages sign-in is not proof that every page is accessible.
+Use **Open Connected tools** for a connection that needs attention.

@@ -153,35 +153,39 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it.each([0, 1])(
-  "refreshes the visible limits countdown with refresh button %i without switching tabs, even when quota is unchanged",
-  async (buttonIndex) => {
-    await act(() => {
-      renderer = create(<UsagePage />);
-    });
-    expect(
-      JSON.stringify(renderer.toJSON(), (key, value) => (key === "props" ? undefined : value)),
-    ).toContain("in 2h 0m");
-    vi.mocked(Date.now).mockReturnValue(Date.parse("2026-09-11T12:30:00Z"));
-    await act(async () => {
-      renderer.root
-        .findAllByProps({ "aria-label": "Refresh limits" })
-        .filter((node) => node.type === "button")
-        .at(buttonIndex)!
-        .props.onClick();
-    });
-    expect(state.refreshProviders).toHaveBeenCalledWith({
-      environmentId: `test-${environmentNumber}`,
-      input: {},
-    });
-    expect(
-      JSON.stringify(renderer.toJSON(), (key, value) => (key === "props" ? undefined : value)),
-    ).toContain("in 1h 30m");
-    expect(
-      JSON.stringify(renderer.toJSON(), (key, value) => (key === "props" ? undefined : value)),
-    ).not.toContain("in 2h 0m");
-  },
-);
+it("refreshes the visible limits countdown without switching tabs, even when quota is unchanged", async () => {
+  await act(() => {
+    renderer = create(<UsagePage />);
+  });
+  expect(
+    JSON.stringify(renderer.toJSON(), (key, value) => (key === "props" ? undefined : value)),
+  ).toContain("in 2h 0m");
+  const usageText = renderer.root
+    .findAll((node) => node.type === "span")
+    .map((node) => node.children.filter((child) => typeof child === "string").join(""))
+    .join(" ")
+    .replace(/\s+/g, " ");
+  expect(usageText).toContain("40% used");
+  expect(usageText).not.toContain("60% used");
+  vi.mocked(Date.now).mockReturnValue(Date.parse("2026-09-11T12:30:00Z"));
+  await act(async () => {
+    renderer.root
+      .findAllByProps({ "aria-label": "Refresh limits" })
+      .filter((node) => node.type === "button")
+      .at(0)!
+      .props.onClick();
+  });
+  expect(state.refreshProviders).toHaveBeenCalledWith({
+    environmentId: `test-${environmentNumber}`,
+    input: {},
+  });
+  expect(
+    JSON.stringify(renderer.toJSON(), (key, value) => (key === "props" ? undefined : value)),
+  ).toContain("in 1h 30m");
+  expect(
+    JSON.stringify(renderer.toJSON(), (key, value) => (key === "props" ? undefined : value)),
+  ).not.toContain("in 2h 0m");
+});
 
 it("uses the current time when returning to limits from tokens", async () => {
   await act(() => {

@@ -1,3 +1,4 @@
+import { AGENT_BROWSER_PROFILE_ID, OrchestratorMcpFailure } from "@starkfuture/contracts";
 import * as Effect from "effect/Effect";
 import * as Preview from "../../../preview/Manager.ts";
 import { requireThreadMcpCapability } from "../../McpInvocationContext.ts";
@@ -16,12 +17,27 @@ export const layer = McpToolAccess.toLayer(PreviewControlsToolkit, {
     Effect.gen(function* () {
       const { scope, manager } = yield* access;
       const result = yield* manager.list({ threadId: scope.thread.threadId });
+      // The manager snapshot has not passed the per-site gate. Expose only
+      // identities here; preview_status authorizes the actual page before
+      // returning its URL, title, dialogs or downloads.
+      const sessions = result.sessions
+        .filter((session) => session.profileId === AGENT_BROWSER_PROFILE_ID)
+        .map((session) => ({
+          threadId: session.threadId,
+          tabId: session.tabId,
+          profileId: session.profileId,
+          ...(session.runtime === undefined ? {} : { runtime: session.runtime }),
+          navStatus: { _tag: "Idle" as const },
+          canGoBack: false,
+          canGoForward: false,
+          updatedAt: session.updatedAt,
+        }));
       const start = input.cursor ?? 0;
       const end = start + (input.limit ?? 20);
       return {
         ...result,
-        sessions: result.sessions.slice(start, end),
-        nextCursor: end < result.sessions.length ? end : null,
+        sessions: sessions.slice(start, end),
+        nextCursor: end < sessions.length ? end : null,
       };
     }),
   ),
@@ -29,6 +45,16 @@ export const layer = McpToolAccess.toLayer(PreviewControlsToolkit, {
     Effect.gen(function* () {
       const { scope, manager } = yield* access;
       const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
+      if (
+        !sessions.some(
+          (session) =>
+            session.tabId === input.tabId && session.profileId === AGENT_BROWSER_PROFILE_ID,
+        )
+      )
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: "Personal browser tabs are unavailable to agents.",
+        });
       if (
         sessions.some((session) => session.tabId === input.tabId && session.runtime === "server")
       ) {

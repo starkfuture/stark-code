@@ -27,6 +27,7 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
 import { prepareStarkWorkbench } from "./prepare-stark-workbench.mjs";
+import { encodePngIcns } from "../apps/desktop/scripts/icns.mjs";
 import {
   BRAND_ASSET_PATHS,
   resolveWebAssetBrandForChannel,
@@ -391,7 +392,6 @@ const MAC_DESKTOP_BUILD_PREREQUISITES = [
   { id: "clang", description: "Xcode Command Line Tools (clang)" },
   { id: "make", description: "Xcode Command Line Tools (make)" },
   { id: "sips", description: "macOS image tool (sips)" },
-  { id: "iconutil", description: "macOS icon tool (iconutil)" },
   { id: "lipo", description: "Xcode universal-binary tool (lipo)" },
 ] as const;
 
@@ -1944,10 +1944,6 @@ export const preflightMacDesktopBuild = Effect.fn("preflightMacDesktopBuild")(fu
       clang: desktopBuildProbeSucceeds(ChildProcess.make("clang", ["--version"]), "clang"),
       make: desktopBuildProbeSucceeds(ChildProcess.make("make", ["--version"]), "make"),
       sips: desktopBuildProbeSucceeds(ChildProcess.make("sips", ["--help"]), "sips"),
-      iconutil: desktopBuildProbeSucceeds(
-        ChildProcess.make("xcrun", ["--find", "iconutil"]),
-        "iconutil",
-      ),
       lipo:
         arch === "universal"
           ? desktopBuildProbeSucceeds(ChildProcess.make("lipo", ["-version"]), "lipo")
@@ -2536,10 +2532,22 @@ function generateMacIconSet(
       );
     }
 
-    yield* runCommand(ChildProcess.make({})`iconutil -c icns ${iconsetDir} -o ${targetIcns}`, {
-      label: "iconutil icns",
-      verbose,
-    });
+    // The same PNG-backed container used by the dev launcher also works where
+    // sandboxed iconutil rejects valid generated iconsets.
+    const entries = yield* Effect.forEach(
+      [
+        ["icp4", "icon_16x16.png"],
+        ["icp5", "icon_32x32.png"],
+        ["icp6", "icon_32x32@2x.png"],
+        ["ic07", "icon_128x128.png"],
+        ["ic08", "icon_256x256.png"],
+        ["ic09", "icon_512x512.png"],
+        ["ic10", "icon_512x512@2x.png"],
+      ] as const,
+      ([type, fileName]) =>
+        fs.readFile(path.join(iconsetDir, fileName)).pipe(Effect.map((png) => ({ type, png }))),
+    );
+    yield* fs.writeFile(targetIcns, encodePngIcns(entries));
   });
 }
 
@@ -2844,6 +2852,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     productName: resolveDesktopProductName(version),
     artifactName: "Stark-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
+    // Encrypt Chromium cookies at rest. Leave RunAsNode unchanged: bundled
+    // local services use the Electron runtime as Node.
+    electronFuses: { enableCookieEncryption: true },
     files: [
       ...DESKTOP_FILE_EXCLUSIONS,
       ...(platform === "mac"

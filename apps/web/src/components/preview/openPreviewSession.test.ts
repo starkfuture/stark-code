@@ -1,4 +1,5 @@
 import {
+  AGENT_BROWSER_PROFILE_ID,
   DEFAULT_BROWSER_PROFILE_ID,
   DEFAULT_CLIENT_SETTINGS,
   FILL_PREVIEW_VIEWPORT,
@@ -23,6 +24,21 @@ import {
 
 import { openPreviewSession } from "./openPreviewSession";
 
+const runtimeMocks = vi.hoisted(() => ({
+  electron: false,
+  runtime: undefined as "server" | undefined,
+}));
+vi.mock("~/env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/env")>()),
+  get isElectron() {
+    return runtimeMocks.electron;
+  },
+}));
+vi.mock("~/browser/previewRuntime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/browser/previewRuntime")>()),
+  previewRuntimeFor: () => runtimeMocks.runtime,
+}));
+
 const threadRef = {
   environmentId: "local" as ScopedThreadRef["environmentId"],
   threadId: "thread-1" as ScopedThreadRef["threadId"],
@@ -42,6 +58,8 @@ const snapshot: PreviewSessionSnapshot = {
 };
 
 beforeEach(() => {
+  runtimeMocks.electron = false;
+  runtimeMocks.runtime = undefined;
   resetPreviewStateForTests();
   useRightPanelStore.setState({ byThreadKey: {}, threadPanelVisibilityByThreadKey: {} });
   __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS);
@@ -52,6 +70,24 @@ afterEach(() => {
 });
 
 describe("openPreviewSession", () => {
+  it.each(["default", "personal-imported", "work", AGENT_BROWSER_PROFILE_ID])(
+    "keeps desktop human profiles out of the server runtime (%s)",
+    async (profileId) => {
+      runtimeMocks.electron = true;
+      runtimeMocks.runtime = "server";
+      const openPreview = vi.fn(async (_args: { input: PreviewOpenInput }) =>
+        AsyncResult.success(snapshot),
+      );
+      await openPreviewSession({ openPreview, threadRef, profileId });
+      expect(openPreview.mock.calls[0]?.[0]).toMatchObject({
+        input: { profileId },
+      });
+      expect(openPreview.mock.calls[0]?.[0]?.input.runtime).toBe(
+        profileId === AGENT_BROWSER_PROFILE_ID ? "server" : undefined,
+      );
+    },
+  );
+
   it("creates an idle tab without recording a recently visited URL", async () => {
     const idleSnapshot: PreviewSessionSnapshot = {
       ...snapshot,

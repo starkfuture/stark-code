@@ -5,6 +5,8 @@ import * as Schema from "effect/Schema";
 import {
   BrowserProfileId,
   BUILT_IN_BROWSER_PROFILES,
+  AGENT_BROWSER_PROFILE_ID,
+  IMPORTED_BROWSER_PROFILE_ID,
   DEFAULT_BROWSER_PROFILE_ID,
   INCOGNITO_BROWSER_PROFILE_ID,
   findBrowserProfile,
@@ -22,6 +24,8 @@ describe("resolveBrowserProfiles", () => {
     expect(resolved.map((profile) => profile.id)).toEqual([
       DEFAULT_BROWSER_PROFILE_ID,
       INCOGNITO_BROWSER_PROFILE_ID,
+      AGENT_BROWSER_PROFILE_ID,
+      IMPORTED_BROWSER_PROFILE_ID,
       work.id,
     ]);
   });

@@ -92,11 +92,11 @@ vi.mock("../ui/dialog", () => ({
   DialogTitle: "div",
   DialogHeader: "div",
 }));
-vi.mock("../ui/wizard", () => ({
-  WizardPanel: "div",
-  WizardPopup: "div",
-  WizardHeader: "div",
-  WizardSteps: ({ onStepChange }: { onStepChange: (step: number) => void }) => (
+vi.mock("./OnboardingLayout", () => ({
+  OnboardingPanel: "div",
+  OnboardingPopup: "div",
+  OnboardingHeader: "div",
+  OnboardingSteps: ({ onStepChange }: { onStepChange: (step: number) => void }) => (
     <button onClick={() => onStepChange(0)}>Back</button>
   ),
 }));

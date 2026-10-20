@@ -20,6 +20,9 @@ import { useThreadRunningTerminalIds } from "../../state/terminalSessions";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { useNativeReplies } from "../../state/nativeReplies";
+import { CappedReviewPanel } from "./CappedReviewPanel";
+import { ChangesetCheckPanel } from "./ChangesetCheckPanel";
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { ResponseVisualPanel } from "./ResponseVisualPanel";
 import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
@@ -40,7 +43,7 @@ import {
   type SideWorkRecord,
 } from "./sideWork.logic";
 
-type SideWorkTab = SideWorkKind | "bookmarks" | "agents";
+type SideWorkTab = SideWorkKind | "bookmarks" | "agents" | "checks" | "review";
 
 export function SideWorkButton(props: { open: boolean; onToggle: () => void }) {
   return (
@@ -222,6 +225,8 @@ export function SideWorkPanel(props: {
             ["format", "Reader"],
             ["bookmarks", "Bookmarks"],
             ["agents", "Agents"],
+            ["checks", "Checks"],
+            ["review", "Review"],
           ] as const
         ).map(([value, label]) => (
           <Button
@@ -236,7 +241,26 @@ export function SideWorkPanel(props: {
           </Button>
         ))}
       </div>
-      {tab === "format" ? (
+      {tab === "review" ? (
+        <CappedReviewPanel
+          key={storageKey}
+          parent={parent}
+          workspaceRoot={props.workspaceRoot}
+          onOpenThread={props.onOpenThread}
+        />
+      ) : tab === "checks" ? (
+        <ChangesetCheckPanel
+          key={`${scopedThreadKey(parentRef)}:${parent.worktreePath ?? props.workspaceRoot}`}
+          threadRef={parentRef}
+          cwd={parent.worktreePath ?? props.workspaceRoot}
+          onDraftFix={(prompt) => {
+            const state = useComposerDraftStore.getState();
+            const existing = state.getComposerDraft(parentRef)?.prompt ?? "";
+            state.setPrompt(parentRef, existing ? `${existing}\n\n${prompt}` : prompt, "human");
+            props.onClose();
+          }}
+        />
+      ) : tab === "format" ? (
         <>
           {records.some((record) => record.kind === "format") ? (
             <details className="shrink-0 border-b p-3 text-xs">

@@ -83,6 +83,49 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+it("shows native evidence for the selected reply and never sends it to the formatter", async () => {
+  await renderAnswers([
+    {
+      id: "earlier",
+      text: "Earlier answer",
+      label: "Earlier",
+      evidence: {
+        coverage: "available",
+        commands: [
+          {
+            id: "test",
+            label: "npm test",
+            isCheck: true,
+            outcome: "tool-completed",
+            exitCode: null,
+            startedAt: "2026-10-20T12:00:00Z",
+            completedAt: "2026-10-20T12:00:01Z",
+          },
+        ],
+        changes: [],
+        unconfirmedChanges: 0,
+      },
+    },
+    { id: "later", text: "Later answer", label: "Later" },
+  ]);
+  expect(container.querySelector('[aria-label="Run evidence"]')).toBeNull();
+  await chooseReply("earlier");
+  expect(container.querySelector('[aria-label="Run evidence"]')?.textContent).toContain(
+    "exit code not reported",
+  );
+  expect(container.querySelector('[aria-label="Run evidence"]')?.textContent).not.toContain(
+    "exited 0",
+  );
+  await act(() => button("Make visual").click());
+  expect(state.generate.mock.calls[0]?.[0].input).toEqual({
+    threadId: thread.id,
+    answer: "Earlier answer",
+    visualRequest: "auto",
+  });
+  await chooseReply("paste");
+  expect(container.querySelector('[aria-label="Run evidence"]')).toBeNull();
+});
+
 it("keeps reading available without generation permission and sends only the selected reply when permitted", async () => {
   state.allowed = false;
   await render();

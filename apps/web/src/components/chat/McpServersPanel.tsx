@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { CheckIcon, PlugIcon, RefreshCwIcon } from "lucide-react";
 import {
   isExpectedMcpCallback,
   type EnvironmentId,
@@ -35,6 +36,7 @@ export function McpServerRows({
   busy,
   waitingName,
   onAction,
+  spacious = false,
 }: {
   servers: ReadonlyArray<McpServerStatusEntry>;
   canReconnect: boolean;
@@ -42,13 +44,22 @@ export function McpServerRows({
   busy: boolean;
   waitingName?: string | undefined;
   onAction: (server: McpServerStatusEntry, action: ServerAction) => void;
+  spacious?: boolean;
 }) {
   return (
     <div className="space-y-3">
       {servers.map((server) => (
-        <section key={server.name} className="rounded-xl border p-3">
+        <section
+          key={server.name}
+          className={spacious ? "stark-mcp-server-card" : "rounded-xl border p-3"}
+        >
           <div className="flex items-center justify-between gap-2">
-            <h4 className="min-w-0 break-all font-medium">{mcpDisplayText(server.name, 256)}</h4>
+            <h4 className="flex min-w-0 items-center gap-3 break-all font-medium">
+              {spacious ? (
+                <PlugIcon aria-hidden className="size-6 shrink-0 text-muted-foreground" />
+              ) : null}
+              {mcpDisplayText(server.name, 256)}
+            </h4>
             <span className="shrink-0 rounded bg-muted px-2 py-0.5 text-xs">
               {server.source
                 ? MCP_SOURCE_LABELS[server.source]
@@ -58,7 +69,12 @@ export function McpServerRows({
               {server.pluginName ? ` ${mcpDisplayText(server.pluginName, 100)}` : ""}
             </span>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p
+            className={spacious ? "stark-mcp-server-status" : "mt-1 text-xs text-muted-foreground"}
+          >
+            {spacious && server.status === "connected" ? (
+              <CheckIcon aria-hidden className="size-4" />
+            ) : null}
             {waitingName === server.name
               ? "Waiting for sign-in…"
               : MCP_STATUS_LABELS[server.status]}
@@ -68,9 +84,10 @@ export function McpServerRows({
             <p className="mt-1 text-xs text-muted-foreground">{mcpRecoveryMessage(server)}</p>
           ) : null}
           {server.error ? (
-            <p className="mt-2 break-all text-xs text-destructive">
-              {mcpDisplayText(server.error)}
-            </p>
+            <details className="mt-2 text-xs">
+              <summary className="cursor-pointer text-muted-foreground">Technical details</summary>
+              <p className="mt-2 break-all text-destructive">{mcpDisplayText(server.error)}</p>
+            </details>
           ) : null}
           {server.tools.length ? (
             <details className="mt-2">
@@ -174,6 +191,9 @@ type McpServersPanelProps = {
   sessionBusy?: boolean | undefined;
   /** Set only by an explicit Sign in click in the health banner. */
   initialSignIn?: string | undefined;
+  showHeading?: boolean;
+  presentation?: "settings" | "compact";
+  scopeControls?: ReactNode;
 };
 
 export function McpServersPanel(props: McpServersPanelProps) {
@@ -193,8 +213,24 @@ function McpServersPanelTarget({
   target,
   sessionBusy = false,
   initialSignIn,
+  showHeading = true,
+  presentation = "compact",
+  scopeControls,
 }: McpServersPanelProps) {
   const query = useMcpServersQuery(environmentId, target, 2_000);
+  const [inspectionAttempt, setInspectionAttempt] = useState(0);
+  const [inspectionSlow, setInspectionSlow] = useState(false);
+  const waitingForStatus = !query.data && !query.error;
+  useEffect(() => {
+    setInspectionSlow(false);
+    if (!waitingForStatus) return;
+    const timer = window.setTimeout(() => setInspectionSlow(true), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [waitingForStatus, inspectionAttempt]);
+  const retryStatus = () => {
+    setInspectionAttempt((attempt) => attempt + 1);
+    query.refresh();
+  };
   const reload = useAtomCommand(serverEnvironment.reloadMcpServers, { reportFailure: false });
   const reconnect = useAtomCommand(serverEnvironment.reconnectMcpServer, { reportFailure: false });
   const toggle = useAtomCommand(serverEnvironment.setMcpServerEnabled, { reportFailure: false });
@@ -203,9 +239,9 @@ function McpServersPanelTarget({
   const submit = useAtomCommand(serverEnvironment.submitMcpServerCallback, {
     reportFailure: false,
   });
-  const { presentation } = useEnvironmentPresentation(environmentId);
-  const desktopHost = presentation
-    ? isLocalMcpDesktopTarget(isElectron, presentation.entry.target)
+  const { presentation: environmentPresentation } = useEnvironmentPresentation(environmentId);
+  const desktopHost = environmentPresentation
+    ? isLocalMcpDesktopTarget(isElectron, environmentPresentation.entry.target)
     : false;
   const canOperate = useEnvironmentScope(environmentId, "orchestration:operate") && desktopHost;
   const canReconnect =
@@ -218,7 +254,8 @@ function McpServersPanelTarget({
   const canManage = useEnvironmentScope(environmentId, "providers:manage") && desktopHost;
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const unavailable = !query.data || (target.threadId !== undefined && !query.data.live);
+  const unavailable =
+    !query.data || Boolean(query.error) || (target.threadId !== undefined && !query.data.live);
   const mutationBlocked = busy || sessionBusy || unavailable;
   const mounted = useRef(false);
   useEffect(() => {
@@ -378,25 +415,53 @@ function McpServersPanelTarget({
   const canPaste =
     pending?.opened && pending.flow.callbackExpected && waitingServer?.canSubmitCallback === true;
   return (
-    <section className="space-y-4 text-sm" aria-label="MCP servers">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="font-medium">MCP servers</h3>
-        <div className="flex flex-wrap gap-2">
-          <Button size="xs" variant="outline" disabled={busy} onClick={() => refresh.current()}>
-            Refresh status
-          </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={
-              !canReload || mutationBlocked || reloadResult?.status === "confirmation-required"
-            }
-            onClick={() => void reloadServers()}
-          >
-            Reload MCPs
-          </Button>
+    <section
+      className={presentation === "settings" ? "stark-mcp-panel" : "space-y-4 text-sm"}
+      aria-label="Connected tools"
+    >
+      {presentation === "settings" ? (
+        <>
+          <div className="stark-settings-intro stark-mcp-heading">
+            <div>
+              <h1>
+                Connected tools <span>MCP servers</span>
+              </h1>
+              <p>Connections for the selected agent and folder.</p>
+            </div>
+            <Button
+              size="comfortable"
+              variant="subtle-outline"
+              disabled={busy}
+              onClick={retryStatus}
+            >
+              <RefreshCwIcon />
+              Check status
+            </Button>
+          </div>
+          <div className="stark-settings-scope">{scopeControls}</div>
+        </>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {showHeading ? <h3 className="font-medium">Connected tools</h3> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button size="xs" variant="outline" disabled={busy} onClick={retryStatus}>
+              Refresh status
+            </Button>
+            {target.threadId !== undefined ? (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={
+                  !canReload || mutationBlocked || reloadResult?.status === "confirmation-required"
+                }
+                onClick={() => void reloadServers()}
+              >
+                Reload MCPs
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
       {!desktopHost ? (
         <p className="text-xs text-muted-foreground">
           Status only. Manage MCP servers from the desktop host.
@@ -413,10 +478,10 @@ function McpServersPanelTarget({
           Individual retries are unavailable here.
         </p>
       ) : null}
-      {target.threadId === undefined ? (
+      {target.threadId === undefined && presentation !== "settings" ? (
         <p className="text-xs text-muted-foreground">
-          Settings inspects project connections. Open the conversation's Tools → MCP panel to reload
-          its connections.
+          This checks connections for the selected folder and agent. To manage a running chat, use +
+          → Connectors → Manage connections in its message box.
         </p>
       ) : null}
       {error || query.error ? (
@@ -539,8 +604,40 @@ function McpServersPanelTarget({
           </Button>
         </div>
       ) : null}
-      {query.isPending && !query.data ? (
-        <p className="text-xs text-muted-foreground">Reading server status…</p>
+      {waitingForStatus ? (
+        <div
+          className={
+            presentation === "settings"
+              ? "stark-mcp-status-hero"
+              : "space-y-3 rounded-xl border p-5"
+          }
+          role="status"
+        >
+          {presentation === "settings" ? (
+            <div className="stark-mcp-status-icon">
+              <PlugIcon aria-hidden />
+            </div>
+          ) : null}
+          <p className="font-medium">
+            {inspectionSlow ? "Status is taking longer than expected" : "Checking connected tools…"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {inspectionSlow
+              ? "No server result has arrived yet. You can try again or continue working."
+              : "Reading the tools available to this agent."}
+          </p>
+          {inspectionSlow ? (
+            <Button
+              size={presentation === "settings" ? "comfortable" : "sm"}
+              variant={presentation === "settings" ? "brand" : "outline"}
+              disabled={busy}
+              onClick={retryStatus}
+            >
+              {presentation === "settings" ? <RefreshCwIcon /> : null}
+              {presentation === "settings" ? "Try status check again" : "Retry status check"}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
       {target.threadId !== undefined && query.data && !query.data.live ? (
         <p className="text-xs text-muted-foreground">
@@ -574,6 +671,7 @@ function McpServersPanelTarget({
         </Button>
       ) : null}
       <McpServerRows
+        spacious={presentation === "settings"}
         servers={query.data?.servers ?? []}
         canReconnect={canReconnect}
         canManage={canManage}
@@ -581,6 +679,12 @@ function McpServersPanelTarget({
         waitingName={pending?.name}
         onAction={action}
       />
+      {presentation === "settings" ? (
+        <div className="stark-mcp-health-note">
+          <strong>Healthy connections stay connected.</strong>
+          <p>Reconnect is offered only for a connection that needs it, when the agent is ready.</p>
+        </div>
+      ) : null}
     </section>
   );
 }

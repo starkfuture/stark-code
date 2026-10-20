@@ -441,96 +441,55 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
-  const redeemClaudeReset = (claim: { result: string; usageFailsAfterClaim: boolean }) =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const fixtures = yield* makeTildeProviderFixtures();
-      const marker = path.join(fixtures.claudeHomePath, "redeemed");
-      yield* fs.writeFileString(
-        path.join(fixtures.claudeHomePath, ".credentials.json"),
-        '{"claudeAiOauth":{"accessToken":"fake-token"}}',
-      );
-      yield* fs.writeFileString(
-        path.join(fixtures.claudeHomePath, ".claude.json"),
-        '{"oauthAccount":{"organizationUuid":"fake-org"}}',
-      );
-      const client = HttpClient.make((request) =>
-        Effect.gen(function* () {
-          if (request.url.endsWith("/api/oauth/usage")) {
-            return HttpClientResponse.fromWeb(
-              request,
-              Response.json({
-                cedar_ember: {
-                  eligible: true,
-                  next_grant_id: "grant_a",
-                  grants: [{ id: "grant_a", resets_left: 1, usable_now: true }],
-                },
-              }),
-            );
-          }
-          if (request.url.endsWith("/reset_rate_limits")) {
-            yield* fs.writeFileString(marker, "redeemed").pipe(Effect.orDie);
-            return HttpClientResponse.fromWeb(request, Response.json({ result: claim.result }));
-          }
-          return HttpClientResponse.fromWeb(request, Response.json({ version: "0.0.0" }));
-        }),
-      );
-      const instanceId = ProviderInstanceId.make("claude_reset");
-      const { registry } = yield* makeProviderInstanceRegistry({
-        drivers: [ClaudeDriver],
-        configMap: {
-          [instanceId]: {
-            driver: ProviderDriverKind.make("claudeAgent"),
-            enabled: true,
-            environment: [
-              { name: "STARK_CLAUDE_RESET_MARKER", value: marker, sensitive: false },
-              ...(claim.usageFailsAfterClaim
-                ? [{ name: "STARK_CLAUDE_USAGE_FAILS_AFTER_CLAIM", value: "1", sensitive: false }]
-                : []),
-            ],
-            config: makeClaudeConfig({
-              enabled: true,
-              binaryPath: fixtures.claudeBinaryPath,
-              homePath: fixtures.claudeHomePath,
-            }),
-          },
-        },
-      }).pipe(Effect.provideService(HttpClient.HttpClient, client));
-      const instance = yield* registry.getInstance(instanceId);
-      expect(instance).toBeDefined();
-      const before = yield* instance!.snapshot.refresh;
-      expect(before.usageLimits?.windows[0]?.usedPercent).toBe(100);
-      expect(before.usageLimits?.resetCredits?.nextCreditId).toBe("grant_a");
-      const outcome = yield* instance!.consumeResetCredit!().pipe(Effect.result);
-      return { outcome, after: yield* instance!.snapshot.getSnapshot };
-    }).pipe(
-      // macOS logins live in the Keychain, where resets are never read.
-      Effect.provideService(HostProcess.Platform, "linux"),
-      Effect.provide(layerTest),
-    );
-
-  it.live.skipIf(windowsHost)("refreshes Claude usage after redeeming a reset", () =>
-    Effect.gen(function* () {
-      const { outcome, after } = yield* redeemClaudeReset({
-        result: "reset",
-        usageFailsAfterClaim: false,
-      });
-      expect(outcome).toMatchObject({ _tag: "Success", success: "reset" });
-      expect(after.usageLimits?.windows[0]?.usedPercent).toBe(0);
-    }),
-  );
-
   it.live.skipIf(windowsHost)(
-    "reports Claude's answer when a claim changed nothing and the re-probe fails",
+    "keeps Claude usage but never reads credentials or calls reset endpoints",
     () =>
       Effect.gen(function* () {
-        const { outcome } = yield* redeemClaudeReset({
-          result: "already_used",
-          usageFailsAfterClaim: true,
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const fixtures = yield* makeTildeProviderFixtures();
+        yield* fs.writeFileString(
+          path.join(fixtures.claudeHomePath, ".credentials.json"),
+          "not-json: must-not-read",
+        );
+        yield* fs.writeFileString(
+          path.join(fixtures.claudeHomePath, ".claude.json"),
+          '{"oauthAccount":{"organizationUuid":"fake-org"}}',
+        );
+        const requests: string[] = [];
+        const client = HttpClient.make((request) => {
+          requests.push(request.url);
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, Response.json({ version: "0.0.0" })),
+          );
         });
-        expect(outcome).toMatchObject({ _tag: "Success", success: "alreadyRedeemed" });
-      }),
+        const instanceId = ProviderInstanceId.make("claude_isolated");
+        const { registry } = yield* makeProviderInstanceRegistry({
+          drivers: [ClaudeDriver],
+          configMap: {
+            [instanceId]: {
+              driver: ProviderDriverKind.make("claudeAgent"),
+              enabled: true,
+              config: makeClaudeConfig({
+                enabled: true,
+                binaryPath: fixtures.claudeBinaryPath,
+                homePath: fixtures.claudeHomePath,
+              }),
+            },
+          },
+        }).pipe(Effect.provideService(HttpClient.HttpClient, client));
+        const instance = yield* registry.getInstance(instanceId);
+        const snapshot = yield* instance!.snapshot.refresh;
+        expect(snapshot.usageLimits?.windows[0]?.usedPercent).toBe(100);
+        expect(snapshot.auth.workspaceId).toBe("fake-org");
+        expect(snapshot.usageLimits?.resetCredits).toBeUndefined();
+        expect(instance!.consumeResetCredit).toBeUndefined();
+        expect(
+          requests.filter(
+            (url) => url.includes("/api/oauth/usage") || url.includes("reset_rate_limits"),
+          ),
+        ).toEqual([]);
+      }).pipe(Effect.provideService(HostProcess.Platform, "linux"), Effect.provide(layerTest)),
   );
 
   it.live(

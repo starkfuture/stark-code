@@ -20,6 +20,8 @@ import {
   DesktopPreviewWebviewConfigSchema,
   PreviewAnnotationSubmissionResultSchema,
   DEFAULT_BROWSER_PROFILE_ID,
+  AGENT_BROWSER_PROFILE_ID,
+  IMPORTED_BROWSER_PROFILE_ID,
   INCOGNITO_BROWSER_PROFILE_ID,
   PreviewForwardedShortcut,
   MAX_KEYBINDINGS_COUNT,
@@ -28,9 +30,12 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as NodeURL from "node:url";
+import type { IpcMainInvokeEvent } from "electron";
 
+import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as ElectronApp from "../../electron/ElectronApp.ts";
+import * as ElectronSafeStorage from "../../electron/ElectronSafeStorage.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import { defaultBrowserSourceId } from "../../preview/BrowserImport/DefaultBrowser.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
@@ -38,6 +43,40 @@ import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts"
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
+
+const authorizeBrowserImport = Effect.fn("desktop.ipc.preview.authorizeBrowserImport")(function* (
+  event?: DesktopIpc.DesktopIpcInvokeEvent,
+) {
+  const window = yield* (yield* ElectronWindow.ElectronWindow).currentMainOrFirst;
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const frame = (event as Pick<IpcMainInvokeEvent, "senderFrame" | "sender"> | undefined)
+    ?.senderFrame;
+  let trusted = false;
+  if (
+    event &&
+    frame &&
+    Option.isSome(window) &&
+    event.sender.id === window.value.webContents.id &&
+    frame === window.value.webContents.mainFrame
+  ) {
+    trusted = yield* Effect.try(() => {
+      const url = new URL(frame.url);
+      return (
+        !url.username &&
+        !url.password &&
+        ((url.protocol === "starkcode:" && url.hostname === "app") ||
+          (environment.isDevelopment &&
+            Option.isSome(environment.devServerUrl) &&
+            url.origin === environment.devServerUrl.value.origin))
+      );
+    }).pipe(Effect.orElseSucceed(() => false));
+  }
+  if (!trusted)
+    return yield* new BrowserImport.BrowserImportFailedError({
+      sourceId: "browser",
+      reason: "unsafeTarget",
+    });
+});
 
 export const installPreviewEventForwarding = Effect.fn(
   "desktop.ipc.preview.installEventForwarding",
@@ -270,8 +309,13 @@ export function resolvePartitionScope(
 ): {
   readonly scope: string;
   readonly persistent: boolean;
-  readonly namespace?: "profile";
+  readonly namespace?: "profile" | "agent";
 } {
+  // A new namespace prevents any legacy custom profile named "agent" (which
+  // may already contain imported sessions) from being relabelled as agent-safe.
+  if (profileId === AGENT_BROWSER_PROFILE_ID) {
+    return { scope: environmentId, persistent: false, namespace: "agent" };
+  }
   if (profileId === undefined || profileId === DEFAULT_BROWSER_PROFILE_ID) {
     return { scope: environmentId, persistent: true };
   }
@@ -333,7 +377,8 @@ export const listBrowserImportSources = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_IMPORT_SOURCES_CHANNEL,
   payload: Schema.Void,
   result: Schema.Array(BrowserImportSource),
-  handler: Effect.fn("desktop.ipc.preview.listBrowserImportSources")(function* () {
+  handler: Effect.fn("desktop.ipc.preview.listBrowserImportSources")(function* (_, event) {
+    yield* authorizeBrowserImport(event);
     const browserImport = yield* BrowserImport.BrowserImport;
     const app = yield* ElectronApp.ElectronApp;
     const [sources, application] = yield* Effect.all(
@@ -351,10 +396,39 @@ export const importBrowserCookies = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_IMPORT_COOKIES_CHANNEL,
   payload: DesktopPreviewImportCookiesInputSchema,
   result: BrowserImportResult,
-  handler: Effect.fn("desktop.ipc.preview.importBrowserCookies")(function* ({
-    environmentId,
-    ...importInput
-  }) {
+  handler: Effect.fn("desktop.ipc.preview.importBrowserCookies")(function* (
+    { environmentId, ...importInput },
+    event,
+  ) {
+    yield* authorizeBrowserImport(event);
+    if (importInput.targetProfileId !== IMPORTED_BROWSER_PROFILE_ID) {
+      return yield* new BrowserImport.BrowserImportFailedError({
+        sourceId: importInput.sourceId,
+        reason: "unsafeTarget",
+      });
+    }
+    const app = yield* ElectronApp.ElectronApp;
+    const packaged = yield* app.metadata.pipe(
+      Effect.map((metadata) => metadata.isPackaged),
+      Effect.orElseSucceed(() => false),
+    );
+    if (!packaged) {
+      return yield* new BrowserImport.BrowserImportFailedError({
+        sourceId: importInput.sourceId,
+        reason: "storageNotEncrypted",
+      });
+    }
+    const safeStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
+    const encrypted = yield* safeStorage.isEncryptionAvailable.pipe(
+      Effect.orElseSucceed(() => false),
+    );
+    const backend = yield* safeStorage.selectedStorageBackend;
+    if (!encrypted || (Option.isSome(backend) && backend.value === "basic_text")) {
+      return yield* new BrowserImport.BrowserImportFailedError({
+        sourceId: importInput.sourceId,
+        reason: "storageNotEncrypted",
+      });
+    }
     const browserImport = yield* BrowserImport.BrowserImport;
     // Derived in main from the same helper the webview config uses, so cookies
     // land in exactly the partition the profile's tabs attach to.

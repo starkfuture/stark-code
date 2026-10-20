@@ -19,7 +19,7 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
-import type { BrowserContext, Page } from "playwright-core";
+import type { BrowserContext, Page, Route, WebSocketRoute } from "playwright-core";
 import { beforeEach, expect, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
@@ -129,6 +129,11 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
     page,
     sessions,
     newPage: async () => page as unknown as Page,
+    cookies: vi.fn(async (_url?: string) => [] as Array<{ name: string; value: string }>),
+    route: vi.fn(async (_pattern: string, _handler: (route: Route) => Promise<void>) => {}),
+    routeWebSocket: vi.fn(
+      async (_pattern: string, _handler: (socket: WebSocketRoute) => Promise<void>) => {},
+    ),
     grantPermissions: vi.fn(async () => {}),
     exposeBinding: vi.fn(async (_name: string, binding: ClipboardBinding) => {
       clipboardBinding = binding;
@@ -237,6 +242,14 @@ const dependencies = Layer.mergeAll(
   Layer.provideMerge(NodeServices.layer),
 );
 const layer = ServerBrowser.layer.pipe(Layer.provideMerge(dependencies));
+/** Keep expected failure assertions out of Effect's error channel. */
+const failureOf = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.match(effect, {
+    onFailure: (error) => error,
+    onSuccess: () => {
+      throw new Error("Expected the browser operation to be refused.");
+    },
+  });
 const ready = Effect.gen(function* () {
   const browser = yield* ServerBrowser.ServerBrowser;
   const broker = yield* Broker.PreviewAutomationBroker;
@@ -247,6 +260,23 @@ const ready = Effect.gen(function* () {
     input: { reuseExistingTab: false, show: false },
   });
   const tabId = PreviewTabId.make(opened.tabId!);
+  const manager = yield* Manager.PreviewManager;
+  // Existing behavioral fixtures use this local test site. Exercise the real
+  // pending-origin + human adjustment path before those operations.
+  yield* broker
+    .invoke({
+      scope,
+      tabId,
+      operation: "navigate",
+      input: { url: "http://localhost:5173" },
+    })
+    .pipe(failureOf);
+  yield* manager.adjust({
+    threadId: scope.thread.threadId,
+    tabId,
+    allowAgentSite: "http://localhost:5173",
+  });
+  yield* Effect.yieldNow;
   return { browser, broker, tabId };
 });
 /** Fills a viewer's output the way a viewer that stopped reading leaves it. */
@@ -387,7 +417,7 @@ it.live("enforces provider ownership and explicit targets when a session has mul
           operation: "navigate",
           input: { url: "http://localhost:5173/foreign" },
         })
-        .pipe(Effect.flip);
+        .pipe(failureOf);
       expect(foreign).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "agentMismatch",
@@ -410,7 +440,7 @@ it.live("enforces provider ownership and explicit targets when a session has mul
           operation: "evaluate",
           input: { expression: "read()" },
         })
-        .pipe(Effect.flip);
+        .pipe(failureOf);
       expect(foreignEvaluate).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "agentMismatch",
@@ -422,21 +452,21 @@ it.live("enforces provider ownership and explicit targets when a session has mul
       });
       const ambiguous = yield* broker
         .invoke<void>({ scope, operation: "evaluate", input: { expression: "ambiguous()" } })
-        .pipe(Effect.flip);
+        .pipe(failureOf);
       expect(ambiguous).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "tabRequired",
       });
       const ambiguousStop = yield* broker
         .invoke<void>({ scope, operation: "recordingStop", input: {} })
-        .pipe(Effect.flip);
+        .pipe(failureOf);
       expect(ambiguousStop).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "tabRequired",
       });
       const explicitStop = yield* broker
         .invoke<void>({ scope, tabId, operation: "recordingStop", input: {} })
-        .pipe(Effect.flip);
+        .pipe(failureOf);
       expect(explicitStop).toMatchObject({
         _tag: "PreviewAutomationExecutionError",
         cause: { _tag: "PreviewAutomationRecordingNotActiveError" },
@@ -561,7 +591,7 @@ it.live(
         }
         const rejected = yield* broker
           .invoke<void>({ scope, tabId, operation: "evaluate", input: { expression: "racing()" } })
-          .pipe(Effect.flip);
+          .pipe(failureOf);
         expect(rejected).toMatchObject({
           _tag: "PreviewAutomationControlInterruptedError",
           reason: "humanControl",
@@ -572,7 +602,7 @@ it.live(
         yield* viewer.input({ type: "releaseControl" });
         const stale = yield* broker
           .invoke<void>({ scope, tabId, operation: "click", input: { locator: `aria-ref=${ref}` } })
-          .pipe(Effect.flip);
+          .pipe(failureOf);
         expect(stale._tag).toBe("PreviewAutomationInvalidSelectorError");
         expect(contexts[0]!.page.locator).not.toHaveBeenCalled();
         expect(
@@ -646,7 +676,7 @@ it.live("reports a pending dialog without evaluating the page and resolves it ex
           operation: "open",
           input: { url: "http://localhost:5173/other" },
         })
-        .pipe(Effect.flip);
+        .pipe(failureOf);
       expect(reuse).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "dialogPending",
@@ -704,7 +734,7 @@ it.live("the owner can close a tab while an agent action waits on its dialog", (
           operation: "close",
           input: {},
         })
-        .pipe(Effect.flip);
+        .pipe(failureOf);
       expect(foreign).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "agentMismatch",
@@ -717,7 +747,7 @@ it.live("the owner can close a tab while an agent action waits on its dialog", (
       expect((yield* manager.list({ threadId: scope.thread.threadId })).sessions).toHaveLength(0);
       const afterClose = yield* broker
         .invoke<void>({ scope, tabId, operation: "evaluate", input: { expression: "late()" } })
-        .pipe(Effect.flip);
+        .pipe(failureOf);
       expect(afterClose._tag).toBe("PreviewAutomationTabNotFoundError");
     }),
   ).pipe(Effect.provide(layer)),
@@ -995,7 +1025,7 @@ it.live("closing a tab while a viewer is still opening it does not leave its pag
       contextGate = Promise.withResolvers<void>();
       const attaching = yield* browser
         .attachViewer(viewerInput(snapshot.tabId, false))
-        .pipe(Effect.flip, Effect.forkScoped);
+        .pipe(failureOf, Effect.forkScoped);
       yield* Effect.sleep("10 millis");
       yield* manager.close({ threadId: scope.thread.threadId, tabId: snapshot.tabId });
       yield* Effect.sleep("10 millis");
@@ -1216,7 +1246,7 @@ it.live("an agent's tabs stop at the limit until an unwatched idle tab closes", 
         input: { reuseExistingTab: false, show: false },
       });
       for (let count = 1; count < 8; count += 1) yield* open;
-      expect(yield* Effect.flip(open)).toMatchObject({
+      expect(yield* failureOf(open)).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "tabLimit",
       });
@@ -1249,7 +1279,7 @@ it.live("an agent answers the page's file picker or sets files on a file input",
       const page = contexts[0]!.page;
       const upload = (input: Record<string, unknown>) =>
         broker.invoke<void>({ scope, tabId, operation: "upload", input });
-      expect(yield* Effect.flip(upload({ paths: ["/tmp/a.csv"] }))).toMatchObject({
+      expect(yield* failureOf(upload({ paths: ["/tmp/a.csv"] }))).toMatchObject({
         _tag: "PreviewAutomationExecutionError",
       });
       const setFiles = vi.fn(async (_files: unknown) => {});
@@ -1271,7 +1301,7 @@ it.live("an agent answers the page's file picker or sets files on a file input",
       }
       expect(opened.fileChooser).toEqual({ multiple: false, accept: ".csv" });
       // A single-file picker rejects several files instead of dropping some.
-      yield* Effect.flip(upload({ paths: ["/tmp/a.csv", "/tmp/b.csv"] }));
+      yield* failureOf(upload({ paths: ["/tmp/a.csv", "/tmp/b.csv"] }));
       yield* upload({ paths: ["/tmp/a.csv"] });
       expect(setFiles).toHaveBeenCalledExactlyOnceWith(["/tmp/a.csv"], expect.anything());
       expect((yield* status).fileChooser).toBeNull();
@@ -1318,7 +1348,12 @@ it.live("drives the desktop's own page for a tab the desktop renders", () =>
       const manager = yield* Manager.PreviewManager;
       yield* Effect.yieldNow;
       desktopRendersNext = true;
-      const opened = yield* manager.open({ threadId: scope.thread.threadId, runtime: "server" });
+      const opened = yield* manager.open({
+        threadId: scope.thread.threadId,
+        runtime: "server",
+        profileId: "agent",
+        automationOwner: "agent-desktop",
+      });
       const viewer = yield* browser.attachViewer(viewerInput(opened.tabId, true));
       expect(desktopConnections.map((connection) => connection.endpoint)).toEqual([
         `ws://desktop/${opened.tabId}`,
@@ -1339,6 +1374,25 @@ it.live("drives the desktop's own page for a tab the desktop renders", () =>
         tabId: PreviewTabId.make(opened.tabId),
       });
       expect(evaluated).toMatchObject({ tabId: opened.tabId });
+      yield* Effect.promise(() => page.goto("https://private.example.test"));
+      page.title.mockClear();
+      for (const session of desktopConnections[0]!.context.sessions) {
+        const send = session.send.getMockImplementation()!;
+        session.send.mockImplementation(async (method, params) => {
+          if (method === "Runtime.evaluate") throw new Error("Native approval denied");
+          return send(method, params);
+        });
+      }
+      const denied = yield* broker
+        .invoke({
+          scope: asSession("agent-desktop"),
+          operation: "status",
+          input: {},
+          tabId: PreviewTabId.make(opened.tabId),
+        })
+        .pipe(failureOf);
+      expect(denied).toMatchObject({ _tag: "PreviewAutomationControlInterruptedError" });
+      expect(page.title).not.toHaveBeenCalled();
       // Closing the session lets go of the desktop's page without closing it.
       yield* manager.close({ threadId: scope.thread.threadId, tabId: opened.tabId });
       while (releasedDesktopTabs.length === 0) yield* Effect.yieldNow;
@@ -1375,7 +1429,7 @@ it.live("a desktop page the desktop takes back reconnects instead of closing", (
   ).pipe(Effect.provide(layer)),
 );
 
-it.live("agents read a human's tab with no arguments and act on it only while nobody drives", () =>
+it.live("agents cannot inspect or act on a personal tab even after the user releases it", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const browser = yield* ServerBrowser.ServerBrowser;
@@ -1386,74 +1440,77 @@ it.live("agents read a human's tab with no arguments and act on it only while no
         threadId: scope.thread.threadId,
         url: "http://localhost:5173/mine",
         runtime: "server",
+        profileId: "personal-imported",
       });
       const tabId = PreviewTabId.make(opened.tabId);
-      // The user opened and is looking at the tab; attaching takes control.
       const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* viewer.input({ type: "releaseControl" });
       const status = yield* broker.invoke<PreviewAutomationStatus>({
         scope,
         operation: "status",
         input: {},
       });
-      expect(status).toMatchObject({
+      expect(status.available).toBe(false);
+      for (const operation of ["snapshot", "evaluate", "navigate", "open"] as const) {
+        const denied = yield* broker
+          .invoke({
+            scope,
+            tabId,
+            operation,
+            input: { expression: "read()", url: "http://localhost:5173/agent" },
+          })
+          .pipe(failureOf);
+        expect(denied).toMatchObject({ _tag: "PreviewAutomationControlInterruptedError" });
+      }
+      expect(contexts[0]!.page.goto).not.toHaveBeenCalledWith(
+        "http://localhost:5173/agent",
+        expect.anything(),
+      );
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("agent sites require exact-origin human consent even without cookies", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const manager = yield* Manager.PreviewManager;
+      const denied = yield* broker
+        .invoke({ scope, tabId, operation: "navigate", input: { url: "https://app.example.test" } })
+        .pipe(failureOf);
+      expect(denied).toMatchObject({ _tag: "PreviewAutomationControlInterruptedError" });
+      const pending = yield* manager.list({ threadId: scope.thread.threadId });
+      expect(pending.sessions[0]?.agentSiteOrigin).toBe("https://app.example.test");
+      yield* manager.adjust({
+        threadId: scope.thread.threadId,
         tabId,
-        control: { owner: "human", ownedByCaller: false },
+        allowAgentSite: "https://wrong.example.test",
       });
-      expect(status.tabs).toEqual([
-        expect.objectContaining({ tabId, owner: "human", ownedByCaller: false, visible: true }),
-      ]);
-      // Reads work while the user drives; page script does not, since it can change the page.
-      const evaluated = yield* broker
-        .invoke<void>({ scope, operation: "evaluate", input: { expression: "read()" } })
-        .pipe(Effect.flip);
-      expect(evaluated).toMatchObject({
-        _tag: "PreviewAutomationControlInterruptedError",
-        reason: "humanControl",
-      });
-      yield* broker.invoke<PreviewAutomationSnapshot>({
-        scope,
+      expect(
+        (yield* manager.list({ threadId: scope.thread.threadId })).sessions[0]?.agentSiteOrigin,
+      ).toBe("https://app.example.test");
+      yield* manager.adjust({
+        threadId: scope.thread.threadId,
         tabId,
-        operation: "snapshot",
-        input: {},
+        allowAgentSite: "https://app.example.test",
       });
-      // Acting is refused while the user controls the tab.
-      const refused = yield* broker
-        .invoke<void>({
-          scope,
-          tabId,
-          operation: "navigate",
-          input: { url: "http://localhost:5173/agent" },
-        })
-        .pipe(Effect.flip);
-      expect(refused).toMatchObject({
-        _tag: "PreviewAutomationControlInterruptedError",
-        reason: "humanControl",
-      });
-      // Once they let go, the tab is unclaimed and the agent may act on it.
-      yield* viewer.input({ type: "releaseControl" });
-      const released = yield* broker.invoke<PreviewAutomationStatus>({
-        scope,
-        tabId,
-        operation: "status",
-        input: {},
-      });
-      expect(released.control).toMatchObject({ owner: "unclaimed", ownedByCaller: false });
+      yield* Effect.yieldNow;
       yield* broker.invoke({
         scope,
         tabId,
         operation: "navigate",
-        input: { url: "http://localhost:5173/agent" },
+        input: { url: "https://app.example.test" },
       });
-      expect(contexts[0]!.page.goto).toHaveBeenCalledWith(
-        "http://localhost:5173/agent",
-        expect.anything(),
-      );
-      // Taking control back refuses the agent again.
-      yield* viewer.input({ type: "takeControl" });
-      const retaken = yield* broker
-        .invoke<void>({ scope, tabId, operation: "press", input: { key: "Enter" } })
-        .pipe(Effect.flip);
-      expect(retaken).toMatchObject({ reason: "humanControl" });
+      yield* broker.invoke({ scope, tabId, operation: "snapshot", input: {} });
+      const other = yield* broker
+        .invoke({
+          scope,
+          tabId,
+          operation: "navigate",
+          input: { url: "https://another.example.test" },
+        })
+        .pipe(failureOf);
+      expect(other).toMatchObject({ _tag: "PreviewAutomationControlInterruptedError" });
     }),
   ).pipe(Effect.provide(layer)),
 );
@@ -1484,57 +1541,120 @@ it.live("a session's own tab stays its default while other sessions' tabs are li
 );
 
 it.live(
-  "preview_open picks a reported profile by id or name and defaults to the reported one",
+  "blocks credentialed redirects and script fetches until their exact origin is approved",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { broker, browser, tabId } = yield* ready;
+        const manager = yield* Manager.PreviewManager;
+        const context = contexts[0]!;
+        const routeHandler = context.route.mock.calls[0]![1];
+        const request = (url: string, headers: Record<string, string> = {}, navigation = false) => {
+          const aborted = vi.fn(async () => {});
+          const continued = vi.fn(async () => {});
+          const route = {
+            request: () => ({
+              url: () => url,
+              allHeaders: async () => headers,
+              isNavigationRequest: () => navigation,
+            }),
+            abort: aborted,
+            continue: continued,
+          } as unknown as Route;
+          return { route, aborted, continued };
+        };
+        const publicAsset = request("https://cdn.example.test/asset.js");
+        yield* Effect.promise(() => routeHandler(publicAsset.route));
+        expect(publicAsset.continued).toHaveBeenCalledOnce();
+        context.cookies.mockImplementation(async (url) =>
+          url?.startsWith("https://login.example.test")
+            ? [{ name: "session", value: "fixture" }]
+            : [],
+        );
+        const redirected = request("https://login.example.test/private?token=not-exposed");
+        yield* Effect.promise(() => routeHandler(redirected.route));
+        expect(redirected.aborted).toHaveBeenCalledWith("blockedbyclient");
+        expect(redirected.continued).not.toHaveBeenCalled();
+        expect(
+          (yield* manager.list({ threadId: scope.thread.threadId })).sessions[0]?.agentSiteOrigin,
+        ).toBe("https://login.example.test");
+        yield* manager.adjust({
+          threadId: scope.thread.threadId,
+          tabId,
+          allowAgentSite: "https://login.example.test",
+        });
+        yield* Effect.yieldNow;
+        yield* Effect.promise(() => routeHandler(redirected.route));
+        expect(redirected.continued).toHaveBeenCalledOnce();
+        const subframe = request("https://frame.example.test/private", {}, true);
+        yield* Effect.promise(() => routeHandler(subframe.route));
+        expect(subframe.aborted).toHaveBeenCalledWith("blockedbyclient");
+        const socketHandler = context.routeWebSocket.mock.calls[0]![1];
+        const socket = {
+          url: () => "wss://socket.example.test/channel",
+          connectToServer: vi.fn(),
+          close: vi.fn(async () => {}),
+        };
+        yield* Effect.promise(() => socketHandler(socket as unknown as WebSocketRoute));
+        expect(socket.connectToServer).not.toHaveBeenCalled();
+        expect(socket.close).toHaveBeenCalledWith(expect.objectContaining({ code: 1008 }));
+        const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+        yield* viewer.input({ type: "takeControl" });
+        const tokenRequest = request("https://api.example.test/query", {
+          Authorization: "Bearer fixture",
+        });
+        yield* Effect.promise(() => routeHandler(tokenRequest.route));
+        expect(tokenRequest.aborted).toHaveBeenCalledWith("blockedbyclient");
+        expect(tokenRequest.continued).not.toHaveBeenCalled();
+        // Even status cannot read a page a redirect or human navigation reached
+        // before the site's permission was granted.
+        yield* Effect.promise(() => context.page.goto("https://unapproved.example.test"));
+        context.page.title.mockClear();
+        const status = yield* broker
+          .invoke({ scope, tabId, operation: "status", input: {} })
+          .pipe(failureOf);
+        expect(status).toMatchObject({ _tag: "PreviewAutomationControlInterruptedError" });
+        expect(context.page.title).not.toHaveBeenCalled();
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live(
+  "agents always get isolated storage and cannot select personal profiles by id or name",
   () =>
     Effect.scoped(
       Effect.gen(function* () {
         const browser = yield* ServerBrowser.ServerBrowser;
         const broker = yield* Broker.PreviewAutomationBroker;
-        const manager = yield* Manager.PreviewManager;
         yield* Effect.yieldNow;
         yield* browser.reportProfiles({
           profiles: [{ id: "profile-work", name: "Work", kind: "persistent" }],
           defaultProfileId: "profile-work",
         });
-        const openWith = (profileId?: string) =>
+        const open = (profileId?: string) =>
           broker.invoke<PreviewAutomationStatus>({
             scope,
             operation: "open",
-            input: {
-              reuseExistingTab: false,
-              show: false,
-              ...(profileId === undefined ? {} : { profileId }),
-            },
+            input: { reuseExistingTab: false, show: false, ...(profileId ? { profileId } : {}) },
           });
-        const byDefault = yield* openWith();
-        const byName = yield* openWith("WORK");
-        const byId = yield* openWith("incognito");
-        const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
-        const profileOf = (tabId: string | null) =>
-          sessions.find((session) => session.tabId === tabId)?.profileId;
-        expect(profileOf(byDefault.tabId)).toBe("profile-work");
-        expect(profileOf(byName.tabId)).toBe("profile-work");
-        expect(profileOf(byId.tabId)).toBe("incognito");
-        // The chosen profile reaches the headless tab's storage.
-        expect(contextRequests).toEqual([
-          { profileId: "profile-work", isolated: false },
-          { profileId: "profile-work", isolated: false },
-          { profileId: "incognito", isolated: true },
-        ]);
-        expect(byDefault).toMatchObject({
-          defaultProfileId: "profile-work",
-          profiles: [
-            { id: "default", name: "Default" },
-            { id: "incognito", name: "Incognito", incognito: true },
-            { id: "profile-work", name: "Work" },
-          ],
+        const status = yield* open();
+        expect(status).toMatchObject({
+          defaultProfileId: "agent",
+          profiles: [{ id: "agent", name: "Agent browser", incognito: true }],
         });
-        const unknown = yield* openWith("Personal").pipe(Effect.flip);
-        expect(unknown).toMatchObject({
-          _tag: "PreviewAutomationExecutionError",
-          reason:
-            'No browser profile is named "Personal". Use one of: Default (id default), Incognito (id incognito), Work (id profile-work).',
-        });
+        expect(contextRequests).toEqual([{ profileId: "agent", isolated: true }]);
+        for (const profileId of [
+          "default",
+          "personal-imported",
+          "Work",
+          "profile-work",
+          "incognito",
+        ]) {
+          expect(yield* open(profileId).pipe(failureOf)).toMatchObject({
+            _tag: "PreviewAutomationControlInterruptedError",
+          });
+        }
+        expect(contextRequests).toHaveLength(1);
       }),
     ).pipe(Effect.provide(layer)),
 );
@@ -1543,7 +1663,7 @@ it.live("an agent tab keeps throwaway storage when no client reported profiles",
   Effect.scoped(
     Effect.gen(function* () {
       yield* ready;
-      expect(contextRequests).toEqual([{ profileId: "default", isolated: true }]);
+      expect(contextRequests).toEqual([{ profileId: "agent", isolated: true }]);
     }),
   ).pipe(Effect.provide(layer)),
 );

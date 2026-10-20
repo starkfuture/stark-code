@@ -1,5 +1,5 @@
 import type { Session, WebContents } from "electron";
-import { BrowserWindow, session } from "electron";
+import { BrowserWindow, session, webContents as electronWebContents } from "electron";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -20,8 +20,37 @@ const PREVIEW_PARTITION_PREFIX = "persist:starkcode-preview-";
  */
 const PREVIEW_EPHEMERAL_PARTITION_PREFIX = "starkcode-preview-ephemeral-";
 const PROFILE_PARTITION_MARKER = "profile-";
+const AGENT_PARTITION_MARKER = "agent-";
 
-export type BrowserSessionPartitionNamespace = "profile";
+export type BrowserSessionPartitionNamespace = "profile" | "agent";
+
+// Only main-created agent sessions enter this set. A profile id, partition
+// string, renderer claim or server command cannot turn a personal session into
+// an agent session. Existing/default partitions are deliberately excluded.
+const agentSessions = new WeakSet<Session>();
+const agentAccessChecks = new WeakMap<
+  Session,
+  {
+    authorize: (
+      requester: WebContents | null,
+      url: string,
+      credentialsPresent?: boolean,
+    ) => Promise<boolean>;
+    revoke: (requester?: WebContents) => void;
+  }
+>();
+export const isAgentBrowserSession = (browserSession: Session): boolean =>
+  agentSessions.has(browserSession);
+export const authorizeAgentBrowserAccess = (
+  browserSession: Session,
+  requester: WebContents,
+  url: string,
+): Promise<boolean> =>
+  // A page can hold login state in localStorage/IndexedDB without cookies.
+  // Agent page access therefore always needs an origin grant.
+  agentAccessChecks.get(browserSession)?.authorize(requester, url, true) ?? Promise.resolve(false);
+export const revokeAgentBrowserAccess = (browserSession: Session, requester?: WebContents): void =>
+  agentAccessChecks.get(browserSession)?.revoke(requester);
 
 // Permissions granted to preview web content. `clipboard-sanitized-write` is the
 // Electron permission behind `navigator.clipboard.writeText()` — note it is NOT
@@ -216,6 +245,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
   const crypto = yield* Crypto.Crypto;
   const electronDialog = yield* ElectronDialog.ElectronDialog;
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
+  const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
   // One prompt at a time, so a page cannot stack dialogs by looping a deep link.
   let externalPromptOpen = false;
   /**
@@ -264,6 +294,122 @@ export const make = Effect.gen(function* BrowserSessionMake() {
   };
   const sessionsRef = yield* SynchronizedRef.make<ReadonlyMap<string, Session>>(new Map());
 
+  const configureAgentAccess = (browserSession: Session) => {
+    const grants = new Map<number, Set<string>>();
+    const pending = new Map<string, Promise<boolean>>();
+    const generations = new Map<number, number>();
+    const observed = new WeakSet<WebContents>();
+    let epoch = 0;
+    const revoke = (requester?: WebContents) => {
+      if (requester) {
+        grants.delete(requester.id);
+        generations.set(requester.id, (generations.get(requester.id) ?? 0) + 1);
+      } else {
+        grants.clear();
+        epoch += 1;
+      }
+    };
+    const authorize = async (
+      requester: WebContents | null,
+      rawUrl: string,
+      credentialsPresent = false,
+    ): Promise<boolean> => {
+      let url: URL;
+      try {
+        url = new URL(rawUrl);
+      } catch {
+        return false;
+      }
+      if (url.protocol === "about:" && url.pathname === "blank") return true;
+      if (
+        !["http:", "https:", "ws:", "wss:"].includes(url.protocol) ||
+        url.username ||
+        url.password
+      )
+        return false;
+      const origin = url.origin;
+      if (requester && grants.get(requester.id)?.has(origin)) return true;
+      try {
+        const cookieUrl = new URL(url);
+        if (cookieUrl.protocol === "ws:") cookieUrl.protocol = "http:";
+        if (cookieUrl.protocol === "wss:") cookieUrl.protocol = "https:";
+        const cookies = await browserSession.cookies.get({ url: cookieUrl.href });
+        if (!credentialsPresent && cookies.length === 0) return true;
+      } catch {
+        return false;
+      }
+      if (!requester || requester.isDestroyed() || requester.session !== browserSession)
+        return false;
+      const owner = previewHostWindow(requester);
+      if (!owner || owner.isDestroyed()) return false;
+      if (!observed.has(requester)) {
+        observed.add(requester);
+        requester.once("destroyed", () => revoke(requester));
+      }
+      const generation = generations.get(requester.id) ?? 0;
+      const promptEpoch = epoch;
+      const key = JSON.stringify([requester.id, generation, promptEpoch, origin]);
+      const existing = pending.get(key);
+      if (existing) return existing;
+      const decision = runPromise(
+        electronDialog
+          .showMessageBox(
+            {
+              type: "warning",
+              title: "Agent access to a site",
+              message: `Allow an agent to access ${origin}?`,
+              detail:
+                "The agent can read this site and act as you if you are signed in to its separate browser profile. " +
+                "This allows access for this tab until it closes or its agent connection ends. " +
+                "Your imported personal browser sessions remain inaccessible.",
+              buttons: ["Cancel", "Allow this site"],
+              defaultId: 0,
+              cancelId: 0,
+              noLink: true,
+            },
+            owner,
+          )
+          .pipe(Effect.orElseSucceed(() => ({ response: 0, checkboxChecked: false }))),
+      )
+        .then(({ response }) => {
+          if (
+            response !== 1 ||
+            requester.isDestroyed() ||
+            owner.isDestroyed() ||
+            epoch !== promptEpoch ||
+            (generations.get(requester.id) ?? 0) !== generation
+          )
+            return false;
+          const origins = grants.get(requester.id) ?? new Set<string>();
+          origins.add(origin);
+          grants.set(requester.id, origins);
+          return true;
+        })
+        .finally(() => pending.delete(key));
+      pending.set(key, decision);
+      return decision;
+    };
+    agentAccessChecks.set(browserSession, { authorize, revoke });
+    // This catches redirects and credentialed fetches from evaluated scripts,
+    // not just the navigation URL the server declared. A background worker
+    // without a trusted owner cannot consume a signed-in identity.
+    browserSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      const requester =
+        details.webContentsId !== undefined && details.webContentsId > 0
+          ? (electronWebContents.fromId(details.webContentsId) ?? null)
+          : null;
+      const credentialsPresent =
+        ["mainFrame", "subFrame", "webSocket"].includes(details.resourceType) ||
+        Object.keys(details.requestHeaders).some((name) =>
+          /^(cookie|authorization|proxy-authorization)$/i.test(name),
+        );
+      void authorize(requester, details.url, credentialsPresent).then(
+        (allowed) => callback({ cancel: !allowed }),
+        () => callback({ cancel: true }),
+      );
+    });
+  };
+
   const getPartition = Effect.fn("BrowserSession.getPartition")(function* (
     scope = "shared",
     persistent = true,
@@ -282,7 +428,13 @@ export const make = Effect.gen(function* BrowserSessionMake() {
     // Legacy/default partitions are prefix + hex digest. The non-hex profile
     // marker creates a disjoint namespace while leaving every legacy default
     // partition byte-for-byte unchanged.
-    return `${prefix}${namespace === "profile" ? PROFILE_PARTITION_MARKER : ""}${Hex.encode(digest).slice(0, 20)}`;
+    const marker =
+      namespace === "agent"
+        ? AGENT_PARTITION_MARKER
+        : namespace === "profile"
+          ? PROFILE_PARTITION_MARKER
+          : "";
+    return `${prefix}${marker}${Hex.encode(digest).slice(0, 20)}`;
   });
 
   const getSession = Effect.fn("BrowserSession.getSession")(function* (
@@ -319,6 +471,10 @@ export const make = Effect.gen(function* BrowserSessionMake() {
           browserSession.setPermissionCheckHandler((_webContents, permission) =>
             ALLOWED_PREVIEW_PERMISSIONS.has(permission),
           );
+          if (namespace === "agent") {
+            configureAgentAccess(browserSession);
+            agentSessions.add(browserSession);
+          }
           const next = new Map(sessions);
           next.set(partition, browserSession);
           return [browserSession, next] as const;
@@ -345,10 +501,12 @@ export const make = Effect.gen(function* BrowserSessionMake() {
         selectSessions(sessions, partitions),
         ([partition, browserSession]) =>
           Effect.tryPromise({
-            try: () =>
-              browserSession.clearStorageData({
+            try: () => {
+              revokeAgentBrowserAccess(browserSession);
+              return browserSession.clearStorageData({
                 storages: ["cookies", "localstorage", "indexdb", "serviceworkers"],
-              }),
+              });
+            },
             catch: (cause) =>
               new BrowserSessionStorageClearError({
                 partition,

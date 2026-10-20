@@ -145,7 +145,7 @@ describe("Helium on Linux", () => {
         assert.include(helium.platforms, "linux");
         assert.isTrue(yield* isSourceInstalled(helium, context));
         assert.deepEqual(yield* listSourceProfiles(helium, context), [
-          { directory: "Default", name: "Personal", cookieCount: 3 },
+          { directory: "Default", name: "Personal", cookieCount: 3, domains: ["example.test"] },
         ]);
         assert.isFalse(yield* isSourceRunning(helium, context));
         yield* fileSystem.symlink("foreign-host-4242", `${root}/SingletonLock`);

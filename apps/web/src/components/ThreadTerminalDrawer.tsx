@@ -398,6 +398,7 @@ interface TerminalViewportProps {
   runtimeEnv?: Record<string, string>;
   providerInstanceId?: ProviderInstanceId;
   agentShell?: boolean;
+  existingOnly?: boolean | undefined;
   onMcpWarning?: (warning: NativeMcpWarning) => void;
   onSessionExited: () => void;
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
@@ -426,6 +427,7 @@ export function TerminalViewport({
   runtimeEnv,
   providerInstanceId,
   agentShell,
+  existingOnly,
   onMcpWarning,
   onSessionExited,
   onAddTerminalContext,
@@ -500,7 +502,7 @@ export function TerminalViewport({
     terminal: {
       threadId,
       terminalId,
-      cwd,
+      ...(!existingOnly ? { cwd } : {}),
       ...(worktreePath !== undefined ? { worktreePath } : {}),
       ...(runtimeEnv ? { env: runtimeEnv } : {}),
       ...(providerInstanceId ? { providerInstanceId } : {}),

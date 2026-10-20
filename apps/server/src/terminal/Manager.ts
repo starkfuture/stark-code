@@ -13,6 +13,7 @@ import {
 } from "./shellCandidates.ts";
 import { prepareNativeClaudeSettings } from "./NativeAgentSettings.ts";
 import * as NativeReplyCapture from "./NativeReplyCapture.ts";
+import { NativeCodexStatusParser, type NativeCodexStatus } from "./NativeCodexStatus.ts";
 import {
   claimAgentWorkspace,
   releaseAgentWorkspace,
@@ -58,6 +59,7 @@ import {
   type TerminalSummary,
   type TerminalWriteInput,
   type NativeAgentReply,
+  type NativeAgentAttention,
   type TerminalNativeRepliesInput,
   ClaudeSettings,
   CodexSettings,
@@ -84,6 +86,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ServerConfig from "../config.ts";
@@ -97,7 +100,6 @@ import {
   terminalRestartsTotal,
   terminalSessionsTotal,
 } from "../observability/Metrics.ts";
-import { expandHomePath } from "@starkfuture/provider-core/server/pathExpansion";
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
 import * as NativeTelemetryClient from "../resourceTelemetry/NativeTelemetryClient.ts";
@@ -208,6 +210,10 @@ export class TerminalManager extends Context.Service<
       input: TerminalNativeRepliesInput,
       listener: (replies: ReadonlyArray<NativeAgentReply>) => Effect.Effect<void>,
     ) => Effect.Effect<() => void, TerminalHistoryError>;
+
+    readonly observeNativeAttention: (
+      listener: (attention: ReadonlyArray<NativeAgentAttention>) => Effect.Effect<void>,
+    ) => Effect.Effect<() => void>;
 
     /**
      * Write input bytes to a terminal session.
@@ -335,6 +341,8 @@ interface TerminalSessionState {
   childCommandLabel: string | null;
   runtimeEnv: Record<string, string> | null;
   agentShell: boolean;
+  codexStatusParser: NativeCodexStatusParser | null;
+  processGeneration: symbol;
   readonly workspaceOwnerToken: symbol;
 }
 
@@ -356,6 +364,7 @@ type DrainProcessEventAction =
       sequence: number;
       history: BoundedTerminalHistory | null;
       data: string;
+      nativeStatus: NativeCodexStatus | undefined;
     }
   | {
       type: "exit";
@@ -1210,7 +1219,10 @@ interface TerminalManagerOptions {
       ) => Effect.Effect<NativeReplyCapture.NativeReplyLaunch | undefined>;
     },
   ) => Effect.Effect<
-    ShellCandidate & { readonly captureEnv?: Readonly<Record<string, string>> },
+    ShellCandidate & {
+      readonly captureEnv?: Readonly<Record<string, string>>;
+      readonly nativeProvider?: "claude" | "codex";
+    },
     | TerminalProviderInstanceNotFoundError
     | TerminalProviderEnvironmentError
     | TerminalNativeLaunchRefusedError
@@ -1353,7 +1365,11 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
               : new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
         });
         if (instance.driver !== "claudeAgent")
-          return { ...launch, ...(captureLaunch ? { captureEnv: captureLaunch.env } : {}) };
+          return {
+            ...launch,
+            nativeProvider: "codex" as const,
+            ...(captureLaunch ? { captureEnv: captureLaunch.env } : {}),
+          };
         const args = yield* prepareNativeClaudeSettings({
           args: launch.args,
           cwd: cwd ?? home,
@@ -1367,7 +1383,12 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
             (cause) => new TerminalProviderEnvironmentError({ providerInstanceId, cause }),
           ),
         );
-        return { ...launch, args, ...(captureLaunch ? { captureEnv: captureLaunch.env } : {}) };
+        return {
+          ...launch,
+          args,
+          nativeProvider: "claude" as const,
+          ...(captureLaunch ? { captureEnv: captureLaunch.env } : {}),
+        };
       }),
   });
 });
@@ -1488,6 +1509,47 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const nativeReplyListeners = new Set<
     (reply: NativeAgentReply, retained: ReadonlyArray<NativeAgentReply>) => Effect.Effect<void>
   >();
+  const nativeAttention = new Map<string, NativeAgentAttention>();
+  const setNativeAttention = (
+    target: { readonly threadId: string; readonly terminalId: string },
+    attention: NativeAgentAttention | null,
+    isCurrent: () => boolean = () => true,
+  ) =>
+    Effect.gen(function* () {
+      if (!isCurrent()) return;
+      const key = toSessionKey(target.threadId, target.terminalId);
+      const previous = nativeAttention.get(key);
+      if (!attention && !previous) return;
+      if (
+        attention?.provider === "codex" &&
+        previous?.provider === "codex" &&
+        attention.kind === previous.kind
+      )
+        return;
+      if (attention) nativeAttention.set(key, attention);
+      else nativeAttention.delete(key);
+      const snapshot = [...nativeAttention.values()];
+      for (const listener of nativeAttentionListeners)
+        yield* listener(snapshot).pipe(Effect.ignoreCause({ log: true }));
+    }).pipe(nativeAttentionGate.withPermits(1));
+  const nativeAttentionListeners = new Set<
+    (attention: ReadonlyArray<NativeAgentAttention>) => Effect.Effect<void>
+  >();
+  const nativeAttentionGate = yield* Semaphore.make(1);
+  const observeNativeAttention: TerminalManager["Service"]["observeNativeAttention"] = (listener) =>
+    Effect.gen(function* () {
+      nativeAttentionListeners.add(listener);
+      yield* listener([...nativeAttention.values()]).pipe(
+        Effect.onError(() =>
+          Effect.sync(() => {
+            nativeAttentionListeners.delete(listener);
+          }),
+        ),
+      );
+      return () => {
+        nativeAttentionListeners.delete(listener);
+      };
+    }).pipe(nativeAttentionGate.withPermits(1));
   const workerScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(workerScope, Exit.void));
 
@@ -1513,6 +1575,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           yield* listener(reply, retained).pipe(Effect.ignoreCause({ log: true }));
         }
       }),
+    onAttention: (target, attention) => setNativeAttention(target, attention),
   }).pipe(Effect.result);
   if (replyCaptureResult._tag === "Failure") {
     yield* Effect.logWarning(
@@ -1962,10 +2025,13 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const drainProcessEvents = Effect.fn("terminal.drainProcessEvents")(function* (
     session: TerminalSessionState,
     expectedPid: number,
+    expectedGeneration: symbol,
   ) {
     while (true) {
       const action: DrainProcessEventAction = yield* Effect.sync(() => {
-        if (session.pid !== expectedPid || !session.process || session.status !== "running") {
+        if (session.processGeneration !== expectedGeneration || session.pid !== expectedPid)
+          return { type: "idle" } as const;
+        if (!session.process || session.status !== "running") {
           session.pendingProcessEvents = [];
           session.pendingProcessEventIndex = 0;
           session.processEventDrainRunning = false;
@@ -2004,6 +2070,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             sequence: eventStamp.sequence,
             history: sanitized.visibleText.length > 0 ? session.history : null,
             data: nextEvent.data,
+            nativeStatus: session.codexStatusParser?.push(nextEvent.data).at(-1),
           } as const;
         }
 
@@ -2014,6 +2081,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         session.hasRunningSubprocess = false;
         session.childCommandLabel = null;
         session.status = "exited";
+        session.codexStatusParser = null;
         session.pendingHistoryControlSequence = "";
         session.pendingProcessEvents = [];
         session.pendingProcessEventIndex = 0;
@@ -2042,6 +2110,27 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       }
 
       if (action.type === "output") {
+        // Source bytes remain untouched for the terminal. Parse only the
+        // managed Codex process's structured lifecycle controls, never history.
+        const status = action.nativeStatus;
+        if (status) {
+          yield* setNativeAttention(
+            session,
+            status.state === "blocked"
+              ? {
+                  threadId: session.threadId,
+                  terminalId: session.terminalId,
+                  provider: "codex",
+                  kind: status.kind ?? "input",
+                  requestedAt: yield* nowIso,
+                }
+              : null,
+            () =>
+              session.processGeneration === expectedGeneration &&
+              session.pid === expectedPid &&
+              session.status === "running",
+          );
+        }
         if (action.history !== null) {
           yield* queuePersist(action.threadId, action.terminalId, action.history);
         }
@@ -2056,21 +2145,34 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         continue;
       }
 
-      yield* clearKillFiber(action.process);
-      yield* replyCapture.retire({ threadId: action.threadId, terminalId: action.terminalId });
-      yield* unregisterTerminal({
-        threadId: action.threadId,
-        terminalId: action.terminalId,
-      });
-      yield* publishEvent({
-        type: "exited",
-        threadId: action.threadId,
-        terminalId: action.terminalId,
-        sequence: action.sequence,
-        exitCode: action.exitCode,
-        exitSignal: action.exitSignal,
-      });
-      yield* evictInactiveSessionsIfNeeded();
+      yield* withThreadLock(
+        action.threadId,
+        Effect.gen(function* () {
+          const current = yield* getSession(action.threadId, action.terminalId);
+          if (
+            Option.isNone(current) ||
+            current.value !== session ||
+            session.processGeneration !== expectedGeneration
+          )
+            return;
+          yield* clearKillFiber(action.process);
+          yield* replyCapture.retire({ threadId: action.threadId, terminalId: action.terminalId });
+          yield* setNativeAttention(session, null);
+          yield* unregisterTerminal({
+            threadId: action.threadId,
+            terminalId: action.terminalId,
+          });
+          yield* publishEvent({
+            type: "exited",
+            threadId: action.threadId,
+            terminalId: action.terminalId,
+            sequence: action.sequence,
+            exitCode: action.exitCode,
+            exitSignal: action.exitSignal,
+          });
+          yield* evictInactiveSessionsIfNeeded();
+        }),
+      );
       return;
     }
   });
@@ -2078,7 +2180,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const stopProcess = Effect.fn("terminal.stopProcess")(function* (session: TerminalSessionState) {
     yield* replyCapture.retire({ threadId: session.threadId, terminalId: session.terminalId });
     const process = session.process;
-    if (!process) return;
+    if (!process) {
+      session.codexStatusParser = null;
+      yield* setNativeAttention(session, null);
+      return;
+    }
 
     const updatedAt = yield* nowIso;
     yield* modifyManagerState((state) => {
@@ -2093,9 +2199,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       session.pendingProcessEventIndex = 0;
       session.processEventDrainRunning = false;
       session.updatedAt = updatedAt;
+      session.codexStatusParser = null;
       return [undefined, state] as const;
     });
 
+    yield* setNativeAttention(session, null);
     yield* clearKillFiber(process);
     yield* unregisterTerminal({
       threadId: session.threadId,
@@ -2183,6 +2291,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     const startingAt = yield* nowIso;
     yield* modifyManagerState((state) => {
       session.status = "starting";
+      session.processGeneration = Symbol("terminal process generation");
       session.cwd = input.cwd;
       session.worktreePath = input.worktreePath ?? null;
       session.cols = input.cols;
@@ -2206,7 +2315,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         Effect.andThen(
           Effect.gen(function* () {
             let shellCandidates: Array<
-              ShellCandidate & { readonly captureEnv?: Readonly<Record<string, string>> }
+              ShellCandidate & {
+                readonly captureEnv?: Readonly<Record<string, string>>;
+                readonly nativeProvider?: "claude" | "codex";
+              }
             > = resolveShellCandidates(shellResolver, platform, baseEnv);
             if (input.agentShell === true) {
               if (
@@ -2324,10 +2436,15 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               }
             }
             const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
+            session.codexStatusParser =
+              input.agentShell === true && shellCandidates[0]?.nativeProvider === "codex"
+                ? new NativeCodexStatusParser()
+                : null;
             ptyProcess = spawnResult.process;
             startedShell = spawnResult.shellLabel;
 
             const processPid = ptyProcess.pid;
+            const processGeneration = session.processGeneration;
             let eventsActivated = false;
 
             let eventStamp: ReturnType<typeof advanceEventSequence> = {
@@ -2340,16 +2457,20 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               session.status = "running";
               // onExit may replay an exit immediately; accept it before subscribing.
               session.unsubscribeData = spawnResult.process.onData((data) => {
+                if (session.processGeneration !== processGeneration) return;
                 if (!enqueueProcessEvent(session, processPid, { type: "output", data })) {
                   return;
                 }
-                if (eventsActivated) runFork(drainProcessEvents(session, processPid));
+                if (eventsActivated)
+                  runFork(drainProcessEvents(session, processPid, processGeneration));
               });
               session.unsubscribeExit = spawnResult.process.onExit((event) => {
+                if (session.processGeneration !== processGeneration) return;
                 if (!enqueueProcessEvent(session, processPid, { type: "exit", event })) {
                   return;
                 }
-                if (eventsActivated) runFork(drainProcessEvents(session, processPid));
+                if (eventsActivated)
+                  runFork(drainProcessEvents(session, processPid, processGeneration));
               });
               eventStamp = advanceEventSequence(session);
               return [undefined, state] as const;
@@ -2364,7 +2485,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             });
             // Publish startup before draining any events replayed during subscription.
             eventsActivated = true;
-            if (session.processEventDrainRunning) runFork(drainProcessEvents(session, processPid));
+            if (session.processEventDrainRunning)
+              runFork(drainProcessEvents(session, processPid, processGeneration));
           }),
         ),
       ),
@@ -2386,6 +2508,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         session.status = "error";
         session.pid = null;
         session.process = null;
+        session.codexStatusParser = null;
         session.hasRunningSubprocess = false;
         session.childCommandLabel = null;
         session.pendingProcessEvents = [];
@@ -2669,6 +2792,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         childCommandLabel: null,
         runtimeEnv: normalizedRuntimeEnv(input.env),
         agentShell: input.agentShell === true,
+        codexStatusParser: null,
+        processGeneration: Symbol("terminal process generation"),
         workspaceOwnerToken: Symbol("native workspace owner"),
       };
 
@@ -3129,9 +3254,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         const session = yield* requireSession(input.threadId, terminalId);
         session.history.clear();
         session.pendingHistoryControlSequence = "";
-        session.pendingProcessEvents = [];
-        session.pendingProcessEventIndex = 0;
-        session.processEventDrainRunning = false;
+        // Clearing scrollback must not discard queued lifecycle/exit controls.
         const eventStamp = advanceEventSequence(session);
         yield* persistHistory(input.threadId, terminalId, session.history);
         yield* publishEvent({
@@ -3181,6 +3304,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           childCommandLabel: null,
           runtimeEnv: normalizedRuntimeEnv(input.env),
           agentShell: input.agentShell === true,
+          codexStatusParser: null,
+          processGeneration: Symbol("terminal process generation"),
           workspaceOwnerToken: Symbol("native workspace owner"),
         };
         const createdSession = session;
@@ -3325,6 +3450,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     observeStream,
     listNativeReplies,
     observeNativeReplies,
+    observeNativeAttention,
     write,
     resize,
     clear,

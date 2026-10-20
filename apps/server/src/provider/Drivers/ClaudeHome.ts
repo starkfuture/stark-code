@@ -1,6 +1,7 @@
 import { claudeModelEnvironment } from "@starkfuture/shared/claudeModelPolicy";
 import type { ClaudeSettings } from "@starkfuture/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
@@ -54,6 +55,31 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
   };
 });
 
+/** Whether this instance uses the normal local Claude login directory. */
+export const usesSharedClaudeLoginHome = Effect.fn("usesSharedClaudeLoginHome")(function* (
+  config: Pick<ClaudeSettings, "homePath">,
+  environment: NodeJS.ProcessEnv,
+): Effect.fn.Return<boolean, never, Path.Path> {
+  const path = yield* Path.Path;
+  const home = yield* HostProcess.HomeDirectory;
+  const resolvedHome = yield* resolveClaudeHomePath(config, environment);
+  if (resolvedHome !== path.resolve(home, ".claude")) return false;
+  if (environment.HOME?.trim() && path.resolve(environment.HOME) !== path.resolve(home))
+    return false;
+  return ![
+    "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+    "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+  ].some((name) => Boolean(environment[name]?.trim()));
+});
+
 export const makeClaudeContinuationGroupKey = Effect.fn("makeClaudeContinuationGroupKey")(
   function* (
     config: Pick<ClaudeSettings, "homePath">,
@@ -89,3 +115,31 @@ export const claudeSignedOutMessage = (input: {
       : "";
   return `Claude could not authenticate. For subscription login, run \`claude auth login\` on this environment's machine${configuration}, then start a new thread. For API-key authentication, check this instance's configured credentials.`;
 };
+
+const ClaudeAccountMetadata = Schema.Struct({
+  oauthAccount: Schema.optional(
+    Schema.Struct({ organizationUuid: Schema.optional(Schema.String) }),
+  ),
+});
+
+const decodeClaudeAccountMetadata = Schema.decodeEffect(
+  Schema.fromJsonString(ClaudeAccountMetadata),
+);
+
+/** Reads only non-secret organization identity; tokens remain owned by Claude Code. */
+export const readClaudeOrganizationId = (accountConfigPath: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const text = yield* fs.readFileString(accountConfigPath);
+    const config = yield* decodeClaudeAccountMetadata(text);
+    return config.oauthAccount?.organizationUuid?.trim() || undefined;
+  }).pipe(Effect.orElseSucceed(() => undefined));
+
+export const claudeAccountConfigPath = Effect.fn("claudeAccountConfigPath")(function* (
+  configDir: string | undefined,
+) {
+  const path = yield* Path.Path;
+  return configDir
+    ? path.join(configDir, ".claude.json")
+    : path.join(yield* HostProcess.HomeDirectory, ".claude.json");
+});

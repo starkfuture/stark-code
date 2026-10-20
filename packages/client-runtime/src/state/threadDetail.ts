@@ -130,8 +130,10 @@ export function createEnvironmentThreadDetailAtoms<E>(
     ).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-worktree:${key}`)),
   );
   const pendingRequestsAtomFamily = Atom.family((key: string) => {
-    let previous: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems"> | null =
-      null;
+    let previous: Pick<
+      OrchestrationV2ThreadProjection,
+      "runtimeRequests" | "turnItems" | "nodes"
+    > | null = null;
     let value: PendingThreadRequests | null = null;
     return Atom.make((get) => {
       const projection = Option.getOrNull(get(threadStateValueAtomFamily(key)).data);
@@ -144,20 +146,26 @@ export function createEnvironmentThreadDetailAtoms<E>(
         (request) => request.status === "pending",
       );
       const ids = new Set(runtimeRequests.map((request) => request.id));
+      const nodes = projection.nodes.filter(
+        (node) => node.runtimeRequestId !== null && ids.has(node.runtimeRequestId),
+      );
+      const commandNodeIds = new Set(nodes.map((node) => node.parentNodeId));
       const turnItems =
         ids.size === 0
           ? []
           : projection.turnItems.filter(
               (item) =>
-                (item.type === "approval_request" || item.type === "user_input_request") &&
-                ids.has(item.requestId),
+                ((item.type === "approval_request" || item.type === "user_input_request") &&
+                  ids.has(item.requestId)) ||
+                (item.type === "command_execution" && commandNodeIds.has(item.nodeId)),
             );
       if (
         previous === null ||
         !arrayElementsEqual(previous.runtimeRequests, runtimeRequests) ||
-        !arrayElementsEqual(previous.turnItems, turnItems)
+        !arrayElementsEqual(previous.turnItems, turnItems) ||
+        !arrayElementsEqual(previous.nodes, nodes)
       ) {
-        previous = { runtimeRequests, turnItems };
+        previous = { runtimeRequests, turnItems, nodes };
         value = derivePendingThreadRequests(previous);
       }
       return value;

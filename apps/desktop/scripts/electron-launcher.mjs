@@ -8,6 +8,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { ensureElectronRuntime } from "./ensure-electron-runtime.mjs";
+import { encodePngIcns } from "./icns.mjs";
+export { encodePngIcns } from "./icns.mjs";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -518,20 +520,4 @@ export function resolveDevProtocolClient() {
     appBundleId: APP_BUNDLE_ID,
     registrationManaged: macProtocolRegistrationManaged,
   };
-}
-
-/** Standard ICNS container with lossless PNG payloads at each native icon size. */
-export function encodePngIcns(entries) {
-  const chunks = entries.map(({ type, png }) => {
-    if (!/^[a-zA-Z0-9]{4}$/.test(type))
-      throw new Error("ICNS entry codes must have four characters.");
-    const header = Buffer.alloc(8);
-    header.write(type, 0, 4, "ascii");
-    header.writeUInt32BE(png.length + 8, 4);
-    return Buffer.concat([header, png]);
-  });
-  const header = Buffer.alloc(8);
-  header.write("icns", 0, 4, "ascii");
-  header.writeUInt32BE(8 + chunks.reduce((sum, chunk) => sum + chunk.length, 0), 4);
-  return Buffer.concat([header, ...chunks]);
 }

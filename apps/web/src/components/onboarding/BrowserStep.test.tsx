@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import {
   DEFAULT_CLIENT_SETTINGS,
+  EnvironmentId,
   type BrowserImportSource,
   type ClientSettings,
   type DesktopPreviewBridge,
@@ -22,7 +23,23 @@ vi.mock("../../hooks/useSettings", () => ({
   useClientSettingsHydrated: () => mocks.settingsReady,
 }));
 vi.mock("../../state/environments", () => ({
-  usePrimaryEnvironment: () => mocks.environment,
+  useEnvironments: () => ({
+    environments: mocks.environment
+      ? [
+          {
+            ...mocks.environment,
+            connection: { phase: "connected" },
+            entry: {
+              target: {
+                _tag: "PrimaryConnectionTarget",
+                httpBaseUrl: "http://127.0.0.1:3773",
+                wsBaseUrl: "ws://127.0.0.1:3773",
+              },
+            },
+          },
+        ]
+      : [],
+  }),
 }));
 vi.mock("../../localApi", () => ({
   ensureLocalApi: () => ({ shell: { openSystemSettings: mocks.openSystemSettings } }),
@@ -67,7 +84,15 @@ function profileButton(name: string) {
   if (!(match instanceof HTMLButtonElement)) throw new Error(`Missing profile: ${name}`);
   return match;
 }
-const mount = () => act(async () => root.render(<BrowserStep onContinue={onContinue} />));
+const mount = () =>
+  act(async () =>
+    root.render(
+      <BrowserStep
+        environmentId={EnvironmentId.make("local-environment")}
+        onContinue={onContinue}
+      />,
+    ),
+  );
 const click = (label: string) => act(async () => button(label).click());
 function chooseBrowser(id: string) {
   return act(async () => {
@@ -98,6 +123,15 @@ beforeEach(() => {
   listSources.mockResolvedValue([chrome, firefox]);
   importCookies.mockResolvedValue({ imported: 9, skipped: 0, skippedDomains: [] });
   window.desktopBridge = {
+    getLocalEnvironmentBootstraps: () => [
+      {
+        id: "primary",
+        label: "This Mac",
+        runningDistro: null,
+        httpBaseUrl: "http://127.0.0.1:3773",
+        wsBaseUrl: "ws://127.0.0.1:3773",
+      },
+    ],
     preview: {
       listBrowserImportSources: listSources,
       importBrowserCookies: importCookies,
@@ -121,7 +155,8 @@ describe("browser import onboarding", () => {
   it("only discovers metadata until the user chooses to import and allows skipping", async () => {
     await mount();
     expect(listSources).toHaveBeenCalledOnce();
-    expect(container.querySelector("select")?.value).toBe("chrome");
+    expect(container.textContent).toContain("Your default browser");
+    expect(container.textContent).toContain("Chrome");
     expect(importCookies).not.toHaveBeenCalled();
     await click("Skip for now");
     expect(onContinue).toHaveBeenCalledOnce();
@@ -134,9 +169,22 @@ describe("browser import onboarding", () => {
     listSources.mockResolvedValue([{ ...chrome, isDefault: false }, firefox]);
     await mount();
     expect(container.querySelector("select")?.value).toBe("");
-    expect(button("Review import").disabled).toBe(true);
+    expect(button("Review before importing").disabled).toBe(true);
     await chooseBrowser("firefox");
-    await click("Review import");
+    await click("Review before importing");
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Firefox Work");
+    expect(importCookies).not.toHaveBeenCalled();
+    await click("Cancel");
+    expect(importCookies).not.toHaveBeenCalled();
+  });
+
+  it("can change the detected default without importing either browser", async () => {
+    await mount();
+    await click("Change browser");
+    await chooseBrowser("firefox");
+    expect(container.textContent).toContain("Firefox");
+    expect(container.textContent).toContain("Selected browser");
+    await click("Review before importing");
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Firefox Work");
     expect(importCookies).not.toHaveBeenCalled();
     await click("Cancel");
@@ -145,7 +193,7 @@ describe("browser import onboarding", () => {
 
   it("reviews the selected browser profile and imports only after the exact choice is confirmed", async () => {
     await mount();
-    await click("Review import");
+    await click("Review before importing");
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Import from Chrome");
     await act(async () => profileButton("Work").click());
     expect(importCookies).not.toHaveBeenCalled();
@@ -164,7 +212,7 @@ describe("browser import onboarding", () => {
     expect(pagesConnect).not.toHaveBeenCalled();
   });
 
-  it("keeps the environment and destination profile selected when review began", async () => {
+  it("keeps the destination profile selected when review began", async () => {
     const initialSettings: ClientSettings = {
       ...DEFAULT_CLIENT_SETTINGS,
       browserDefaultProfileId: "company",
@@ -175,8 +223,7 @@ describe("browser import onboarding", () => {
     };
     mocks.getSettings.mockReturnValue(initialSettings);
     await mount();
-    await click("Review import");
-    mocks.environment = { environmentId: "another-environment" };
+    await click("Review before importing");
     mocks.getSettings.mockReturnValue({ ...initialSettings, browserDefaultProfileId: "personal" });
     await mount();
     await click("Import");
@@ -195,7 +242,7 @@ describe("browser import onboarding", () => {
       browserDefaultProfileId: "incognito",
     });
     await mount();
-    await click("Review import");
+    await click("Review before importing");
     await click("Import");
     expect(importCookies.mock.calls[0]?.[0].targetProfileId).toBe("default");
   });
@@ -203,7 +250,7 @@ describe("browser import onboarding", () => {
   it("rechecks a running browser without importing until the user confirms the reviewed profile", async () => {
     listSources.mockResolvedValueOnce([{ ...chrome, unavailable: "browserRunning" }]);
     await mount();
-    await click("Review import");
+    await click("Review before importing");
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
       "Quit Chrome to import",
     );
@@ -219,7 +266,7 @@ describe("browser import onboarding", () => {
   it("does not claim an empty import connected the browser", async () => {
     importCookies.mockResolvedValue({ imported: 0, skipped: 0, skippedDomains: [] });
     await mount();
-    await click("Review import");
+    await click("Review before importing");
     await click("Import");
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("No cookies found");
     await click("Done");
@@ -231,7 +278,7 @@ describe("browser import onboarding", () => {
   it("shows a failed copy without exposing raw errors or marking setup ready", async () => {
     importCookies.mockRejectedValue(new Error("Authorization: private-cookie-value"));
     await mount();
-    await click("Review import");
+    await click("Review before importing");
     await click("Import");
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
       "Couldn’t import from Chrome",
@@ -245,11 +292,11 @@ describe("browser import onboarding", () => {
   it("does not start import before client settings are hydrated or an environment is available", async () => {
     mocks.settingsReady = false;
     await mount();
-    expect(button("Review import").disabled).toBe(true);
+    expect(button("Review before importing").disabled).toBe(true);
     mocks.settingsReady = true;
     mocks.environment = null;
     await mount();
-    expect(button("Review import").disabled).toBe(true);
+    expect(button("Review before importing").disabled).toBe(true);
     expect(importCookies).not.toHaveBeenCalled();
   });
 
@@ -262,8 +309,31 @@ describe("browser import onboarding", () => {
     expect(document.body.textContent).not.toContain("secret-metadata");
     await click("Try again");
     expect(listSources).toHaveBeenCalledTimes(2);
-    expect(container.querySelector("select")?.value).toBe("chrome");
+    expect(container.textContent).toContain("Your default browser");
+    expect(container.textContent).toContain("Chrome");
     expect(importCookies).not.toHaveBeenCalled();
     expect(pagesConnect).not.toHaveBeenCalled();
   });
+});
+
+it("refuses local cookie import after the destination computer changes", async () => {
+  await mount();
+  await click("Review before importing");
+  mocks.environment = { environmentId: "another-environment" };
+  await mount();
+  await click("Import");
+  expect(importCookies).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain("Couldn’t import from Chrome");
+});
+
+it("does not discover local browsers for an unproven remote destination", async () => {
+  window.desktopBridge!.getLocalEnvironmentBootstraps = () => [];
+  await mount();
+  expect(listSources).not.toHaveBeenCalled();
+  expect(button("Review before importing").disabled).toBe(true);
+  expect(container.textContent).toContain(
+    "Browser import is available when setting up this computer",
+  );
+  await click("Skip for now");
+  expect(onContinue).toHaveBeenCalledOnce();
 });

@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "./starkSurfaces.css";
+@import "./components/settings/settingsReview.css";
+@import "./components/sidebar/sidebarNavigation.css";
+@import "./components/sidebar/accountMenu.css";
 
 @custom-variant dark (&:is(.dark, .dark *));
 @custom-variant light (&:not(.dark, .dark *));

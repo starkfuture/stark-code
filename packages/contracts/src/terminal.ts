@@ -106,6 +106,30 @@ export type TerminalCloseInput = typeof TerminalCloseInput.Type;
 export const TerminalSessionStatus = Schema.Literals(["starting", "running", "exited", "error"]);
 export type TerminalSessionStatus = typeof TerminalSessionStatus.Type;
 
+/** A bounded projection of this turn's native transcript. Never includes tool output. */
+export const NativeTurnEvidence = Schema.Struct({
+  coverage: Schema.Literals(["available", "partial", "unavailable"]),
+  commands: Schema.Array(
+    Schema.Struct({
+      id: Schema.String.check(Schema.isMaxLength(256)),
+      label: Schema.String.check(Schema.isMaxLength(256)),
+      isCheck: Schema.Boolean,
+      outcome: Schema.Literals(["exit-zero", "tool-completed", "failed", "unknown"]),
+      exitCode: Schema.NullOr(Schema.Int),
+      startedAt: Schema.NullOr(Schema.String),
+      completedAt: Schema.NullOr(Schema.String),
+    }),
+  ).check(Schema.isMaxLength(100)),
+  changes: Schema.Array(
+    Schema.Struct({
+      path: Schema.String.check(Schema.isMaxLength(512)),
+      completedAt: Schema.NullOr(Schema.String),
+    }),
+  ).check(Schema.isMaxLength(200)),
+  unconfirmedChanges: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type NativeTurnEvidence = typeof NativeTurnEvidence.Type;
+
 /** A completed native CLI reply, captured by its Stop hook (not streamed output). */
 export const NativeAgentReply = Schema.Struct({
   id: Schema.String.check(Schema.isNonEmpty()),
@@ -118,6 +142,7 @@ export const NativeAgentReply = Schema.Struct({
   capturedAt: Schema.String,
   /** The captured prefix is shorter than the provider's completed reply. */
   truncated: Schema.optional(Schema.Boolean),
+  evidence: Schema.optional(NativeTurnEvidence),
   /** Durable capture order. Async hooks can arrive out of provider turn order. */
   sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 });
@@ -128,6 +153,20 @@ export const TerminalNativeRepliesInput = Schema.Struct({
   terminalId: Schema.optional(TerminalIdSchema),
 });
 export type TerminalNativeRepliesInput = typeof TerminalNativeRepliesInput.Type;
+
+/** Native lifecycle hints only; opening one never authorizes or answers a request. */
+export const NativeAgentAttention = Schema.Struct({
+  threadId: TrimmedNonEmptyStringSchema,
+  terminalId: TerminalIdSchema,
+  provider: Schema.Literals(["claude", "codex"]),
+  // Claude hooks carry this; Codex's aggregate OSC status has no session ID.
+  sessionId: Schema.optional(
+    Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(256)),
+  ),
+  kind: Schema.Literals(["permission", "question", "auth", "input"]),
+  requestedAt: Schema.String,
+});
+export type NativeAgentAttention = typeof NativeAgentAttention.Type;
 
 export const TerminalSessionSnapshot = Schema.Struct({
   threadId: Schema.String.check(Schema.isNonEmpty()),

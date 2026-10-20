@@ -194,6 +194,16 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
         : undefined,
   },
   {
+    id: "zen",
+    name: "Zen",
+    engine: "firefox",
+    // Zen's macOS profile root differs from Firefox, but its profile metadata,
+    // cookie schema and container isolation use the same reader.
+    platforms: ["darwin"],
+    userDataDirectory: (context) =>
+      context.platform === "darwin" ? macApplicationSupport(context, "zen") : undefined,
+  },
+  {
     id: "firefox",
     name: "Firefox",
     engine: "firefox",
@@ -363,6 +373,36 @@ const isSafeProfileDirectory = (directory: string): boolean =>
 
 const CookieCountRow = Schema.Struct({ count: Schema.Number });
 const decodeCookieCount = Schema.decodeUnknownEffect(Schema.Array(CookieCountRow));
+const decodeCookieDomains = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ domain: Schema.String })),
+);
+
+const listProfileCookieDomains = Effect.fnUntraced(function* (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+  directory: string,
+) {
+  if (definition.engine === "safari") return undefined;
+  const database = yield* resolveCookieDatabase(definition, context, directory);
+  if (database === undefined) return undefined;
+  return yield* Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows =
+      definition.engine === "firefox"
+        ? yield* sql`select distinct host as domain from moz_cookies where originAttributes = '' limit 2000`
+        : yield* sql`select distinct host_key as domain from cookies limit 2000`;
+    return [
+      ...new Set(
+        (yield* decodeCookieDomains(rows))
+          .map(({ domain }) => domain.replace(/^\./, "").toLowerCase())
+          .filter((domain) => /^[a-z0-9.-]+$/i.test(domain)),
+      ),
+    ].sort();
+  }).pipe(
+    Effect.provide(NodeSqliteClient.layer({ filename: database, readonly: true })),
+    Effect.orElseSucceed(() => undefined),
+  );
+});
 
 /**
  * How many importable cookies a profile holds, counted without decrypting
@@ -398,11 +438,15 @@ const withCookieCounts = (
   profiles: ReadonlyArray<BrowserImportSourceProfile>,
 ) =>
   Effect.forEach(profiles, (profile) =>
-    countProfileCookies(definition, context, profile.directory).pipe(
-      Effect.map((cookieCount) =>
-        cookieCount === undefined ? profile : { ...profile, cookieCount },
-      ),
-    ),
+    Effect.gen(function* () {
+      const cookieCount = yield* countProfileCookies(definition, context, profile.directory);
+      const domains = yield* listProfileCookieDomains(definition, context, profile.directory);
+      return {
+        ...profile,
+        ...(cookieCount === undefined ? {} : { cookieCount }),
+        ...(domains === undefined ? {} : { domains }),
+      };
+    }),
   );
 
 const SafariProfileRows = Schema.Array(

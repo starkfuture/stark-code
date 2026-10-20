@@ -41,6 +41,10 @@ export function createTerminalEnvironmentAtoms<R, E>(
       label: "environment-data:terminal:native-replies",
       tag: WS_METHODS.terminalNativeReplies,
     }),
+    nativeAttention: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:terminal:native-attention",
+      tag: WS_METHODS.terminalNativeAttention,
+    }),
     observe: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:terminal:observe",
       subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.terminalObserve>) =>

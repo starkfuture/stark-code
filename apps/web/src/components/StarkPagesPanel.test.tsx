@@ -7,7 +7,20 @@ vi.mock("~/hooks/usePreviewPanelInlineSize", () => ({
   usePreviewPanelInlineSize: () => ({ width: 540, handlers: {} }),
 }));
 vi.mock("./StarkPagesSidebar", () => ({
-  StarkPagesSidebar: () => <iframe title="Workspace page" sandbox="allow-same-origin" />,
+  StarkPagesSidebar: ({
+    onPageChange,
+  }: {
+    onPageChange?: (page: { kind: "local"; slug: string; title: string }) => void;
+  }) => (
+    <>
+      <iframe title="Workspace page" sandbox="allow-same-origin" />
+      <button
+        onClick={() => onPageChange?.({ kind: "local", slug: "review-page", title: "Review page" })}
+      >
+        Show folder page
+      </button>
+    </>
+  ),
 }));
 vi.mock("./PublishedStarkPages", () => ({
   PublishedStarkPages: () => {
@@ -24,7 +37,8 @@ import { StarkPagesPanel } from "./StarkPagesPanel";
 let root: Root;
 let container: HTMLDivElement;
 const close = vi.fn();
-const render = (inline = true, active = true) =>
+const openPage = vi.fn();
+const render = (inline = true, active = true, tabs = false) =>
   act(() =>
     root.render(
       <StarkPagesPanel
@@ -35,6 +49,7 @@ const render = (inline = true, active = true) =>
         canPublish={false}
         onPublishRequest={vi.fn()}
         onClose={close}
+        onOpenPage={tabs ? openPage : undefined}
       />,
     ),
   );
@@ -65,6 +80,7 @@ beforeEach(() => {
   );
   vi.stubGlobal("cancelAnimationFrame", clearTimeout);
   close.mockReset();
+  openPage.mockReset();
   window.localStorage.clear();
   container = document.createElement("div");
   document.body.append(container);
@@ -177,4 +193,20 @@ it("retains the selected page while another panel is active and releases modal f
   expect(frame.closest("[hidden]")).toBeNull();
   expect(container.querySelector('[data-pages-expanded="true"]')).not.toBeNull();
   otherTool.remove();
+});
+
+it("opens the chosen folder page as a full workspace tab through either expand entry point", async () => {
+  await render(true, true, true);
+  await chooseSource("Folder pages");
+  await click("Show folder page");
+  expect(openPage).not.toHaveBeenCalled();
+  await click("Expand Pages");
+  expect(openPage).toHaveBeenCalledExactlyOnceWith({
+    kind: "local",
+    slug: "review-page",
+    title: "Review page",
+  });
+  expect(container.querySelector('[data-pages-expanded="true"]')).toBeNull();
+  await act(() => window.dispatchEvent(new Event("starkcode:auxiliary-panel-toggle-expanded")));
+  expect(openPage).toHaveBeenCalledTimes(2);
 });

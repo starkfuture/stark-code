@@ -32,6 +32,18 @@ const baseProviderSnapshot = {
 };
 
 describe("ServerProvider", () => {
+  it.each([undefined, true, false])(
+    "preserves optional shared Claude login proof=%s",
+    (usesSharedClaudeLogin) => {
+      const parsed = decodeServerProvider({
+        ...baseProviderSnapshot,
+        driver: "claudeAgent",
+        ...(usesSharedClaudeLogin === undefined ? {} : { usesSharedClaudeLogin }),
+      });
+      expect(parsed.usesSharedClaudeLogin).toBe(usesSharedClaudeLogin);
+    },
+  );
+
   it.each([undefined, true, false])("decodes workspace command discovery pending=%s", (pending) => {
     const workspace = {
       cwd: "/workspace/project",

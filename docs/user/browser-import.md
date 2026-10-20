@@ -1,19 +1,32 @@
 # Import browser sessions
 
 The desktop app can import cookies from another browser so you can reuse its signed-in sessions
-in the preview browser.
+in your **Personal imported sessions** profile. Agents cannot open this profile or any other
+personal profile. They use a separate **Agent browser** whose sessions are discarded when the app quits.
 
 During setup, choose **Browser** after connecting your agents. Your default browser is selected
-when it is recognized. Choose **Review import**, select the browser profile, then choose **Import**.
-Setup imports into your current default Stark Code browser profile.
+when it is recognized. Choose **Review import**, select the source profile and the
+sites to copy, then confirm the warning and choose **Import**. No sites start selected.
+Only the exact selected cookie domains are copied; a parent domain is a separate
+choice because its cookies can sign you into multiple subdomains.
 
-To import later or create a separate profile, open **Settings → Integrations → Browser profiles →
+To import later, open **Settings → Integrations → Browser profiles →
 Add profile**, then choose a browser under **Import from**. Close the source browser before
 importing, and allow an operating-system keyring unlock prompt if one appears.
+Imports always go into Personal imported sessions, regardless of the current default profile.
 
 This is a one-time copy. Later login changes stay separate between the two browsers, and some
 sites may still require you to sign in again.
 Saved passwords, bookmarks and browsing history are not imported.
+
+On macOS, Zen profiles are supported alongside Firefox. Only the default container's cookies
+are copied; separate container logins remain in the source browser.
+
+Existing imported sessions stay in their personal profiles after an update and
+remain unavailable to agents. Before an agent reads or acts on a site in Agent
+browser, approve that site's origin in the browser panel or native app prompt.
+That permission does not copy any sessions from Personal imported sessions. Closing the
+agent tab or clearing its cookies ends the permission.
 
 On macOS, Safari imports need Full Disk Access. Choose **Allow**, drag Stark Code into the
 System Settings permission list, and turn access on. **Continue** becomes available when access
@@ -23,3 +36,7 @@ the import wizard afterward. You can revoke Full Disk Access once the import is 
 On Windows, import supports Firefox and Helium profiles that use standard profile encryption.
 Other Chromium-based browsers use app-bound encryption and cannot be imported. Partitioned cookies
 are skipped on all platforms.
+
+Session imports require a packaged build with cookie encryption and an available OS keyring.
+Development builds can show available browsers and sites, but cannot import sessions.
+Ordinary browsing remains available.

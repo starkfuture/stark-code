@@ -633,6 +633,9 @@ it.effect("refuses reply generation to read-only clients before invoking the mod
     });
     expect(handled).toBe(false);
     expect(requiredScopeForRpcMethod(WS_METHODS.terminalNativeReplies)).toBe(AuthTerminalReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.terminalNativeAttention)).toBe(
+      AuthTerminalReadScope,
+    );
   }).pipe(Effect.scoped),
 );
 

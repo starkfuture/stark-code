@@ -208,6 +208,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           isCollapsed ? "Show the question and its options" : "Hide the question and its options"
         }
         data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
+        data-runtime-request-id={prompt.requestId}
       >
         <ComposerBanner.Icon />
         <ComposerBanner.Content>

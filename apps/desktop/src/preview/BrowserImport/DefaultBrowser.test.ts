@@ -12,6 +12,7 @@ describe("default browser source", () => {
     ["/Applications/Arc.app", "arc"],
     ["/Applications/Helium.app", "helium"],
     ["/Applications/Firefox.app/Contents/MacOS/firefox", "firefox"],
+    ["/Applications/Zen.app/Contents/MacOS/zen", "zen"],
     ["/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app", "safari"],
   ])("recognizes the installed browser at %s", (path, expected) => {
     expect(defaultBrowserSourceId({ name: "Localized app name", path })).toBe(expected);

@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   isOnboardingRelayEnvironment,
+  resolveOnboardingLocalEnvironment,
   resolveOnboardingSetup,
   resolveOnboardingTargetEnvironment,
 } from "./targetEnvironment.logic";
@@ -89,6 +90,55 @@ const desktopLocalEnvironment = {
   },
   label: "WSL",
 } as const;
+
+describe("resolveOnboardingLocalEnvironment", () => {
+  const bootstraps = [
+    {
+      id: "primary",
+      label: "This Mac",
+      runningDistro: null,
+      httpBaseUrl: "http://127.0.0.1:3773",
+      wsBaseUrl: "ws://127.0.0.1:3773",
+    },
+  ];
+
+  it("defaults only to the connected backend advertised by this desktop", () => {
+    expect(
+      resolveOnboardingLocalEnvironment(
+        [olderRelay, pairedRemote, sshEnvironment, primaryEnvironment],
+        bootstraps,
+      ),
+    ).toBe(primaryEnvironment);
+    expect(
+      resolveOnboardingLocalEnvironment(
+        [{ ...primaryEnvironment, connection: { phase: "connecting" } }],
+        bootstraps,
+      ),
+    ).toBeNull();
+  });
+
+  it("does not infer a local machine from authentication or a loopback tunnel", () => {
+    expect(resolveOnboardingLocalEnvironment([primaryEnvironment], [])).toBeNull();
+    expect(
+      resolveOnboardingLocalEnvironment(
+        [primaryEnvironment],
+        [
+          {
+            ...bootstraps[0]!,
+            httpBaseUrl: "http://127.0.0.1:4000",
+            wsBaseUrl: "ws://127.0.0.1:4000",
+          },
+        ],
+      ),
+    ).toBeNull();
+    expect(
+      resolveOnboardingLocalEnvironment(
+        [olderRelay, pairedRemote, sshEnvironment, desktopLocalEnvironment],
+        bootstraps,
+      ),
+    ).toBeNull();
+  });
+});
 
 describe("resolveOnboardingTargetEnvironment", () => {
   it("waits for the exact paired machine instead of using an older connected machine", () => {

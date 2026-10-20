@@ -10,6 +10,23 @@ rebases, the files Git brought in are left out. A file stays in the list when th
 committed it, or fixed a conflict in it. Use the branch comparison to review everything that changed
 against your base branch. Restore still returns the complete saved workspace.
 
+## Check release notes
+
+Open **Tools → Conversation tools → Checks** to check changed publishable packages
+under `packages/` for a changeset. If your workspace contains several repositories,
+set **Repository folder** to the one you want to inspect. Leave the comparison field empty for staged,
+unstaged and new files, or enter an existing local branch/ref to include committed
+changes since its merge base. The check does not fetch or use model tokens.
+
+Only changeset files included in the change count. Packages marked `private: true`
+are excluded. Staged package changes require a covering staged changeset; an
+unstaged note is shown separately. Refresh after editing. Invalid files or limits
+are reported as incomplete checks, not a clean result.
+
+**Draft a fix request** adds a request to the current composer and preserves any
+text already there. Review and send it yourself. The check does not write, stage,
+commit or publish files.
+
 ## Connect an account
 
 Install Git and configure authentication on the machine running your Stark Code server. For a remote

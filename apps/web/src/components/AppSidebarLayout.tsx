@@ -34,8 +34,8 @@ import {
 import LegacyThreadSidebar from "./LegacySidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
 import ThreadSidebar from "./Sidebar";
-import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
-import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SettingsSidebarHeader, SettingsSidebarNav } from "./settings/SettingsSidebarNav";
+import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
@@ -81,7 +81,11 @@ function readInitialThreadSidebarWidth(): number {
 }
 
 function SidebarControl() {
+  const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
+  const settingsPageOpen = useLocation({
+    select: (location) => /^\/settings(\/|$)/.test(location.pathname),
+  });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
   const isSidebarVisible = useSidebarVisibility();
@@ -143,6 +147,7 @@ function SidebarControl() {
       className={cn(
         "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center",
         isMobile && mobileSheetMounted && "hidden",
+        isSidebarVisible && !settingsPageOpen && !isMacosDesktop && "hidden",
       )}
       data-sidebar-control=""
     >
@@ -268,10 +273,22 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
       : {}
   ) as CSSProperties;
-  const sidebarProviderStyle = {
-    "--sidebar-width": `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,
-    "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
+  const sidebarWindowStyle = {
     ...windowControlsInsetStyle,
+    // macOS identifies the app in its menu and Dock. Keep this row for window
+    // controls instead of squeezing a wordmark beside the traffic lights.
+    "--stark-sidebar-brand-display": isMacosDesktop ? "none" : "inline-flex",
+    "--stark-sidebar-brand-start": isMacosDesktop
+      ? "calc(var(--workspace-controls-left) + 1px)"
+      : "20px",
+    "--stark-sidebar-brand-height": isMacosDesktop ? "52px" : "56px",
+  } as CSSProperties;
+  const sidebarProviderStyle = {
+    "--sidebar-width": isOnSettings
+      ? "220px"
+      : `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,
+    "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
+    ...sidebarWindowStyle,
   } as CSSProperties;
 
   useEffect(() => {
@@ -324,24 +341,28 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <Sidebar
           side="left"
           collapsible="offcanvas"
-          data-app-sidebar=""
+          data-app-sidebar={isOnSettings ? "settings" : "threads"}
           role="navigation"
           aria-label={isOnSettings ? "Settings" : "Threads"}
-          resizable={{
-            maxWidth: sidebarMaximumWidth,
-            minWidth: sidebarMinimumWidth,
-            shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
-              nextWidth <= currentWidth ||
-              wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
-            storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
-            onResize: setSidebarWidth,
-          }}
+          resizable={
+            isOnSettings
+              ? false
+              : {
+                  maxWidth: sidebarMaximumWidth,
+                  minWidth: sidebarMinimumWidth,
+                  shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
+                    nextWidth <= currentWidth ||
+                    wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
+                  storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
+                  onResize: setSidebarWidth,
+                }
+          }
           // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
-          style={windowControlsInsetStyle}
+          style={sidebarWindowStyle}
         >
           {isOnSettings ? (
             <>
-              <SidebarChromeHeader isElectron={isElectron} />
+              <SettingsSidebarHeader />
               <SettingsSidebarNav pathname={pathname} />
             </>
           ) : legacySidebarEnabled ? (
@@ -349,7 +370,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           ) : (
             <ThreadSidebar />
           )}
-          <SidebarRail onDoubleClick={resetSidebarWidth} />
+          {!isOnSettings ? <SidebarRail onDoubleClick={resetSidebarWidth} /> : null}
         </Sidebar>
         {children}
         <SidebarControl />

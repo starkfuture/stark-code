@@ -1391,6 +1391,8 @@ export interface DesktopPreviewBridge {
     readonly sourceId: BrowserImportSourceId;
     readonly sourceProfileDirectory: string;
     readonly targetProfileId: string;
+    readonly selectedDomains: ReadonlyArray<string>;
+    readonly consent: true;
   }) => Promise<BrowserImportResult>;
   setAnnotationTheme: (theme: DesktopPreviewAnnotationTheme) => Promise<void>;
   /** Keep an open annotation picker's send shortcut in sync with its thread grant. */

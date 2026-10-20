@@ -1,5 +1,7 @@
 import { it as effectIt } from "@effect/vitest";
 import {
+  AGENT_BROWSER_PROFILE_ID,
+  IMPORTED_BROWSER_PROFILE_ID,
   DEFAULT_BROWSER_PROFILE_ID,
   INCOGNITO_BROWSER_PROFILE_ID,
   PreviewAutomationStatus,
@@ -13,7 +15,10 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronApp from "../../electron/ElectronApp.ts";
+import * as ElectronSafeStorage from "../../electron/ElectronSafeStorage.ts";
 import * as PreviewIpc from "./preview.ts";
 
 const { fromPartition } = vi.hoisted(() => ({
@@ -34,9 +39,47 @@ vi.mock("electron", () => ({
   },
 }));
 
+const packagedApp = {
+  ...ElectronApp.make,
+  metadata: Effect.succeed({
+    appVersion: "1",
+    appPath: "/fixture",
+    isPackaged: true,
+    resourcesPath: "/fixture",
+    runningUnderArm64Translation: false,
+  }),
+};
+const encryptedStorage = ElectronSafeStorage.ElectronSafeStorage.of({
+  isEncryptionAvailable: Effect.succeed(true),
+  selectedStorageBackend: Effect.succeed(Option.none()),
+  encryptString: () => Effect.die("unused"),
+  decryptString: () => Effect.die("unused"),
+});
+
+const mainFrame = { url: "starkcode://app/" };
+const trustedEvent = { sender: { id: 42 }, senderFrame: mainFrame };
+const trustedSender = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.provideService(ElectronWindow.ElectronWindow, {
+      currentMainOrFirst: Effect.succeedSome({ webContents: { id: 42, mainFrame } }),
+    } as never),
+    Effect.provideService(DesktopEnvironment.DesktopEnvironment, {
+      isDevelopment: false,
+      devServerUrl: Option.none(),
+    } as never),
+  );
+
 describe("preview IPC methods", () => {
   beforeEach(() => {
     fromPartition.mockClear();
+  });
+
+  it("keeps agent storage ephemeral and outside every personal partition", () => {
+    expect(PreviewIpc.resolvePartitionScope("environment", "agent")).toEqual({
+      scope: "environment",
+      persistent: false,
+      namespace: "agent",
+    });
   });
 
   it("does not access the Electron session while the module loads", async () => {
@@ -82,7 +125,7 @@ describe("preview IPC methods", () => {
     });
   });
 
-  effectIt.effect("targets imports at the same partition tuple as the renderer", () => {
+  effectIt.effect("imports only selected sites into a personal profile from the main frame", () => {
     const received: Array<Parameters<BrowserImport.BrowserImport["Service"]["importCookies"]>[0]> =
       [];
     const browserImport = BrowserImport.BrowserImport.of({
@@ -93,26 +136,110 @@ describe("preview IPC methods", () => {
           return { imported: 0, skipped: 0, skippedDomains: [] };
         }),
     });
-    const request = (environmentId: string, targetProfileId: string) =>
-      PreviewIpc.importBrowserCookies.handler({
-        environmentId,
-        sourceId: "helium",
-        sourceProfileDirectory: "Default",
-        targetProfileId,
-      });
-
+    const input = {
+      environmentId: "env",
+      sourceId: "helium",
+      sourceProfileDirectory: "Default",
+      targetProfileId: IMPORTED_BROWSER_PROFILE_ID,
+      selectedDomains: ["docs.example.com"],
+      consent: true,
+    };
     return Effect.gen(function* () {
-      yield* request("a", "b");
-      yield* request("a::b", DEFAULT_BROWSER_PROFILE_ID);
-
-      expect(received[0]).toMatchObject(PreviewIpc.resolvePartitionScope("a", "b"));
-      expect(received[1]).toMatchObject(
-        PreviewIpc.resolvePartitionScope("a::b", DEFAULT_BROWSER_PROFILE_ID),
+      yield* PreviewIpc.importBrowserCookies.handler(input, trustedEvent);
+      expect(received[0]).toMatchObject(
+        PreviewIpc.resolvePartitionScope("env", IMPORTED_BROWSER_PROFILE_ID),
       );
-      expect(received[0]?.namespace).toBe("profile");
-      expect(received[1]?.namespace).toBeUndefined();
-    }).pipe(Effect.provideService(BrowserImport.BrowserImport, browserImport));
+      for (const targetProfileId of ["default", "incognito", AGENT_BROWSER_PROFILE_ID, "custom"]) {
+        expect(
+          Exit.isFailure(
+            yield* Effect.exit(
+              PreviewIpc.importBrowserCookies.handler({ ...input, targetProfileId }, trustedEvent),
+            ),
+          ),
+        ).toBe(true);
+      }
+      for (const event of [
+        undefined,
+        { sender: { id: 43 }, senderFrame: mainFrame },
+        { sender: { id: 42 }, senderFrame: { url: "starkcode://app/" } },
+      ]) {
+        expect(
+          Exit.isFailure(yield* Effect.exit(PreviewIpc.importBrowserCookies.handler(input, event))),
+        ).toBe(true);
+        expect(
+          Exit.isFailure(
+            yield* Effect.exit(PreviewIpc.listBrowserImportSources.handler(undefined, event)),
+          ),
+        ).toBe(true);
+      }
+      for (const unsafe of [{ selectedDomains: [] }, { consent: false }, { consent: undefined }]) {
+        expect(
+          Exit.isFailure(
+            yield* Effect.exit(
+              PreviewIpc.importBrowserCookies.handler({ ...input, ...unsafe }, trustedEvent),
+            ),
+          ),
+        ).toBe(true);
+      }
+      expect(received).toHaveLength(1);
+    }).pipe(
+      Effect.provideService(BrowserImport.BrowserImport, browserImport),
+      Effect.provideService(ElectronApp.ElectronApp, packagedApp),
+      Effect.provideService(ElectronSafeStorage.ElectronSafeStorage, encryptedStorage),
+      trustedSender,
+    );
   });
+
+  effectIt.effect("blocks unencrypted imports before the source service runs", () =>
+    Effect.gen(function* () {
+      const importCookies = vi.fn(() =>
+        Effect.succeed({ imported: 0, skipped: 0, skippedDomains: [] }),
+      );
+      for (const runtime of [
+        { packaged: false, encryption: true, backend: Option.none<string>() },
+        { packaged: true, encryption: false, backend: Option.none<string>() },
+        { packaged: true, encryption: true, backend: Option.some("basic_text") },
+      ]) {
+        const error = yield* PreviewIpc.importBrowserCookies
+          .handler(
+            {
+              environmentId: "env",
+              sourceId: "helium",
+              sourceProfileDirectory: "Default",
+              targetProfileId: IMPORTED_BROWSER_PROFILE_ID,
+              selectedDomains: ["example.test"],
+              consent: true,
+            },
+            trustedEvent,
+          )
+          .pipe(
+            Effect.provideService(ElectronApp.ElectronApp, {
+              ...packagedApp,
+              metadata: packagedApp.metadata.pipe(
+                Effect.map((metadata) => ({ ...metadata, isPackaged: runtime.packaged })),
+              ),
+            }),
+            Effect.provideService(ElectronSafeStorage.ElectronSafeStorage, {
+              ...encryptedStorage,
+              isEncryptionAvailable: Effect.succeed(runtime.encryption),
+              selectedStorageBackend: Effect.succeed(runtime.backend),
+            }),
+            Effect.provideService(BrowserImport.BrowserImport, {
+              listSources: Effect.succeed([]),
+              importCookies,
+            }),
+            Effect.match({
+              onFailure: (error) => error,
+              onSuccess: () => {
+                throw new Error("Expected the unencrypted import to be refused.");
+              },
+            }),
+          );
+        expect(error).toMatchObject({ reason: "storageNotEncrypted" });
+      }
+      expect(importCookies).not.toHaveBeenCalled();
+    }).pipe(trustedSender),
+  );
 
   effectIt.effect("marks the default source without importing or choosing its profile", () => {
     const importCookies = vi.fn();
@@ -126,10 +253,11 @@ describe("preview IPC methods", () => {
       },
     ];
     return Effect.gen(function* () {
-      const listed = yield* PreviewIpc.listBrowserImportSources.handler(undefined);
+      const listed = yield* PreviewIpc.listBrowserImportSources.handler(undefined, trustedEvent);
       expect(listed).toEqual([sources[0], { ...sources[1], isDefault: true }]);
       expect(importCookies).not.toHaveBeenCalled();
     }).pipe(
+      trustedSender,
       Effect.provideService(BrowserImport.BrowserImport, {
         listSources: Effect.succeed(sources),
         importCookies,
@@ -145,8 +273,11 @@ describe("preview IPC methods", () => {
   effectIt.effect("keeps sources usable when the default handler is unknown", () => {
     const sources = [{ id: "chrome" as const, name: "Chrome", profiles: [] }];
     return Effect.gen(function* () {
-      expect(yield* PreviewIpc.listBrowserImportSources.handler(undefined)).toEqual(sources);
+      expect(yield* PreviewIpc.listBrowserImportSources.handler(undefined, trustedEvent)).toEqual(
+        sources,
+      );
     }).pipe(
+      trustedSender,
       Effect.provideService(BrowserImport.BrowserImport, {
         listSources: Effect.succeed(sources),
         importCookies: vi.fn(),

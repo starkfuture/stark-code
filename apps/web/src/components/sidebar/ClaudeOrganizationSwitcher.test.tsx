@@ -28,6 +28,10 @@ vi.mock("../../state/use-atom-command", () => ({
     command.kind === "read" ? state.read : state.command,
 }));
 vi.mock("../../hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
+vi.mock("../../hooks/useSettings", () => ({
+  usePrimarySettings: (select: (settings: { timestampFormat: string }) => unknown) =>
+    select({ timestampFormat: "24-hour" }),
+}));
 
 import { ClaudeOrganizationSwitcher } from "./ClaudeOrganizationSwitcher";
 import { SidebarProvider } from "../ui/sidebar";
@@ -142,7 +146,7 @@ describe("quick Claude organization switcher", () => {
     await render();
     expect(state.read).toHaveBeenCalledExactlyOnceWith({ environmentId, input: undefined });
     expect(button("Switch Claude organization").textContent).toContain("Stark Future 1");
-    expect(button("Switch Claude organization").textContent).toContain("Claude organization");
+    expect(button("Switch Claude organization").textContent).toContain("person@example.com");
     await click("Switch Claude organization");
     expect(state.read).toHaveBeenCalledExactlyOnceWith({ environmentId, input: undefined });
     expect(
@@ -151,13 +155,43 @@ describe("quick Claude organization switcher", () => {
     expect(button("Switch Claude organization").textContent).toContain("Stark Future 1");
     expect(org("Stark Future 1").getAttribute("aria-pressed")).toBe("true");
     expect(org("Stark Future 1").textContent).toContain("89% used");
-    expect(org("Stark Future 2").textContent).not.toContain("37% used");
+    expect(org("Stark Future 2").textContent).toContain("37% used");
+    expect(org("Stark Future 2").textContent).toContain("Out of date · checked 5 min ago");
     expect(org("Stark Future 3").textContent).not.toContain("21% used");
+    expect(org("Stark Future 3").textContent).toContain("Sign in again");
     await click("Refresh");
     expect(state.read).toHaveBeenCalledTimes(2);
     expect(state.command).not.toHaveBeenCalled();
     await click("Manage organizations");
     expect(state.manage).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it("keeps stale reported usage visible but never presents an expired window as current", async () => {
+    const now = Date.now();
+    state.read.mockResolvedValueOnce(
+      success({
+        ...snapshot,
+        accounts: [
+          {
+            ...snapshot.accounts[0]!,
+            usageAgeSeconds: 600,
+            windows: [
+              { name: "Session", percent: 28, resetsAt: new Date(now - 60_000).toISOString() },
+              { name: "Weekly", percent: 86, resetsAt: new Date(now + 86_400_000).toISOString() },
+              { name: "Fable", percent: 60, resetsAt: null },
+            ],
+          },
+        ],
+      }),
+    );
+    await open();
+    const content = org("Stark Future 1").textContent;
+    expect(content).toContain("Out of date · checked 10 min ago");
+    expect(content).toContain("Session Not reported");
+    expect(content).not.toContain("28% used");
+    expect(content).toContain("86% used");
+    expect(content).toContain("60% used");
+    expect(state.command).not.toHaveBeenCalled();
   });
 
   it("waits for the connection before loading the footer and retries on reconnect", async () => {

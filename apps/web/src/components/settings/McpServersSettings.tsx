@@ -4,6 +4,7 @@ import { useProjects } from "../../state/entities";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer } from "./settingsLayout";
 import { McpServersPanel } from "../chat/McpServersPanel";
+import { SettingsScopeSentence } from "./SettingsScopeSentence";
 
 export function McpServersSettings() {
   const { environment, scope } = useSettingsScope();
@@ -24,62 +25,78 @@ export function McpServersSettings() {
   const project = projects.find((entry) => entry.id === projectId) ?? projects[0];
   const provider = providers.find((entry) => entry.instanceId === instanceId) ?? providers[0];
   return (
-    <SettingsPageContainer>
-      <div className="space-y-5 py-6">
-        <div>
-          <h2 className="text-base font-semibold">MCP servers</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Inspect provider servers for a project. Authentication opens in your system browser.
-          </p>
-        </div>
+    <SettingsPageContainer showScope={false}>
+      <div>
+        {!environment || !project || !provider ? (
+          <>
+            <div className="stark-settings-intro">
+              <h1>Connected tools</h1>
+              <p>Connections for the selected agent and folder.</p>
+            </div>
+            <div className="stark-settings-scope">
+              <SettingsScopeSentence />
+            </div>
+          </>
+        ) : null}
         {!environment ? (
           <p className="text-sm text-muted-foreground">
-            Connect an environment to view its MCP servers.
+            Connect a computer to view its connected tools.
           </p>
         ) : !project || !provider ? (
           <p className="text-sm text-muted-foreground">
-            Add a project and a Claude or Codex provider to inspect MCP servers.
+            Choose a folder and connect Claude or Codex to inspect its tools.
           </p>
         ) : (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-2 text-sm">
-                Project
-                <select
-                  aria-label="MCP project"
-                  className="rounded-lg border bg-background px-3 py-2"
-                  value={project.id}
-                  onChange={(event) => setProjectId(ProjectId.make(event.target.value))}
+          <McpServersPanel
+            showHeading={false}
+            presentation="settings"
+            key={`${environment.environmentId}:${project.id}:${provider.instanceId}`}
+            environmentId={environment.environmentId}
+            target={{ projectId: project.id, providerInstanceId: provider.instanceId }}
+            scopeControls={
+              <>
+                <SettingsScopeSentence />
+                <div
+                  className="stark-mcp-scope"
+                  aria-label={`${environment.label} · ${project.workspaceRoot}`}
                 >
-                  {projects.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-2 text-sm">
-                Provider
-                <select
-                  aria-label="MCP provider"
-                  className="rounded-lg border bg-background px-3 py-2"
-                  value={provider.instanceId}
-                  onChange={(event) => setInstanceId(ProviderInstanceId.make(event.target.value))}
-                >
-                  {providers.map((entry) => (
-                    <option key={entry.instanceId} value={entry.instanceId}>
-                      {entry.displayName ?? entry.instanceId}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <McpServersPanel
-              key={`${environment.environmentId}:${project.id}:${provider.instanceId}`}
-              environmentId={environment.environmentId}
-              target={{ projectId: project.id, providerInstanceId: provider.instanceId }}
-            />
-          </>
+                  <label>
+                    <span className="sr-only">Folder</span>
+                    <select
+                      aria-label="Connected tools folder"
+                      value={project.id}
+                      onChange={(event) => setProjectId(ProjectId.make(event.target.value))}
+                    >
+                      {projects.map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span aria-hidden className="text-muted-foreground">
+                    /
+                  </span>
+                  <label>
+                    <span className="sr-only">Agent</span>
+                    <select
+                      aria-label="Connected tools agent"
+                      value={provider.instanceId}
+                      onChange={(event) =>
+                        setInstanceId(ProviderInstanceId.make(event.target.value))
+                      }
+                    >
+                      {providers.map((entry) => (
+                        <option key={entry.instanceId} value={entry.instanceId}>
+                          {entry.displayName ?? entry.instanceId}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </>
+            }
+          />
         )}
       </div>
     </SettingsPageContainer>

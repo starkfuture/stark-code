@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
   AuthOrchestrationOperateScope,
+  AuthFilesystemReadScope,
   AuthTerminalOperateScope,
   AuthProvidersManageScope,
   AuthSettingsWriteScope,
@@ -16,6 +17,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.claudeAccountsSnapshot]: AuthProvidersManageScope,
   [WS_METHODS.claudeAccountsCommand]: AuthProvidersManageScope,
   [WS_METHODS.responseVisualsFormat]: AuthOrchestrationOperateScope,
+  [WS_METHODS.gitCheckChangesets]: AuthFilesystemReadScope,
   [WS_METHODS.mcpServerReconnect]: AuthOrchestrationOperateScope,
   [WS_METHODS.mcpServersReload]: AuthOrchestrationOperateScope,
   [WS_METHODS.mcpServerSetEnabled]: AuthProvidersManageScope,

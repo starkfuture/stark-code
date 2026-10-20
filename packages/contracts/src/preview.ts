@@ -215,6 +215,8 @@ export const PreviewSessionSnapshot = Schema.Struct({
   runtime: Schema.optional(PreviewRuntime),
   /** Authenticated provider session owning an isolated server tab. */
   automationOwner: Schema.optional(Schema.String),
+  /** An isolated agent tab is waiting for a person's consent to this exact origin. */
+  agentSiteOrigin: Schema.optional(Schema.NullOr(Schema.String)),
   /** An agent opened this tab and asked to show it, so viewers float it. */
   reveal: Schema.optional(Schema.Boolean),
   /** A fresh presentation request, including whether it overrides automatic-floating settings. */
@@ -286,6 +288,8 @@ export const PreviewAdjustInput = Schema.Struct({
   hardReload: Schema.optional(Schema.Boolean),
   /** Clears the tab's profile's cookies or HTTP cache; its other storage stays. */
   clear: Schema.optional(Schema.Literals(["cookies", "cache"])),
+  /** Human client only; must match the tab's outstanding request. */
+  allowAgentSite: Schema.optional(Schema.String),
 });
 export type PreviewAdjustInput = typeof PreviewAdjustInput.Type;
 
@@ -353,6 +357,7 @@ const PreviewResizedEvent = Schema.Struct({
     Schema.Struct({
       hardReload: Schema.optional(Schema.Boolean),
       clear: Schema.optional(Schema.Literals(["cookies", "cache"])),
+      allowAgentSite: Schema.optional(Schema.String),
     }),
   ),
 });

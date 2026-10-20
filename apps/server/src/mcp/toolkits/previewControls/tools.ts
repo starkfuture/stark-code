@@ -25,7 +25,7 @@ const shared = {
 const PreviewListTool = Tool.make("stark_preview_list", {
   ...shared,
   description:
-    "List this thread's preview tabs. Pages reflect the current server state and may shift as tabs change.",
+    "List this thread's agent-browser tab identifiers, without page content. Call preview_status with a tabId to obtain its URL and title after site approval. Idle navStatus here is a redacted placeholder, not the tab's actual navigation state.",
   parameters: Schema.Struct({
     cursor: Schema.optional(NonNegativeInt),
     limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),

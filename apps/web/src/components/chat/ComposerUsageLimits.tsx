@@ -115,7 +115,9 @@ function UsageLimitsBannerBody({
                   Manage usage
                 </Button>
               ) : null}
-              {resetCreditInput && account.limits.resetCredits ? (
+              {account.driver !== "claudeAgent" &&
+              resetCreditInput &&
+              account.limits.resetCredits ? (
                 <ResetCredits
                   environmentId={environmentId}
                   input={resetCreditInput}

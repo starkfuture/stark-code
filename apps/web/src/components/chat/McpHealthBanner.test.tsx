@@ -127,7 +127,7 @@ it("offers review without sign-in permission and blocks changes during a turn", 
   await render();
   expect(button("Sign in to Drive")).toBeUndefined();
   await act(() => button("Review connections")!.click());
-  expect(document.body.textContent).toContain("MCP servers");
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Connections");
   expect(state.signIn).not.toHaveBeenCalled();
 });
 

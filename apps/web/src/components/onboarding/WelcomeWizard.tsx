@@ -46,6 +46,7 @@ import { randomUUID } from "../../lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "../../state/environments";
 import {
   isOnboardingRelayEnvironment,
+  resolveOnboardingLocalEnvironment,
   resolveOnboardingSetup,
 } from "../../onboarding/targetEnvironment.logic";
 import { serverEnvironment } from "../../state/server";
@@ -63,7 +64,6 @@ import { TerminalViewport } from "../ThreadTerminalDrawer";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
 import { presentSavedCloudEnvironmentConnection } from "../cloud/cloudEnvironmentConnectionPresentation";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-import { StarkWordmark } from "../StarkWordmark";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { CommandBlock } from "../CommandBlock";
@@ -71,20 +71,24 @@ import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
 import { ScrollArea } from "../ui/scroll-area";
-import { WizardPanel, WizardSteps, WizardPopup, WizardHeader } from "../ui/wizard";
+import {
+  OnboardingPanel,
+  OnboardingSteps,
+  OnboardingPopup,
+  OnboardingHeader,
+} from "./OnboardingLayout";
 import { Dialog } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { FolderStep } from "./FolderStep";
 import { BrowserStep } from "./BrowserStep";
+import styles from "./OnboardingLayout.module.css";
 
 /**
  * First-run welcome wizard. Rendered over the workspace at `/welcome` on a
- * fresh install (no completed-onboarding flag, empty workspace). Flow per the
- * onboarding overhaul spec: connection choice → sign-in/pair (remote paths) →
- * managed Codex setup or an inline CLI terminal → browser import (desktop) → main folder → main screen.
- * Every step past the connection gate is skippable; the whole wizard is
- * re-runnable by clearing the flag.
+ * fresh install (no completed-onboarding flag, empty workspace): local agents →
+ * optional browser import → main folder. Remote computers remain available
+ * through an explicit connection choice. Re-run by clearing the flag.
  */
 
 type WizardStep = "connection" | "agents" | "browser" | "folder";
@@ -108,22 +112,51 @@ export function WelcomeWizard({
   readonly onDone: (projectRef?: ScopedProjectRef) => void | Promise<void>;
 }) {
   const completeOnboarding = useCompleteOnboarding();
-  const hasBrowserImport =
-    typeof window !== "undefined" && !!window.desktopBridge?.preview?.listBrowserImportSources;
-  const steps: readonly WizardStep[] = hasBrowserImport
-    ? ["connection", "agents", "browser", "folder"]
-    : ["connection", "agents", "folder"];
-  const [step, setStep] = useState<WizardStep>(resumeEnvironmentId ? "agents" : "connection");
   const { environments } = useEnvironments();
+  const localEnvironment = resolveOnboardingLocalEnvironment(
+    environments,
+    typeof window === "undefined"
+      ? []
+      : (window.desktopBridge?.getLocalEnvironmentBootstraps?.() ?? []),
+  );
+  const [choosingComputers, setChoosingComputers] = useState(false);
+  const [localSetupEnvironmentId, setLocalSetupEnvironmentId] = useState(
+    localEnvironment?.environmentId ?? null,
+  );
+  const [step, setStep] = useState<WizardStep>(
+    resumeEnvironmentId || localEnvironment ? "agents" : "connection",
+  );
   const [selection, setSelection] = useState<ReadonlySet<EnvironmentId> | null>(null);
   const autoSelectedComputers = useRef(new Set<EnvironmentId>());
   const [setupIds, setSetupIds] = useState<readonly EnvironmentId[]>(
-    resumeEnvironmentId ? [resumeEnvironmentId] : [],
+    resumeEnvironmentId
+      ? [resumeEnvironmentId]
+      : localEnvironment
+        ? [localEnvironment.environmentId]
+        : [],
   );
+  const hasBrowserImport =
+    typeof window !== "undefined" &&
+    !!window.desktopBridge?.preview?.listBrowserImportSources &&
+    localSetupEnvironmentId !== null &&
+    setupIds.includes(localSetupEnvironmentId);
+  const steps: readonly WizardStep[] = [
+    ...(!localSetupEnvironmentId || choosingComputers ? (["connection"] as const) : []),
+    "agents",
+    ...(hasBrowserImport ? (["browser"] as const) : []),
+    "folder",
+  ];
   const [isOpeningFolder, setIsOpeningFolder] = useState(false);
   const finishingPromiseRef = useRef<Promise<boolean> | null>(null);
   const completionErrorToastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
   const primaryEnvironment = usePrimaryEnvironment();
+  useEffect(() => {
+    if (step !== "connection" || choosingComputers || resumeEnvironmentId || !localEnvironment)
+      return;
+    setLocalSetupEnvironmentId(localEnvironment.environmentId);
+    setSetupIds([localEnvironment.environmentId]);
+    setStep("agents");
+  }, [choosingComputers, localEnvironment, resumeEnvironmentId, step]);
   useEffect(() => {
     const newComputers = environments.filter(
       (environment) => !autoSelectedComputers.current.has(environment.environmentId),
@@ -147,6 +180,7 @@ export function WelcomeWizard({
     selection ?? new Set(primaryEnvironment ? [primaryEnvironment.environmentId] : []);
   const startSetup = (ids: readonly EnvironmentId[]) => {
     if (ids.length === 0) return;
+    if (localEnvironment) setLocalSetupEnvironmentId(localEnvironment.environmentId);
     setSetupIds(ids);
     setStep("agents");
   };
@@ -194,24 +228,11 @@ export function WelcomeWizard({
 
   return (
     <Dialog open disablePointerDismissal onOpenChange={(_, event) => event.cancel()}>
-      <WizardPopup
-        size="wide"
-        bottomStickOnMobile={false}
-        showCloseButton={false}
+      <OnboardingPopup
         initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
       >
-        <WizardHeader
-          title={`Set up ${BRAND.productName}`}
-          identity={
-            <div className="flex items-baseline gap-1.5" role="img" aria-label={BRAND.productName}>
-              <StarkWordmark className="h-4 w-auto shrink-0" aria-hidden />
-              <span className="text-2xl font-medium tracking-tight text-muted-foreground">
-                {BRAND.productName}
-              </span>
-            </div>
-          }
-        >
-          <WizardSteps
+        <OnboardingHeader title={`Set up ${BRAND.productName}`}>
+          <OnboardingSteps
             steps={steps.map((stage) => ONBOARDING_LABELS[stage])}
             currentStep={stageIndex}
             isStepDisabled={(index) => isOpeningFolder || index >= stageIndex}
@@ -221,15 +242,18 @@ export function WelcomeWizard({
               if (previousStep) setStep(previousStep);
             }}
           />
-        </WizardHeader>
+        </OnboardingHeader>
 
-        <WizardPanel>
+        <OnboardingPanel>
           {step === "connection" ? (
             <ConnectionStep
               expandPairingInitially={!localAvailable && !hasCloudPublicConfig()}
               selectedIds={selectedIds}
               autoSelectedComputers={autoSelectedComputers.current}
-              onSelectionChange={setSelection}
+              onSelectionChange={(ids) => {
+                setChoosingComputers(true);
+                setSelection(ids);
+              }}
               onToggleEnvironment={(environmentId, checked) =>
                 setSelection((current) => {
                   const next = new Set(current ?? selectedIds);
@@ -242,16 +266,26 @@ export function WelcomeWizard({
                 startSetup(resolveOnboardingSetup(environments, selectedIds).environmentIds)
               }
               onPaired={(environmentId) => {
+                setChoosingComputers(true);
                 setSelection(new Set([...selectedIds, environmentId]));
               }}
             />
           ) : step === "agents" ? (
             <AgentsStep
               environmentIds={setupIds}
+              localEnvironmentId={localSetupEnvironmentId}
+              onChooseComputers={() => {
+                setChoosingComputers(true);
+                setSelection(new Set(setupIds));
+                setStep("connection");
+              }}
               onContinue={() => setStep(hasBrowserImport ? "browser" : "folder")}
             />
           ) : step === "browser" ? (
-            <BrowserStep onContinue={() => setStep("folder")} />
+            <BrowserStep
+              environmentId={localSetupEnvironmentId}
+              onContinue={() => setStep("folder")}
+            />
           ) : (
             <FolderStep
               environmentIds={setupIds}
@@ -260,8 +294,8 @@ export function WelcomeWizard({
               onDone={finish}
             />
           )}
-        </WizardPanel>
-      </WizardPopup>
+        </OnboardingPanel>
+      </OnboardingPopup>
       <ChatGptWelcomeCoordinator />
     </Dialog>
   );
@@ -309,10 +343,10 @@ function ConnectionStep({
   }, [ready]);
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+      <h1 className={`${styles.title} leading-tight font-semibold text-foreground`}>
         Connect your computers
       </h1>
-      <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+      <p className={`${styles.intro} mt-3.25 text-muted-foreground`}>
         Choose one or more computers. We’ll set up agents, then choose your main folder.
       </p>
       {directEnvironments.length > 0 ? (
@@ -634,9 +668,13 @@ interface AgentTerminalSession {
 /** Codex uses managed setup; existing CLI installs retain the terminal path. */
 function AgentsStep({
   environmentIds,
+  localEnvironmentId,
+  onChooseComputers,
   onContinue,
 }: {
   readonly environmentIds: readonly EnvironmentId[];
+  readonly localEnvironmentId: EnvironmentId | null;
+  readonly onChooseComputers: () => void;
   readonly onContinue: () => void;
 }) {
   const { environments } = useEnvironments();
@@ -652,15 +690,22 @@ function AgentsStep({
               key={environmentId}
               environmentId={environmentId}
               machineLabel={
-                environments.find((environment) => environment.environmentId === environmentId)
-                  ?.label ?? "Computer"
+                environmentId === localEnvironmentId
+                  ? navigator.platform.startsWith("Mac")
+                    ? "This Mac"
+                    : "This computer"
+                  : (environments.find((environment) => environment.environmentId === environmentId)
+                      ?.label ?? "Computer")
               }
             />
           ))}
         </div>
       </ScrollArea>
-      <div className="mt-6 flex justify-end">
-        <Button autoFocus onClick={onContinue}>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5.75">
+        <Button variant="quiet" size="comfortable" onClick={onChooseComputers}>
+          Use another computer
+        </Button>
+        <Button variant="brand" size="comfortable" autoFocus onClick={onContinue}>
           Continue
           <ArrowRightIcon className="size-3.5" />
         </Button>
@@ -1166,9 +1211,9 @@ function StepShell({
 }) {
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
+      <h1 className={`${styles.title} leading-tight font-semibold text-foreground`}>{title}</h1>
       {description ? (
-        <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
+        <p className={`${styles.intro} mt-3.25 text-muted-foreground`}>{description}</p>
       ) : null}
       {children}
     </>

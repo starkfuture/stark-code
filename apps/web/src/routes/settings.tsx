@@ -122,28 +122,30 @@ function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron}>
-          <div className="flex w-full items-center gap-3">
-            <SettingsBreadcrumb pathname={location.pathname} />
-            {location.pathname === "/settings/general" ? (
-              <div className="ms-auto flex shrink-0 items-center">
-                <RestoreDeviceDefaultsButton
-                  onRestored={() => setRestoreSignal((value) => value + 1)}
-                />
-              </div>
-            ) : null}
-          </div>
-        </WorkspacePageHeader>
+    <div className="stark-review-surface stark-settings-layout contents">
+      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+          <WorkspacePageHeader electron={isElectron}>
+            <div className="flex w-full items-center gap-3">
+              <SettingsBreadcrumb pathname={location.pathname} />
+              {location.pathname === "/settings/general" ? (
+                <div className="ms-auto flex shrink-0 items-center">
+                  <RestoreDeviceDefaultsButton
+                    onRestored={() => setRestoreSignal((value) => value + 1)}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </WorkspacePageHeader>
 
-        <div key={`${contentScopeKey}:${restoreSignal}`} className="min-h-0 flex flex-1 flex-col">
-          <SettingsScopeBoundary pathname={location.pathname}>
-            <Outlet />
-          </SettingsScopeBoundary>
+          <div key={`${contentScopeKey}:${restoreSignal}`} className="min-h-0 flex flex-1 flex-col">
+            <SettingsScopeBoundary pathname={location.pathname}>
+              <Outlet />
+            </SettingsScopeBoundary>
+          </div>
         </div>
-      </div>
-    </SidebarInset>
+      </SidebarInset>
+    </div>
   );
 }
 
@@ -187,7 +189,7 @@ export const Route = createFileRoute("/settings")({
     }
 
     if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/general", replace: true });
+      throw redirect({ to: "/settings/providers", replace: true });
     }
   },
   component: SettingsRouteLayout,

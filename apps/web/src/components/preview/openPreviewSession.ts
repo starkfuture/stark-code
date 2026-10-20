@@ -1,10 +1,11 @@
-import type {
-  EnvironmentId,
-  PreviewOpenInput,
-  PreviewRuntime,
-  PreviewSessionSnapshot,
-  PreviewViewportSetting,
-  ScopedThreadRef,
+import {
+  AGENT_BROWSER_PROFILE_ID,
+  type EnvironmentId,
+  type PreviewOpenInput,
+  type PreviewRuntime,
+  type PreviewSessionSnapshot,
+  type PreviewViewportSetting,
+  type ScopedThreadRef,
 } from "@starkfuture/contracts";
 import type { AtomCommandResult } from "@starkfuture/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
@@ -16,6 +17,7 @@ import {
   resolveBrowserDefaults,
 } from "~/browser/browserDefaults";
 import { BrowserSettingsReadError } from "~/browser/openFileInPreview";
+import { isElectron } from "~/env";
 import { previewRuntimeFor } from "~/browser/previewRuntime";
 import { applyPreviewServerSnapshot, rememberPreviewUrl } from "~/previewStateStore";
 
@@ -45,14 +47,21 @@ export async function openPreviewSession<E>(
   if (defaults instanceof BrowserSettingsReadError) {
     return AsyncResult.failure(Cause.fail(defaults));
   }
-  const runtime = input.runtime ?? previewRuntimeFor(input.threadRef.environmentId);
+  const profileId = input.profileId ?? browserDefaultOpenProfileId(defaults);
+  // Personal profiles stay in the human-owned desktop browser. Only the
+  // isolated Agent browser may attach to the desktop automation relay.
+  const runtime =
+    input.runtime ??
+    (isElectron && profileId !== AGENT_BROWSER_PROFILE_ID
+      ? "desktop"
+      : previewRuntimeFor(input.threadRef.environmentId));
   const result = await input.openPreview({
     environmentId: input.threadRef.environmentId,
     input: {
       threadId: input.threadRef.threadId,
       ...(input.url === undefined ? {} : { url: input.url }),
       viewport: input.viewport ?? browserDefaultOpenViewport(defaults),
-      profileId: input.profileId ?? browserDefaultOpenProfileId(defaults),
+      profileId,
       ...(runtime === undefined || runtime === "desktop" ? {} : { runtime }),
     },
   });

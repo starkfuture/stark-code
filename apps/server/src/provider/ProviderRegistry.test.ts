@@ -3303,7 +3303,7 @@ it.layer(
       ),
     );
 
-    it.effect("reads banked resets only for subscription logins", () =>
+    it.effect("never offers direct Claude banked resets for subscription or external logins", () =>
       Effect.gen(function* () {
         const check = (overrides: Partial<TestClaudeCapabilities>) =>
           checkClaudeProviderStatus(
@@ -3323,11 +3323,10 @@ it.layer(
             undefined,
             undefined,
             undefined,
-            () => Effect.succeed({ availableCount: 2 }),
           );
         const subscription = yield* check({ subscriptionType: "max" });
         const bedrock = yield* check({ apiProvider: "bedrock" });
-        assert.deepStrictEqual(subscription.usageLimits?.resetCredits, { availableCount: 2 });
+        assert.strictEqual(subscription.usageLimits?.resetCredits, undefined);
         assert.strictEqual(bedrock.usageLimits?.resetCredits, undefined);
       }).pipe(
         Effect.provide(

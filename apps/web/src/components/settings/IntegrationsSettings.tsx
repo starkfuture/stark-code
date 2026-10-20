@@ -34,6 +34,7 @@ import {
   findBrowserProfile,
   isBuiltInBrowserProfileId,
   resolveBrowserProfiles,
+  IMPORTED_BROWSER_PROFILE_ID,
   type BrowserImportSource,
   type PreviewAppearancePreference,
   type PreviewViewportSetting,
@@ -1058,7 +1059,12 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const runWizardImport = async (
     source: BrowserImportSource,
     environmentId: EnvironmentId,
-    input: { readonly sourceProfileDirectory: string; readonly target: WizardTarget },
+    input: {
+      readonly sourceProfileDirectory: string;
+      readonly target: WizardTarget;
+      readonly selectedDomains: string[];
+      readonly consent: true;
+    },
   ): Promise<ImportOutcome> => {
     if (!previewBridge) return { kind: "blocked", reason: "sessionUnavailable" };
     if (!settingsHydrated) return { kind: "blocked", reason: "sessionUnavailable" };
@@ -1361,8 +1367,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         <BrowserImportWizard
           source={importSession.source}
           destinationEnvironmentName={importSession.environmentName}
-          targetProfiles={listedProfiles.map((profile) => ({ id: profile.id, name: profile.name }))}
-          canCreateProfile={settingsHydrated && !atProfileLimit}
+          targetProfiles={[{ id: IMPORTED_BROWSER_PROFILE_ID, name: "Personal imported sessions" }]}
+          canCreateProfile={false}
           onImport={(input) =>
             runWizardImport(importSession.source, importSession.environmentId, input)
           }

@@ -43,6 +43,7 @@ const settingsState = vi.hoisted(() => ({
 const settingsSearchState = vi.hoisted(() => ({
   targetId: null as string | null,
   effects: [] as Array<() => void>,
+  scrollTargets: [] as string[],
 }));
 
 vi.mock("react", async (importOriginal) => {
@@ -63,6 +64,10 @@ vi.mock("./settingsLayout", async (importOriginal) => {
   return {
     ...actual,
     useSettingsSearchTargetId: () => settingsSearchState.targetId,
+    scrollToSettingsTarget: (target: string) => {
+      settingsSearchState.scrollTargets.push(target);
+      return true;
+    },
   };
 });
 
@@ -226,6 +231,7 @@ describe("EnvironmentProviderSettings routing", () => {
     settingsState.updateClientSettings.mockReset();
     settingsSearchState.targetId = null;
     settingsSearchState.effects = [];
+    settingsSearchState.scrollTargets = [];
     settingsState.mutateProviderInstance
       .mockReset()
       .mockResolvedValue({ _tag: "Success", value: {} });
@@ -245,7 +251,7 @@ describe("EnvironmentProviderSettings routing", () => {
       expect(
         visitElements(
           panel,
-          (element) => element.props.instanceId === driver && element.props.mode === "list",
+          (element) => element.props.instanceId === driver && element.props.mode === "editor",
         ),
       ).not.toBeNull();
     }
@@ -253,7 +259,7 @@ describe("EnvironmentProviderSettings routing", () => {
       expect(
         visitElements(
           panel,
-          (element) => element.props.instanceId === driver && element.props.mode === "list",
+          (element) => element.props.instanceId === driver && element.props.mode === "editor",
         ),
       ).toBeNull();
     }
@@ -271,7 +277,7 @@ describe("EnvironmentProviderSettings routing", () => {
     expect(
       visitElements(
         panel,
-        (element) => element.props.instanceId === grokId && element.props.mode === "list",
+        (element) => element.props.instanceId === grokId && element.props.mode === "editor",
       ),
     ).not.toBeNull();
   });
@@ -293,7 +299,7 @@ describe("EnvironmentProviderSettings routing", () => {
     expect(
       visitElements(
         panel,
-        (element) => element.props.instanceId === "grok" && element.props.mode === "list",
+        (element) => element.props.instanceId === "grok" && element.props.mode === "editor",
       ),
     ).not.toBeNull();
   });
@@ -333,7 +339,7 @@ describe("EnvironmentProviderSettings routing", () => {
     });
   });
 
-  it("opens the requested provider instance instead of the first provider", () => {
+  it("focuses the requested provider card without substituting the first account", () => {
     settingsState.value = {
       ...DEFAULT_UNIFIED_SETTINGS,
       providerInstances: {
@@ -342,8 +348,13 @@ describe("EnvironmentProviderSettings routing", () => {
     };
     atoms.providers = [provider()];
     const panel = renderPanel({ targetInstanceId: customId });
-    const editor = visitElements(panel, (element) => element.props.mode === "editor");
+    const editor = visitElements(
+      panel,
+      (element) => element.props.instanceId === customId && element.props.mode === "editor",
+    );
     expect(editor?.props.instanceId).toBe(customId);
+    settingsSearchState.effects.forEach((effect) => effect());
+    expect(settingsSearchState.scrollTargets).toEqual([`provider-instance-${customId}`]);
   });
 
   it.each([
@@ -376,11 +387,15 @@ describe("EnvironmentProviderSettings routing", () => {
   it("does not substitute another account when the requested instance was removed", () => {
     atoms.providers = [provider()];
     const panel = renderPanel({ targetInstanceId: customId });
-    expect(visitElements(panel, (element) => element.props.mode === "editor")).toBeNull();
+    expect(visitElements(panel, (element) => element.props.instanceId === customId)).toBeNull();
+    const notice = visitElements(panel, (element) => element.props.role === "status");
+    expect(notice?.props.children).toContain("no longer available");
+    settingsSearchState.effects.forEach((effect) => effect());
+    expect(settingsSearchState.scrollTargets).toEqual([`provider-instance-${customId}`]);
     expect(settingsState.updateSettings).not.toHaveBeenCalled();
   });
 
-  it("keeps provider selection available while write controls are read only", () => {
+  it("keeps every provider card readable while write controls are read only", () => {
     commands.canWriteSettings = false;
     settingsState.value = {
       ...DEFAULT_UNIFIED_SETTINGS,
@@ -399,11 +414,9 @@ describe("EnvironmentProviderSettings routing", () => {
 
     const customRow = visitElements(
       panel,
-      (element) => element.props.instanceId === customId && element.props.mode === "list",
+      (element) => element.props.instanceId === customId && element.props.mode === "editor",
     );
     expect(customRow?.props.readOnly).toBe(true);
-    expect(customRow?.props.onSelect).toBeTypeOf("function");
-    (customRow?.props.onSelect as (() => void) | undefined)?.();
 
     panel = renderPanel({ readOnly: true });
     const customEditor = visitElements(
@@ -448,16 +461,20 @@ describe("EnvironmentProviderSettings routing", () => {
     expect(settingsState.updateSettings).not.toHaveBeenCalled();
   });
 
-  it("keeps Advanced visible when search targets the provider health interval", () => {
+  it("keeps background checks available when search targets the provider health interval", () => {
     let panel = renderPanel();
-    expect(visitElements(panel, (element) => element.props.title === "Advanced")).not.toBeNull();
+    expect(
+      visitElements(panel, (element) => element.props.title === "Background status checks"),
+    ).not.toBeNull();
     expect(
       visitElements(panel, (element) => element.props.id === "provider-health-check-interval"),
     ).not.toBeNull();
 
     settingsSearchState.targetId = "provider-health-check-interval";
     panel = renderPanel();
-    expect(visitElements(panel, (element) => element.props.title === "Advanced")).not.toBeNull();
+    expect(
+      visitElements(panel, (element) => element.props.title === "Background status checks"),
+    ).not.toBeNull();
     expect(
       visitElements(panel, (element) => element.props.id === "provider-health-check-interval"),
     ).not.toBeNull();
@@ -482,12 +499,6 @@ describe("EnvironmentProviderSettings routing", () => {
       favorites: [{ provider: customId, model: "favorite" }],
     };
     let panel = renderPanel();
-    const customRow = visitElements(
-      panel,
-      (element) => element.props.instanceId === customId && element.props.mode === "list",
-    );
-    (customRow?.props.onSelect as (() => void) | undefined)?.();
-    panel = renderPanel();
     const customCard = visitElements(
       panel,
       (element) => element.props.instanceId === customId && element.props.mode === "editor",
@@ -502,11 +513,6 @@ describe("EnvironmentProviderSettings routing", () => {
     });
 
     settingsState.mutateProviderInstance.mockClear();
-    const defaultRow = visitElements(
-      panel,
-      (element) => element.props.instanceId === codexId && element.props.mode === "list",
-    );
-    (defaultRow?.props.onSelect as (() => void) | undefined)?.();
     panel = renderPanel();
     const defaultCard = visitElements(
       panel,
@@ -572,7 +578,7 @@ describe("EnvironmentProviderSettings routing", () => {
     let panel = renderPanel();
     const row = visitElements(
       panel,
-      (element) => element.props.instanceId === firstId && element.props.mode === "list",
+      (element) => element.props.instanceId === firstId && element.props.mode === "editor",
     );
     (row?.props.onSelect as (() => void) | undefined)?.();
     panel = renderPanel();

@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
+  AGENT_BROWSER_PROFILE_ID,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProjectId,
@@ -61,7 +62,16 @@ it.effect.each([
           ),
         ),
       );
-      const tab = yield* manager.open({ threadId, url: "http://localhost:3000" });
+      const personal = yield* manager.open({
+        threadId,
+        url: "https://private.example.test",
+        profileId: "personal-imported",
+      });
+      const tab = yield* manager.open({
+        threadId,
+        url: "http://localhost:3000",
+        profileId: AGENT_BROWSER_PROFILE_ID,
+      });
       const layerDependencies = Layer.mergeAll(
         PreviewAutomationBroker.layer.pipe(Layer.provide(NodeServices.layer)),
         Layer.succeed(Preview.PreviewManager, manager),
@@ -85,9 +95,18 @@ it.effect.each([
         .handle("stark_preview_close", { tabId: tab.tabId })
         .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(layerDependencies));
       if (projectAccess) {
-        expect(listed.at(-1)?.result).toMatchObject({ sessions: [tab], nextCursor: null });
+        expect(listed.at(-1)?.result).toMatchObject({
+          sessions: [{ tabId: tab.tabId, navStatus: { _tag: "Idle" } }],
+          nextCursor: null,
+        });
+        expect(JSON.stringify(listed.at(-1)?.result)).not.toContain("localhost:3000");
+        expect(JSON.stringify(listed.at(-1)?.result)).not.toContain("private.example.test");
         expect(closed.at(-1)?.result).toEqual({});
-        expect((yield* manager.list({ threadId })).sessions).toEqual([]);
+        const refused = yield* toolkit
+          .handle("stark_preview_close", { tabId: personal.tabId })
+          .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(layerDependencies));
+        expect(refused.at(-1)?.result).toMatchObject({ _tag: "OrchestratorMcpFailure" });
+        expect((yield* manager.list({ threadId })).sessions).toEqual([personal]);
       } else {
         for (const result of [listed, closed]) {
           expect(result.at(-1)?.result).toMatchObject({
@@ -96,7 +115,7 @@ it.effect.each([
             threadId,
           });
         }
-        expect((yield* manager.list({ threadId })).sessions).toEqual([tab]);
+        expect((yield* manager.list({ threadId })).sessions).toEqual([personal, tab]);
       }
     }),
   ),

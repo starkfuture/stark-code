@@ -543,10 +543,16 @@ export function SettingsPageContainer({
   children,
   className,
   width = "readable",
+  heading,
+  description,
+  showScope = true,
 }: {
   children: ReactNode;
   className?: string;
   width?: WorkspacePageWidth;
+  heading?: string;
+  description?: string;
+  showScope?: boolean;
 }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
@@ -574,8 +580,21 @@ export function SettingsPageContainer({
         className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
         data-settings-page-scroll
       >
-        <WorkspacePageContainer width={width} className={cn("gap-8", className)}>
-          <SettingsScopeSentence />
+        <WorkspacePageContainer
+          width={width}
+          className={cn("stark-settings-page gap-8", className)}
+        >
+          {heading ? (
+            <div className="stark-settings-intro">
+              <h1>{heading}</h1>
+              {description ? <p>{description}</p> : null}
+            </div>
+          ) : null}
+          {showScope ? (
+            <div className="stark-settings-scope">
+              <SettingsScopeSentence />
+            </div>
+          ) : null}
           {children}
         </WorkspacePageContainer>
       </div>

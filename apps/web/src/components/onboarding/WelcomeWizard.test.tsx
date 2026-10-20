@@ -37,7 +37,14 @@ vi.mock("../../state/environments", () => {
     environmentId: "test-env",
     label: "Computer",
     connection: { phase: "connected" },
-    entry: { enabled: true },
+    entry: {
+      enabled: true,
+      target: {
+        _tag: "PrimaryConnectionTarget",
+        httpBaseUrl: "http://127.0.0.1:3773",
+        wsBaseUrl: "ws://127.0.0.1:3773",
+      },
+    },
   };
   return {
     useEnvironments: () => ({ environments: [environment] }),
@@ -148,24 +155,78 @@ it("offers browser import after agents and can revisit it without importing or s
   const importBrowserCookies = vi.fn();
   const connect = vi.fn();
   window.desktopBridge = {
+    getLocalEnvironmentBootstraps: () => [
+      {
+        id: "primary",
+        label: "This Mac",
+        runningDistro: null,
+        httpBaseUrl: "http://127.0.0.1:3773",
+        wsBaseUrl: "ws://127.0.0.1:3773",
+      },
+    ],
     preview: { listBrowserImportSources, importBrowserCookies },
     publishedPages: { connect },
   } as unknown as NonNullable<Window["desktopBridge"]>;
   await act(async () => root.render(<WelcomeWizard localAvailable onDone={vi.fn()} />));
-  await click("Continue");
   expect(document.body.textContent).toContain("Connect your agents");
+  expect(document.body.textContent).not.toContain("Connect your computers");
   await click("Continue");
-  expect(document.body.textContent).toContain("Bring your browser sign-ins");
+  expect(document.body.textContent).toContain("Bring your website sign-ins");
   expect(importBrowserCookies).not.toHaveBeenCalled();
   expect(connect).not.toHaveBeenCalled();
   await click("Skip for now");
   expect(document.body.textContent).toContain("Choose your main folder");
   const browserStep = document.querySelector<HTMLButtonElement>(
-    'button[aria-label="Browser, step 3"]',
+    'button[aria-label="Browser, step 2"]',
   );
   expect(browserStep).not.toBeNull();
   await act(async () => browserStep!.click());
-  expect(document.body.textContent).toContain("Bring your browser sign-ins");
+  expect(document.body.textContent).toContain("Bring your website sign-ins");
   expect(importBrowserCookies).not.toHaveBeenCalled();
   expect(connect).not.toHaveBeenCalled();
+});
+
+it("starts with local agents and keeps other computers an explicit choice", async () => {
+  window.desktopBridge = {
+    getLocalEnvironmentBootstraps: () => [
+      {
+        id: "primary",
+        label: "This Mac",
+        runningDistro: null,
+        httpBaseUrl: "http://127.0.0.1:3773",
+        wsBaseUrl: "ws://127.0.0.1:3773",
+      },
+    ],
+  } as unknown as NonNullable<Window["desktopBridge"]>;
+  await act(async () => root.render(<WelcomeWizard localAvailable onDone={vi.fn()} />));
+  expect(document.body.textContent).toContain("Connect your agents");
+  expect(document.body.textContent).not.toContain("Connect your computers");
+  await click("Use another computer");
+  expect(document.body.textContent).toContain("Connect your computers");
+  await click("Continue");
+  expect(document.body.textContent).toContain("Connect your agents");
+  await click("Continue");
+  expect(document.body.textContent).toContain("Choose your main folder");
+});
+
+it("keeps the connection choice for a remote primary, even in the desktop app", async () => {
+  const listBrowserImportSources = vi.fn();
+  window.desktopBridge = {
+    getLocalEnvironmentBootstraps: () => [
+      {
+        id: "primary",
+        label: "This Mac",
+        runningDistro: null,
+        httpBaseUrl: "http://127.0.0.1:4000",
+        wsBaseUrl: "ws://127.0.0.1:4000",
+      },
+    ],
+    preview: { listBrowserImportSources },
+  } as unknown as NonNullable<Window["desktopBridge"]>;
+  await act(async () => root.render(<WelcomeWizard localAvailable onDone={vi.fn()} />));
+  expect(document.body.textContent).toContain("Connect your computers");
+  await click("Continue");
+  await click("Continue");
+  expect(document.body.textContent).toContain("Choose your main folder");
+  expect(listBrowserImportSources).not.toHaveBeenCalled();
 });

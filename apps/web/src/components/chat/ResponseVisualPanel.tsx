@@ -5,6 +5,7 @@ import type {
   ResponseVisualsInput,
   ResponseVisualsResult,
   ScopedThreadRef,
+  NativeTurnEvidence,
 } from "@starkfuture/contracts";
 import { useRef, useState, type CSSProperties } from "react";
 import * as Schema from "effect/Schema";
@@ -14,6 +15,8 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
+import { FinishEvidenceCard } from "./FinishEvidenceCard";
+import { deriveNativeFinishEvidence } from "./nativeFinishEvidence";
 
 const ReaderFontSize = Schema.Literals([14, 16, 18, 20]);
 
@@ -22,6 +25,7 @@ export interface ReaderAnswer {
   readonly text: string;
   readonly label: string;
   readonly truncated?: boolean;
+  readonly evidence?: NativeTurnEvidence | undefined;
 }
 
 /** Source stays verbatim; additions never replace the provider's answer. */
@@ -78,6 +82,13 @@ export function ResponseVisualPanel(props: {
           </details>
         ) : null}
       </div>
+      {chosen !== "paste" && selected?.evidence ? (
+        <div className="max-h-64 shrink-0 overflow-auto px-3">
+          <FinishEvidenceCard
+            evidence={deriveNativeFinishEvidence(selected.id, selected.evidence)}
+          />
+        </div>
+      ) : null}
       {answer ? (
         <VisualReader
           key={`${chosen === "paste" ? "paste" : selected?.id}:${answer}`}

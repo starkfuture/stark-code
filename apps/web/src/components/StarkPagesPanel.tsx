@@ -1,7 +1,9 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { ChevronDownIcon, Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
 import {
+  useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -11,6 +13,7 @@ import {
 import { usePreviewPanelInlineSize } from "~/hooks/usePreviewPanelInlineSize";
 import { cn } from "~/lib/utils";
 import { isElectron } from "~/env";
+import type { StarkPageTarget } from "../starkPageTabs";
 import { StarkPagesSidebar } from "./StarkPagesSidebar";
 import { PublishedStarkPages } from "./PublishedStarkPages";
 import { Button } from "./ui/button";
@@ -64,6 +67,23 @@ export function StarkPagesPanel({
   };
   const folderName = props.projectRoot.split(/[\\/]/).findLast(Boolean) ?? "this folder";
   const [expanded, setExpanded] = useState(false);
+  const [selectedFolderPage, setSelectedFolderPage] = useState<{
+    root: string;
+    page: StarkPageTarget;
+  } | null>(null);
+  const selectFolderPage = useCallback(
+    (page: StarkPageTarget) => {
+      setSelectedFolderPage({ root: props.projectRoot, page });
+    },
+    [props.projectRoot],
+  );
+  const expandPages = () => {
+    if (view === "local" && selectedFolderPage?.root === props.projectRoot && props.onOpenPage) {
+      props.onOpenPage(selectedFolderPage.page);
+    } else {
+      setExpanded(true);
+    }
+  };
   const [portalHost, setPortalHost] = useState<HTMLDivElement | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const expandButton = useRef<HTMLButtonElement>(null);
@@ -85,17 +105,20 @@ export function StarkPagesPanel({
       expandButton.current?.focus({ preventScroll: true });
     }
   }, [active, overlay, portalHost]);
-  useEffect(() => {
-    if (!active) return;
-    const toggleExpanded = () => setExpanded((current) => !current);
-    window.addEventListener("starkcode:auxiliary-panel-toggle-expanded", toggleExpanded);
-    return () =>
-      window.removeEventListener("starkcode:auxiliary-panel-toggle-expanded", toggleExpanded);
-  }, [active]);
   const restorePanel = () => {
     setExpanded(false);
     expandButton.current?.focus({ preventScroll: true });
   };
+  const toggleExpanded = useEffectEvent(() => {
+    if (expanded) restorePanel();
+    else expandPages();
+  });
+  useEffect(() => {
+    if (!active) return;
+    const toggle = () => toggleExpanded();
+    window.addEventListener("starkcode:auxiliary-panel-toggle-expanded", toggle);
+    return () => window.removeEventListener("starkcode:auxiliary-panel-toggle-expanded", toggle);
+  }, [active]);
 
   return (
     <Dialog.Root
@@ -200,7 +223,7 @@ export function StarkPagesPanel({
                         size="icon-sm"
                         variant="ghost"
                         aria-label={expanded ? "Return Pages to side panel" : "Expand Pages"}
-                        onClick={() => (expanded ? restorePanel() : setExpanded(true))}
+                        onClick={() => (expanded ? restorePanel() : expandPages())}
                       >
                         {expanded ? <Minimize2Icon aria-hidden /> : <Maximize2Icon aria-hidden />}
                       </Button>
@@ -239,6 +262,7 @@ export function StarkPagesPanel({
               {visited.has("local") ? (
                 <StarkPagesSidebar
                   {...props}
+                  onPageChange={selectFolderPage}
                   active={active && view === "local"}
                   showHeader={false}
                 />

@@ -15,7 +15,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { parse as parseToml } from "smol-toml";
 import * as NativeReplyCapture from "./NativeReplyCapture.ts";
 import { nativeAgentLaunch } from "./NativeAgentLaunch.ts";
-import type { NativeAgentReply } from "@starkfuture/contracts";
+import type { NativeAgentReply, NativeAgentAttention } from "@starkfuture/contracts";
 
 const delivery = (values: Record<string, unknown> = {}) => ({
   deliveryId: NodeCrypto.randomUUID(),
@@ -49,6 +49,11 @@ const create = Effect.fn(function* (directory?: string) {
   const root =
     directory ?? (yield* fs.makeTempDirectoryScoped({ prefix: "stark-native-capture-" }));
   const replies: NativeAgentReply[] = [];
+  const attention: Array<{
+    threadId: string;
+    terminalId: string;
+    value: NativeAgentAttention | null;
+  }> = [];
   const capture = yield* NativeReplyCapture.make({
     directory: root,
     nodeExecutable: process.execPath,
@@ -57,13 +62,17 @@ const create = Effect.fn(function* (directory?: string) {
       Effect.sync(() => {
         replies.push(reply);
       }),
+    onAttention: (target, value) =>
+      Effect.sync(() => {
+        attention.push({ ...target, value });
+      }),
   });
   const launch = yield* capture.bind({
     threadId: "stark-thread",
     terminalId: "native-shell",
     provider: "codex",
   });
-  return { capture, launch, replies, root };
+  return { capture, launch, replies, attention, root };
 });
 
 const decodeStopHooks = Schema.decodeUnknownSync(
@@ -85,13 +94,100 @@ const decodeStopHooks = Schema.decodeUnknownSync(
 );
 
 it.layer(NodeServices.layer)("native completed replies", (it) => {
+  it.effect(
+    "tracks only root Claude prompt hooks, clears reliably, and rejects stale late notifications",
+    () =>
+      Effect.gen(function* () {
+        const { capture, attention, replies, launch: codex } = yield* create();
+        const launch = yield* capture.bind({
+          threadId: "claude-thread",
+          terminalId: "claude-shell",
+          provider: "claude",
+        });
+        const event = (fields: Record<string, unknown> = {}) => ({
+          deliveryId: NodeCrypto.randomUUID(),
+          hook_event_name: "Notification",
+          session_id: "claude-session",
+          attention: "permission",
+          occurred_at: 100,
+          ...fields,
+        });
+        expect(yield* post(codex, event())).toBe(400);
+        expect(yield* post(launch, event({ agent_id: "child" }))).toBe(400);
+        expect(yield* post(launch, event())).toBe(200);
+        expect(attention.at(-1)).toMatchObject({
+          threadId: "claude-thread",
+          terminalId: "claude-shell",
+          value: { kind: "permission" },
+        });
+        expect(replies).toHaveLength(0);
+        expect(
+          yield* post(
+            launch,
+            event({ hook_event_name: "UserPromptSubmit", attention: "clear", occurred_at: 200 }),
+          ),
+        ).toBe(200);
+        expect(attention.at(-1)?.value).toBeNull();
+        const clearedCount = attention.length;
+        expect(yield* post(launch, event({ occurred_at: 150 }))).toBe(200);
+        expect(attention).toHaveLength(clearedCount);
+        expect(yield* post(launch, event({ attention: "question", occurred_at: 300 }))).toBe(200);
+        expect(attention.at(-1)?.value?.kind).toBe("question");
+        expect(
+          yield* post(
+            launch,
+            event({ hook_event_name: "Stop", attention: "clear", occurred_at: 400 }),
+          ),
+        ).toBe(200);
+        expect(attention.at(-1)?.value).toBeNull();
+        const stoppedCount = attention.length;
+        expect(yield* post(launch, event({ occurred_at: 350 }))).toBe(200);
+        expect(attention).toHaveLength(stoppedCount);
+        // Stop arriving before the corresponding Notification still establishes
+        // a watermark, so late delivery cannot resurrect a finished prompt.
+        expect(
+          yield* post(
+            launch,
+            event({ hook_event_name: "Stop", attention: "clear", occurred_at: 600 }),
+          ),
+        ).toBe(200);
+        const stoppedAgain = attention.length;
+        expect(yield* post(launch, event({ occurred_at: 500 }))).toBe(200);
+        expect(attention).toHaveLength(stoppedAgain);
+        yield* post(launch, event({ occurred_at: 700 }));
+        const nextPromptCount = attention.length;
+        // A delayed asynchronous reply from the preceding turn must not erase
+        // the current prompt, even when it belongs to the same CLI session.
+        yield* post(launch, delivery({ session_id: "claude-session", occurred_at: 750 }));
+        expect(attention).toHaveLength(nextPromptCount);
+        yield* capture.retire({ threadId: "claude-thread", terminalId: "claude-shell" });
+        expect(attention.at(-1)?.value).toBeNull();
+        const retiredCount = attention.length;
+        yield* post(launch, event({ occurred_at: 800 }));
+        expect(attention).toHaveLength(retiredCount);
+        const replacement = yield* capture.bind({
+          threadId: "claude-thread",
+          terminalId: "claude-shell",
+          provider: "claude",
+        });
+        yield* post(replacement, event({ session_id: "replacement", occurred_at: 900 }));
+        const replacementCount = attention.length;
+        yield* post(launch, delivery({ session_id: "claude-session", occurred_at: 1_000 }));
+        yield* post(
+          launch,
+          event({ hook_event_name: "UserPromptSubmit", attention: "clear", occurred_at: 1_001 }),
+        );
+        expect(attention).toHaveLength(replacementCount);
+        expect(attention.at(-1)?.value?.sessionId).toBe("replacement");
+      }).pipe(Effect.scoped),
+  );
   it.effect.each(["claude", "codex"] as const)(
     "captures %s replies through the hook in its real launch configuration",
     (provider, ctx) =>
       Effect.gen(function* () {
         const platform = yield* HostProcess.Platform;
         if (platform === "win32") return ctx.skip("POSIX hook execution requires a POSIX host");
-        const { capture, root } = yield* create();
+        const { capture, root, attention } = yield* create();
         const launch = yield* capture.bind({
           threadId: `${provider}-launch-thread`,
           terminalId: "native",
@@ -110,34 +206,52 @@ it.layer(NodeServices.layer)("native completed replies", (it) => {
             ? JSON.parse(args[args.indexOf("--settings") + 1]!)
             : parseToml(args.find((arg) => arg.startsWith("hooks="))!);
         const stopHooks = decodeStopHooks(settings).hooks.Stop.flatMap((group) => group.hooks);
-        expect(stopHooks).toHaveLength(1);
-        expect(stopHooks[0]?.async).toBe(true);
+        expect(stopHooks).toHaveLength(provider === "claude" ? 2 : 1);
+        const replyHook = stopHooks.find((hook) => hook.async)!;
         const text =
           "# Verified reply\n\n**Result:** Ready to read.\n\n| Check | Result |\n| --- | --- |\n| Capture | Pass |\n\n![Screenshot](./screenshots/result.png)";
-        const result = yield* Effect.promise(
-          () =>
-            new Promise<{ code: number | null; out: string; err: string }>((resolve, reject) => {
-              // Run the command a real CLI receives, never a model turn or user hook.
-              const child = NodeChildProcess.spawn("/bin/sh", ["-c", stopHooks[0]!.command], {
-                env: { PATH: "/usr/bin:/bin", ...launch.env },
-              });
-              let out = "";
-              let err = "";
-              child.stdout.on("data", (chunk) => (out += chunk));
-              child.stderr.on("data", (chunk) => (err += chunk));
-              child.on("error", reject);
-              child.on("close", (code) => resolve({ code, out, err }));
-              child.stdin.end(
-                JSON.stringify({
-                  hook_event_name: "Stop",
-                  session_id: `${provider}-session`,
-                  ...(provider === "codex" ? { turn_id: "codex-turn" } : {}),
-                  stop_hook_active: false,
-                  last_assistant_message: text,
-                }),
-              );
+        const runHook = (command: string, body: Record<string, unknown>) =>
+          Effect.promise(
+            () =>
+              new Promise<{ code: number | null; out: string; err: string }>((resolve, reject) => {
+                // Run the command a real CLI receives, never a model turn or user hook.
+                const child = NodeChildProcess.spawn("/bin/sh", ["-c", command], {
+                  env: { PATH: "/usr/bin:/bin", ...launch.env },
+                });
+                let out = "";
+                let err = "";
+                child.stdout.on("data", (chunk) => (out += chunk));
+                child.stderr.on("data", (chunk) => (err += chunk));
+                child.on("error", reject);
+                child.on("close", (code) => resolve({ code, out, err }));
+                child.stdin.end(JSON.stringify(body));
+              }),
+          );
+        const reply = {
+          hook_event_name: "Stop",
+          session_id: `${provider}-session`,
+          ...(provider === "codex" ? { turn_id: "codex-turn" } : {}),
+          stop_hook_active: false,
+          last_assistant_message: text,
+        };
+        if (provider === "claude") {
+          expect(
+            yield* runHook(launch.command, {
+              hook_event_name: "Notification",
+              notification_type: "permission_prompt",
+              session_id: `${provider}-session`,
             }),
-        );
+          ).toEqual({ code: 0, out: "{}\n", err: "" });
+          expect(attention.at(-1)?.value?.kind).toBe("permission");
+          expect(yield* runHook(stopHooks.find((hook) => !hook.async)!.command, reply)).toEqual({
+            code: 0,
+            out: "{}\n",
+            err: "",
+          });
+          expect(attention.at(-1)?.value).toBeNull();
+          expect(yield* capture.list({ threadId: `${provider}-launch-thread` })).toEqual([]);
+        }
+        const result = yield* runHook(replyHook.command, reply);
         expect(result).toEqual({ code: 0, out: "{}\n", err: "" });
         const retained = yield* capture.list({ threadId: `${provider}-launch-thread` });
         expect(retained).toHaveLength(1);
@@ -260,6 +374,195 @@ it.layer(NodeServices.layer)("native completed replies", (it) => {
         expect(
           yield* capture.list({ threadId: "stark-thread", terminalId: "other-terminal" }),
         ).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("captures installed Codex argv checks and edits through the standalone Stop hook", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { capture, launch, root } = yield* create();
+      const home = `${root}/codex-home`;
+      yield* fs.makeDirectory(`${home}/sessions`, { recursive: true });
+      const transcript = `${home}/sessions/rollout-provider-session.jsonl`;
+      const item = (value: unknown, start: number, end: number) => ({
+        type: "event_msg",
+        payload: {
+          type: "item_completed",
+          thread_id: "provider-session",
+          turn_id: "turn-1",
+          started_at_ms: start,
+          completed_at_ms: end,
+          item: value,
+        },
+      });
+      yield* fs.writeFileString(
+        transcript,
+        [
+          { type: "session_meta", payload: { session_id: "provider-session" } },
+          item(
+            {
+              type: "CommandExecution",
+              id: "check",
+              command: ["/bin/zsh", "-lc", "node --test check.test.cjs"],
+              status: "completed",
+              exit_code: 0,
+              aggregated_output: "private output",
+            },
+            1000,
+            2000,
+          ),
+          item(
+            {
+              type: "FileChange",
+              id: "edit",
+              status: "completed",
+              changes: { "/workspace/evidence.txt": { type: "add", content: "private content" } },
+            },
+            2100,
+            3000,
+          ),
+        ]
+          .map((row) => JSON.stringify(row))
+          .join("\n") + "\n",
+      );
+      yield* Effect.promise(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const child = NodeChildProcess.spawn("/bin/sh", ["-c", launch.command], {
+              env: { PATH: "/usr/bin:/bin", CODEX_HOME: home, ...launch.env },
+            });
+            let out = "",
+              err = "";
+            child.stdout.on("data", (chunk) => (out += chunk));
+            child.stderr.on("data", (chunk) => (err += chunk));
+            child.on("error", reject);
+            child.on("close", (code) => {
+              if (code !== 0 || out !== "{}\n" || err)
+                reject(new Error("Codex evidence helper did not exit neutrally."));
+              else resolve();
+            });
+            child.stdin.end(
+              JSON.stringify(delivery({ transcript_path: transcript, cwd: "/workspace" })),
+            );
+          }),
+      );
+      const rows = yield* capture.list({ threadId: "stark-thread" });
+      expect(rows[0]?.evidence?.commands[0]).toMatchObject({
+        label: "node --test …",
+        isCheck: true,
+        exitCode: 0,
+        outcome: "exit-zero",
+      });
+      expect(rows[0]?.evidence?.changes[0]?.path).toBe("evidence.txt");
+      expect(JSON.stringify(rows[0]?.evidence)).not.toContain("private");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "captures bounded native evidence through the real hook and refuses transcript paths outside its provider home",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const { capture, root } = yield* create();
+        const launch = yield* capture.bind({
+          threadId: "claude-evidence",
+          terminalId: "native",
+          provider: "claude",
+        });
+        const home = `${root}/claude-home`;
+        const project = `${home}/projects/work`;
+        yield* fs.makeDirectory(project, { recursive: true });
+        const transcript =
+          [
+            {
+              sessionId: "session",
+              uuid: "prompt",
+              parentUuid: null,
+              type: "user",
+              message: { content: "Test." },
+            },
+            {
+              sessionId: "session",
+              uuid: "use",
+              parentUuid: "prompt",
+              type: "assistant",
+              timestamp: "2026-10-20T12:00:00Z",
+              message: {
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "bash",
+                    name: "Bash",
+                    input: { command: "npm test --secret do-not-collect" },
+                  },
+                ],
+              },
+            },
+            {
+              sessionId: "session",
+              uuid: "result",
+              parentUuid: "use",
+              type: "user",
+              timestamp: "2026-10-20T12:00:01Z",
+              message: {
+                content: [{ type: "tool_result", tool_use_id: "bash", content: "private-output" }],
+              },
+              toolUseResult: { stdout: "private-output", stderr: "", interrupted: false },
+            },
+            {
+              sessionId: "session",
+              uuid: "reply",
+              parentUuid: "result",
+              type: "assistant",
+              message: { content: [{ type: "text", text: "Finished." }] },
+            },
+          ]
+            .map((row) => JSON.stringify(row))
+            .join("\n") + "\n";
+        yield* fs.writeFileString(`${project}/session.jsonl`, transcript);
+        yield* fs.writeFileString(`${root}/session.jsonl`, transcript);
+        const run = (transcriptPath: string) =>
+          Effect.promise(
+            () =>
+              new Promise<void>((resolve, reject) => {
+                const child = NodeChildProcess.spawn("/bin/sh", ["-c", launch.command], {
+                  env: { PATH: "/usr/bin:/bin", CLAUDE_CONFIG_DIR: home, ...launch.env },
+                });
+                let out = "",
+                  err = "";
+                child.stdout.on("data", (chunk) => (out += chunk));
+                child.stderr.on("data", (chunk) => (err += chunk));
+                child.on("error", reject);
+                child.on("close", (code) => {
+                  if (code !== 0 || out !== "{}\n" || err)
+                    reject(new Error("Evidence helper did not exit neutrally."));
+                  else resolve();
+                });
+                child.stdin.end(
+                  JSON.stringify(
+                    delivery({
+                      session_id: "session",
+                      turn_id: null,
+                      transcript_path: transcriptPath,
+                      cwd: "/workspace",
+                      last_assistant_message: "Finished.",
+                    }),
+                  ),
+                );
+              }),
+          );
+        yield* run(`${project}/session.jsonl`);
+        yield* run(`${root}/session.jsonl`);
+        const rows = yield* capture.list({ threadId: "claude-evidence" });
+        expect(rows[0]?.evidence?.commands[0]).toMatchObject({
+          label: "npm test …",
+          outcome: "tool-completed",
+          exitCode: null,
+        });
+        expect(rows[1]?.evidence?.coverage).toBe("unavailable");
+        expect(JSON.stringify(rows.map((row) => row.evidence))).not.toMatch(
+          /do-not-collect|private-output/,
+        );
       }).pipe(Effect.scoped),
   );
 

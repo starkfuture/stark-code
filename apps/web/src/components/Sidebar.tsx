@@ -1,4 +1,5 @@
 import { type EnvironmentId, type ScopedProjectRef } from "@starkfuture/contracts";
+import { NeedsYouInbox } from "./sidebar/NeedsYouInbox";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import {
@@ -275,6 +276,7 @@ import {
   useComboboxFilter,
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
+import { SidebarNavigationButton } from "./sidebar/SidebarNavigationButton";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
@@ -857,7 +859,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
           <SquarePenIcon aria-hidden className={draftPenClassName} />
           <span
             aria-hidden
-            className="min-w-0 flex-1 truncate text-sm font-normal text-foreground/90"
+            className="min-w-0 flex-1 truncate stark-sidebar-chat-title font-normal text-foreground/90"
           >
             {preview}
           </span>
@@ -1509,7 +1511,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // content; surface is reserved for interaction (hover, multi-select, route).
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-    variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
+    variantAction === "unsettle" &&
+      !props.isActive &&
+      "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive
       ? "bg-sidebar-row-active text-sidebar-foreground"
       : isSelected || props.sweepAction !== null
@@ -1593,7 +1597,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <span
         aria-hidden
         className={cn(
-          "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
+          "min-w-0 flex-1 stark-sidebar-chat-title transition-opacity motion-reduce:transition-none",
           isUnread || isWoke || status === "input" ? "font-medium" : "font-normal",
           variant === "card"
             ? cn(
@@ -1604,7 +1608,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     ? "text-foreground"
                     : status === "failed"
                       ? "text-foreground/95"
-                      : "text-foreground/90",
+                      : props.isActive
+                        ? "text-sidebar-foreground"
+                        : "text-sidebar-muted-foreground",
               )
             : cn(
                 "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
@@ -2033,7 +2039,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               </span>
             )}
             {props.showChatActions ? (
-              <span className="shrink-0 opacity-0 focus-within:opacity-100 group-any-hover/sidebar-row:opacity-100">
+              <span className="pointer-events-none absolute right-2 opacity-0 focus-within:pointer-events-auto focus-within:static focus-within:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100">
                 <Button
                   size="icon-xs"
                   variant="ghost-muted"
@@ -4957,6 +4963,13 @@ export default function Sidebar() {
           // header and would otherwise paint across the search row's outline.
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
+              needsYou={
+                <NeedsYouInbox
+                  threads={threads}
+                  projects={projects}
+                  onOpenThread={navigateToThread}
+                />
+              }
               searchFieldRef={headerSearchRef}
               hasProjects={projectGroups.length > 0}
               projectScope={
@@ -4984,7 +4997,9 @@ export default function Sidebar() {
                     setProjectScopeKey(item.value === "all" ? null : item.value);
                   }}
                 >
-                  <ComboboxTrigger render={<SidebarMenuButton aria-label="Choose folder" />}>
+                  <ComboboxTrigger
+                    render={<SidebarNavigationButton data-workspace aria-label="Choose folder" />}
+                  >
                     <FolderIcon />
                     <span className="min-w-0 flex-1 truncate">
                       {scopedProjectGroup?.displayName ??

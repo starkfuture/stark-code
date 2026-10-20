@@ -17,12 +17,15 @@ const { fromPartition, sessions } = vi.hoisted(() => ({
       readonly setPermissionRequestHandler: ReturnType<typeof vi.fn>;
       readonly setPermissionCheckHandler: ReturnType<typeof vi.fn>;
       readonly setUserAgent: ReturnType<typeof vi.fn>;
+      readonly cookies: { readonly get: ReturnType<typeof vi.fn> };
+      readonly webRequest: { readonly onBeforeSendHeaders: ReturnType<typeof vi.fn> };
     }
   >(),
 }));
 
-const { fromWebContents } = vi.hoisted(() => ({
+const { fromWebContents, webContentsFromId } = vi.hoisted(() => ({
   fromWebContents: vi.fn<(webContents: unknown) => unknown>(() => null),
+  webContentsFromId: vi.fn<(id: number) => unknown>(() => null),
 }));
 
 vi.mock("electron", () => ({
@@ -30,6 +33,7 @@ vi.mock("electron", () => ({
   session: {
     fromPartition,
   },
+  webContents: { fromId: webContentsFromId },
 }));
 
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
@@ -63,6 +67,8 @@ describe("BrowserSession", () => {
         setPermissionRequestHandler: vi.fn(),
         setPermissionCheckHandler: vi.fn(),
         setUserAgent: vi.fn(),
+        cookies: { get: vi.fn(() => Promise.resolve([])) },
+        webRequest: { onBeforeSendHeaders: vi.fn() },
       };
       sessions.set(partition, browserSession);
       return browserSession;
@@ -81,6 +87,122 @@ describe("BrowserSession", () => {
       assert.strictEqual(first, second);
       assert.strictEqual(fromPartition.mock.calls.length, 1);
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect(
+    "excludes all legacy profiles from the agent relay and isolates the new agent partition",
+    () =>
+      Effect.gen(function* () {
+        const browserSessions = yield* BrowserSession.BrowserSession;
+        const legacyDefault = yield* browserSessions.getSession("env");
+        const legacyNamedAgent = yield* browserSessions.getSession(
+          '["env","agent"]',
+          true,
+          "profile",
+        );
+        const personal = yield* browserSessions.getSession(
+          '["env","personal-imported"]',
+          true,
+          "profile",
+        );
+        const agent = yield* browserSessions.getSession("env", true, "agent");
+        assert.isFalse(BrowserSession.isAgentBrowserSession(legacyDefault));
+        assert.isFalse(BrowserSession.isAgentBrowserSession(legacyNamedAgent));
+        assert.isFalse(BrowserSession.isAgentBrowserSession(personal));
+        assert.isTrue(BrowserSession.isAgentBrowserSession(agent));
+        assert.notStrictEqual(agent, legacyNamedAgent);
+        assert.notStrictEqual(agent, legacyDefault);
+      }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect(
+    "asks once per page origin, gates frames and credentialed requests, and revokes on clear",
+    () =>
+      Effect.gen(function* () {
+        const browserSessions = yield* BrowserSession.BrowserSession;
+        const agent = yield* browserSessions.getSession("origin-test", true, "agent");
+        const sessionMock = sessions.get(
+          yield* browserSessions.getPartition("origin-test", true, "agent"),
+        )!;
+        sessionMock.cookies.get.mockResolvedValue([]);
+        const guest = {
+          id: 42,
+          session: agent,
+          isDestroyed: () => false,
+          once: vi.fn(),
+        } as unknown as Electron.WebContents;
+        fromWebContents.mockReturnValue({ isDestroyed: () => false });
+        webContentsFromId.mockReturnValue(guest);
+        showMessageBox.mockClear();
+        showMessageBox.mockReturnValue(1);
+        assert.isTrue(
+          yield* Effect.promise(() =>
+            BrowserSession.authorizeAgentBrowserAccess(
+              agent,
+              guest,
+              "https://docs.example/private?token=hidden",
+            ),
+          ),
+        );
+        assert.isTrue(
+          yield* Effect.promise(() =>
+            BrowserSession.authorizeAgentBrowserAccess(agent, guest, "https://docs.example/next"),
+          ),
+        );
+        assert.equal(showMessageBox.mock.calls.length, 1);
+        assert.notInclude(JSON.stringify(showMessageBox.mock.calls), "token=hidden");
+        const listener = sessionMock.webRequest.onBeforeSendHeaders.mock.calls[0]![0] as (
+          details: unknown,
+          callback: (value: { cancel: boolean }) => void,
+        ) => void;
+        showMessageBox.mockReturnValue(0);
+        const blocked = yield* Effect.promise(
+          () =>
+            new Promise<{ cancel: boolean }>((resolve) =>
+              listener(
+                {
+                  webContentsId: 42,
+                  url: "https://other.example/account",
+                  requestHeaders: { Cookie: "session=private" },
+                },
+                resolve,
+              ),
+            ),
+        );
+        assert.isTrue(blocked.cancel);
+        assert.equal(showMessageBox.mock.calls.length, 2);
+        for (const resourceType of ["subFrame", "webSocket"]) {
+          const denied = yield* Effect.promise(
+            () =>
+              new Promise<{ cancel: boolean }>((resolve) =>
+                listener(
+                  {
+                    webContentsId: 42,
+                    url: "https://frame.example/private",
+                    requestHeaders: {},
+                    resourceType,
+                  },
+                  resolve,
+                ),
+              ),
+          );
+          assert.isTrue(denied.cancel);
+        }
+        showMessageBox.mockClear();
+        yield* browserSessions.clearCookies();
+        assert.isFalse(
+          yield* Effect.promise(() =>
+            BrowserSession.authorizeAgentBrowserAccess(agent, guest, "https://docs.example/again"),
+          ),
+        );
+        assert.equal(showMessageBox.mock.calls.length, 1);
+        fromWebContents.mockReturnValue(null);
+        assert.isFalse(
+          yield* Effect.promise(() =>
+            BrowserSession.authorizeAgentBrowserAccess(agent, guest, "https://hidden.example"),
+          ),
+        );
+      }).pipe(Effect.provide(layer)),
   );
 
   it.effect("keeps scopes that differ only by a lone surrogate in separate partitions", () =>
@@ -148,6 +270,8 @@ describe("BrowserSession", () => {
           setUserAgent: vi.fn((next: string) => {
             userAgent = next;
           }),
+          cookies: { get: vi.fn(() => Promise.resolve([])) },
+          webRequest: { onBeforeSendHeaders: vi.fn() },
         };
         sessions.set(partition, browserSession);
         return browserSession;

@@ -3,22 +3,25 @@ import {
   ChartNoAxesColumnIcon,
   MoreHorizontalIcon,
   SettingsIcon,
+  UserRoundIcon,
 } from "lucide-react";
 import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
-import { cn } from "../../lib/utils";
+import { cn, isMacPlatform } from "../../lib/utils";
 import {
   useEnvironment,
   usePrimaryEnvironmentId,
   usePullRequestsSupported,
 } from "../../state/environments";
 import { useComposerDraftStore } from "../../composerDraftStore";
+import { isSharedClaudeOrganizationContext } from "../../claudeSharedLogin";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
 import { searchableSetting } from "../settings/settingsSearch";
 import { ClaudeOrganizationSwitcher } from "./ClaudeOrganizationSwitcher";
-import { StarkWordmark } from "../StarkWordmark";
+import { ProviderAccountSwitcher } from "./ProviderAccountSwitcher";
+import { sidebarAccountContextKey, useSidebarAccountContexts } from "./sidebarAccountContext";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -42,12 +45,15 @@ import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
+import { SidebarNavigationButton } from "./SidebarNavigationButton";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
 }: {
   isElectron: boolean;
 }) {
+  const { isMobile } = useSidebar();
+  const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const stageLabel = useEnvironmentStageLabel();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const backdropVariant = resolveSidebarStageBackdropVariant(
@@ -60,41 +66,31 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       : null;
 
   return (
-    // The titlebar row, not a padded SidebarHeader: it aligns to the window controls.
     <div
-      className={cn(
-        "relative flex h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center gap-2 pr-3",
-        isElectron && "drag-region",
-      )}
+      className={cn("stark-sidebar-brandrow", isElectron && "drag-region")}
+      data-has-pill={pillLabel ? true : undefined}
     >
       {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
-      {/* Match the fixed control's inset and border compensation inside the sheet's safe area. */}
-      <div className="relative top-[calc(var(--workspace-controls-top)-env(safe-area-inset-top))] z-10 ml-[calc(var(--workspace-controls-left)+1px-env(safe-area-inset-left))] flex shrink-0 items-center md:hidden">
-        <SidebarTrigger
-          // Over the stage artwork: the media viewer's control-on-imagery treatment.
-          variant={backdropVariant ? "media-navigation" : "ghost"}
-          className="relative top-auto translate-y-0"
-          aria-label="Toggle main sidebar"
-        />
-      </div>
-      {/* One visible line: the pill wraps onto the clipped second line once it no longer fits.
-          The padding keeps the brand's focus ring inside the clip. */}
-      <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
-        <SidebarBrand onBackdrop={backdropVariant !== null} />
-        {pillLabel ? (
-          <div className="ml-1 flex h-7 items-center">
-            <Badge data-environment-identification="pill" size="sm" variant="secondary">
-              {pillLabel}
-            </Badge>
-          </div>
-        ) : null}
-      </div>
+      <SidebarBrand onBackdrop={backdropVariant !== null} />
+      {pillLabel ? (
+        <div className="stark-sidebar-environment">
+          <Badge data-environment-identification="pill" size="sm" variant="secondary">
+            {pillLabel}
+          </Badge>
+        </div>
+      ) : null}
+      {/* macOS keeps one fixed toggle across open/closed states. A portaled
+          sheet owns a replacement at that same position while it is open. */}
+      {!isMacosDesktop || isMobile ? (
+        <div className={cn("relative z-10 shrink-0", !isMacosDesktop && "ml-auto")}>
+          <SidebarTrigger aria-label="Toggle main sidebar" />
+        </div>
+      ) : null}
     </div>
   );
 });
 
-// Measures the brand at its titlebar inset, plus the header's right padding and the
-// sidebar border, so the sidebar minimum follows font size, zoom and macOS window controls.
+// Match the header's visible content, including native window-control clearance.
 export function SidebarBrandWidthProbe({
   onWidthChange,
 }: {
@@ -112,46 +108,34 @@ export function SidebarBrandWidthProbe({
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none invisible fixed top-0 left-0 flex w-max border-r border-transparent pr-3"
+      className="pointer-events-none invisible fixed top-0 left-0 flex w-max border-r border-transparent"
       ref={observeWidth}
     >
-      <div className="ml-[var(--workspace-titlebar-content-left)] flex">
-        <SidebarBrandMark onBackdrop={false} />
+      <div className="stark-sidebar-brand-probe">
+        <span className="stark-sidebar-brand">
+          <span className="stark-sidebar-brandmark" />
+          <span>Stark Code</span>
+        </span>
+        <span className="w-(--workspace-titlebar-control-size)" />
       </div>
     </div>
   );
 }
 
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
+  const { isMobile, setOpenMobile } = useSidebar();
   return (
     <Link
       aria-label="Go to chats"
-      className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
-        onBackdrop ? "text-white" : "text-foreground",
-      )}
+      className={cn("stark-sidebar-brand", onBackdrop && "text-white")}
       to="/"
+      onClick={() => {
+        if (isMobile) setOpenMobile(false);
+      }}
     >
-      <SidebarBrandMark onBackdrop={onBackdrop} />
+      <span className="stark-sidebar-brandmark" aria-hidden="true" />
+      <span>Stark Code</span>
     </Link>
-  );
-}
-
-function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
-  return (
-    // Center the visible capitals, without the font's ascender/descender space.
-    // Padding keeps ascenders and round-letter overshoot inside the truncation clip.
-    <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
-      <StarkWordmark aria-label="Stark" className="h-[1cap] w-auto shrink-0" />
-      <span
-        className={cn(
-          "truncate [text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:py-1",
-          onBackdrop ? "text-white/70" : "text-muted-foreground",
-        )}
-      >
-        Code
-      </span>
-    </span>
   );
 }
 
@@ -196,22 +180,37 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     <SidebarMenu className="flex-row items-center">
       {isOnUtilityPage ? (
         <SidebarMenuItem className="min-w-0 flex-1">
-          <SidebarMenuButton onClick={handleBackClick}>
+          <SidebarNavigationButton
+            className="stark-sidebar-utility-button"
+            onClick={handleBackClick}
+          >
             <ArrowLeftIcon />
             <span>Back</span>
-          </SidebarMenuButton>
+          </SidebarNavigationButton>
         </SidebarMenuItem>
       ) : (
         <>
           <SidebarMenuItem className="min-w-0 flex-1">
-            <SidebarMenuButton aria-label="Settings" onClick={handleSettingsClick}>
+            <SidebarNavigationButton
+              className="stark-sidebar-utility-button"
+              aria-label="Settings"
+              onClick={handleSettingsClick}
+            >
               <SettingsIcon />
               <span>Settings</span>
-            </SidebarMenuButton>
+            </SidebarNavigationButton>
           </SidebarMenuItem>
           <SidebarMenuItem className="shrink-0">
             <Menu>
-              <MenuTrigger render={<SidebarMenuButton size="icon" aria-label="More app options" />}>
+              <MenuTrigger
+                render={
+                  <SidebarNavigationButton
+                    className="stark-sidebar-utility-button"
+                    data-icon
+                    aria-label="More app options"
+                  />
+                }
+              >
                 <MoreHorizontalIcon />
               </MenuTrigger>
               <MenuPopup side="top" align="end">
@@ -235,7 +234,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
-function SidebarClaudeOrganizations() {
+function SidebarAccounts() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -248,41 +247,73 @@ function SidebarClaudeOrganizations() {
     const draft = store.getDraftSession(routeTarget.draftId);
     return draft?.promotedTo?.environmentId ?? draft?.environmentId ?? null;
   });
+  const context = useSidebarAccountContexts((store) =>
+    routeTarget ? (store.contexts[sidebarAccountContextKey(routeTarget)] ?? null) : null,
+  );
   // Follow the conversation's machine, including drafts. Never fall back to the
   // local login when a selected remote conversation is unavailable.
   const environmentId =
-    routeTarget?.kind === "server"
+    context?.environmentId ??
+    (routeTarget?.kind === "server"
       ? routeTarget.threadRef.environmentId
       : routeTarget?.kind === "draft"
         ? draftEnvironmentId
-        : primaryEnvironmentId;
+        : primaryEnvironmentId);
   const environment = useEnvironment(environmentId);
-  if (!environment) return null;
-  return (
+  const selected = context?.entries.find((entry) => entry.instanceId === context.instanceId);
+  const onManage = () => {
+    if (isMobile) setOpenMobile(false);
+    void navigate({
+      to: "/settings/providers",
+      search: environmentId ? { machine: environmentId } : {},
+      ...(isSharedClaudeOrganizationContext(selected?.snapshot)
+        ? { hash: searchableSetting("claude-organizations").id }
+        : {}),
+    });
+  };
+  const onUsage = () => {
+    if (isMobile) setOpenMobile(false);
+    void navigate({ to: "/usage" });
+  };
+  if (!environment || !context || !selected) {
+    return (
+      <SidebarMenuButton onClick={onManage}>
+        <UserRoundIcon />
+        <span>Agents &amp; accounts</span>
+      </SidebarMenuButton>
+    );
+  }
+  return isSharedClaudeOrganizationContext(selected.snapshot) ? (
     <ClaudeOrganizationSwitcher
       environmentId={environment.environmentId}
       environmentLabel={environment.label}
       isConnected={environment.connection.phase === "connected"}
-      onManage={() => {
-        if (isMobile) setOpenMobile(false);
-        void navigate({
-          to: "/settings/providers",
-          search: { machine: environment.environmentId },
-          hash: searchableSetting("claude-organizations").id,
-        });
-      }}
+      onManage={onManage}
+      onUsage={onUsage}
+    />
+  ) : (
+    <ProviderAccountSwitcher
+      key={`${environment.environmentId}:${selected.driverKind}`}
+      context={context}
+      selected={selected}
+      environmentLabel={environment.label}
+      connected={environment.connection.phase === "connected"}
+      onManage={onManage}
+      onUsage={onUsage}
     />
   );
 }
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
-    <SidebarFooter>
-      <SidebarThreadUndoNotice />
-      <SidebarProviderUpdatePill />
-      <SidebarUpdateArchitectureWarning />
-      <SidebarClaudeOrganizations />
-      <SidebarUtilityMenu />
-    </SidebarFooter>
+    <div className="stark-sidebar-footer">
+      <SidebarFooter>
+        <SidebarThreadUndoNotice />
+        <SidebarProviderUpdatePill />
+        <SidebarUpdateArchitectureWarning />
+        <SidebarAccounts />
+        <SidebarUtilityMenu />
+      </SidebarFooter>
+    </div>
   );
 });

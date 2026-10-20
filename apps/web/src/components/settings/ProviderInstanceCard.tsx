@@ -61,7 +61,10 @@ import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { AcpSessionManagementSection } from "./AcpSessionManagementSection";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { SettingsGroup } from "./SettingsGroup";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
+import { Link } from "@tanstack/react-router";
+import { ProviderAccountIdentity } from "./ProviderAccountIdentity";
 import {
   getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
@@ -618,6 +621,7 @@ interface ProviderInstanceCardProps {
    */
   readonly headerAction?: ReactNode | undefined;
   readonly setup?: ReactNode;
+  readonly accountAction?: ReactNode;
   readonly runtime?: ReactNode;
   readonly hiddenModels: ReadonlyArray<string>;
   readonly favoriteModels: ReadonlyArray<string>;
@@ -683,6 +687,7 @@ export function ProviderInstanceCard({
   onDelete,
   headerAction,
   setup,
+  accountAction,
   runtime,
   hiddenModels,
   favoriteModels,
@@ -699,6 +704,7 @@ export function ProviderInstanceCard({
   acpProjects = EMPTY_ACP_PROJECTS,
   projectOverride,
 }: ProviderInstanceCardProps) {
+  const [accountOpen, setAccountOpen] = useState(false);
   const enabled = projectOverride?.effectiveEnabled ?? resolveProviderInstanceEnabled(instance);
   const compatibility = enabled ? liveProvider?.compatibilityAdvisory : undefined;
   // A locally disabled provider reads "Disabled" with a muted dot even if its
@@ -880,8 +886,8 @@ export function ProviderInstanceCard({
           : (readConfigString(instance.config, "registryIconUrl") ?? undefined)
       }
       showBadge={Boolean(accentColor)}
-      className="size-5"
-      iconClassName="size-4 text-foreground/80"
+      className={mode === "editor" ? "size-8" : "size-5"}
+      iconClassName={mode === "editor" ? "size-7 text-foreground/80" : "size-4 text-foreground/80"}
       badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
     />
   );
@@ -1131,7 +1137,6 @@ export function ProviderInstanceCard({
           {driverOption.badgeLabel}
         </Badge>
       ) : null}
-      {versionCodeNode}
       {versionAdvisoryNode}
       <span
         inert={readOnly}
@@ -1176,18 +1181,35 @@ export function ProviderInstanceCard({
   );
 
   return (
-    <>
-      <SettingsSection title={displayName} icon={titleIconNode} headerAction={editorHeaderAction}>
-        <SettingsRow
-          title="Display name"
-          status={
-            <>
+    <section
+      id={`provider-instance-${instanceId}`}
+      tabIndex={-1}
+      className="stark-agent-card outline-none"
+    >
+      <SettingsGroup divided={false} className="overflow-hidden">
+        <div className="stark-agent-card-heading">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <span className="pt-0.5">{titleIconNode}</span>
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <h3 className="stark-agent-name">{displayName}</h3>
+                {versionCodeNode}
+              </div>
               <ProviderStatusDiagnostic detail={statusDiagnostic}>
                 <div
                   tabIndex={statusDiagnostic ? 0 : undefined}
-                  className="flex min-w-0 flex-wrap items-baseline gap-x-1.5"
+                  aria-live="polite"
+                  className="stark-agent-identity flex min-w-0 flex-wrap items-baseline gap-x-1.5"
                 >
-                  {editorStatusNode}
+                  {isAuthenticated && liveProvider && environmentId ? (
+                    <ProviderAccountIdentity
+                      key={`${environmentId}:${liveProvider.auth.workspaceId ?? ""}:${liveProvider.auth.email ?? ""}`}
+                      environmentId={environmentId}
+                      provider={liveProvider}
+                    />
+                  ) : (
+                    editorStatusNode
+                  )}
                 </div>
               </ProviderStatusDiagnostic>
               {urlAuthAction && onAcceptUrlAuth ? (
@@ -1213,48 +1235,71 @@ export function ProviderInstanceCard({
                   </Button>
                 </div>
               ) : null}
-            </>
-          }
-          control={
-            <div
-              inert={readOnly}
-              aria-disabled={readOnly || undefined}
-              className={cn(
-                "flex w-full min-w-0 items-center justify-end gap-2 @min-[32rem]/settings-row:w-auto",
-                readOnly && "opacity-50 select-none",
-              )}
-            >
-              <ProviderAccentColorPicker
-                layout="inline"
-                displayName={displayName}
-                value={accentColor}
-                onCommit={updateAccentColor}
-                commitDelayMs={120}
-              />
-              <DraftInput
-                id={`provider-instance-${instanceId}-display-name`}
-                size="sm"
-                className="min-w-0 flex-1 @min-[32rem]/settings-row:w-56"
-                value={instance.displayName ?? ""}
-                onCommit={updateDisplayName}
-                placeholder={driverOption?.label ?? "Instance label"}
-                spellCheck={false}
-              />
             </div>
-          }
-        />
-      </SettingsSection>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">
+            {editorHeaderAction}
+            <span className="stark-agent-state" data-state={statusKey}>
+              {statusKey === "ready" && liveProvider?.installed ? (
+                <CheckIcon aria-hidden className="size-4" />
+              ) : null}
+              {statusKey === "ready" && liveProvider?.installed
+                ? "Ready"
+                : !enabled
+                  ? "Disabled"
+                  : summary.headline}
+            </span>
+            {projectOverride?.value !== undefined ? (
+              <span className="flex items-center">
+                <ProjectOverrideInheritance
+                  projectEnabled={projectOverride.value}
+                  deviceEnabled={resolveProviderInstanceEnabled(instance)}
+                />
+                <SettingResetButton
+                  label={`${displayName} enablement`}
+                  tooltip="Reset to the device setting"
+                  disabled={readOnly || !canWriteSettings}
+                  onClick={projectOverride.onReset}
+                />
+              </span>
+            ) : null}
+            <Switch
+              checked={enabled}
+              disabled={readOnly || (projectOverride !== undefined && !canWriteSettings)}
+              onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
+              aria-label={`Enable ${displayName}`}
+            />
+          </div>
+        </div>
 
-      {setup || environmentFields.length > 0 ? (
-        <SettingsSection title="Setup">
-          {setup}
-          <div
-            inert={readOnly}
-            aria-disabled={readOnly || undefined}
-            className={readOnly ? "opacity-50 select-none" : undefined}
-          >
-            {environmentFields.length > 0 ? (
-              <>
+        <div className="stark-agent-actions">
+          {accountAction}
+          {setup || environmentFields.length > 0 ? (
+            <Button
+              size="comfortable"
+              variant="subtle-outline"
+              aria-expanded={accountOpen}
+              onClick={() => setAccountOpen((open) => !open)}
+            >
+              {isAuthenticated ? "Manage account" : "Connect account"}
+            </Button>
+          ) : null}
+          <Button size="comfortable" variant="subtle-outline" render={<Link to="/usage" />}>
+            View usage
+          </Button>
+        </div>
+        <div>
+          {accountOpen && (setup || environmentFields.length > 0) ? (
+            <div
+              id={`provider-instance-${instanceId}-account`}
+              className="stark-agent-account-fields"
+            >
+              {setup}
+              <div
+                inert={readOnly}
+                aria-disabled={readOnly || undefined}
+                className={readOnly ? "opacity-50 select-none" : undefined}
+              >
                 {environmentFields.map((field) => (
                   <ProviderEnvironmentFieldRow
                     key={field.name}
@@ -1265,85 +1310,93 @@ export function ProviderInstanceCard({
                     onRemove={removeEnvironmentField}
                   />
                 ))}
-              </>
-            ) : null}
-          </div>
-        </SettingsSection>
-      ) : null}
+              </div>
+            </div>
+          ) : null}
 
-      {instance.driver === "codex" && readCodexSetupMode(instance.config) === "managed" ? (
-        <div
-          inert={readOnly}
-          aria-disabled={readOnly || undefined}
-          className={readOnly ? "opacity-50 select-none" : undefined}
-        >
           <FoldedSettingsSection
-            key={instanceId}
             id={`provider-instance-${instanceId}-runtime`}
-            title="Runtime"
-            headerPlacement="outside"
+            title="Advanced runtime settings"
+            summary="Binary path, home & launch arguments"
+            headerPlacement="footer"
+            revealForTargets={["provider-runtime", `provider-instance-${instanceId}-display-name`]}
           >
-            {runtime ?? runtimeFields}
+            <div
+              inert={readOnly}
+              aria-disabled={readOnly || undefined}
+              className={readOnly ? "opacity-50 select-none" : undefined}
+            >
+              <SettingsRow
+                title="Display name"
+                control={
+                  <div className="flex w-full min-w-0 items-center justify-end gap-2 @min-[32rem]/settings-row:w-auto">
+                    <ProviderAccentColorPicker
+                      layout="inline"
+                      displayName={displayName}
+                      value={accentColor}
+                      onCommit={updateAccentColor}
+                      commitDelayMs={120}
+                    />
+                    <DraftInput
+                      id={`provider-instance-${instanceId}-display-name`}
+                      size="sm"
+                      className="min-w-0 flex-1 @min-[32rem]/settings-row:w-56"
+                      value={instance.displayName ?? ""}
+                      onCommit={updateDisplayName}
+                      placeholder={driverOption?.label ?? "Instance label"}
+                      spellCheck={false}
+                    />
+                  </div>
+                }
+              />
+              {instance.driver === "codex" && readCodexSetupMode(instance.config) === "managed"
+                ? (runtime ?? runtimeFields)
+                : !driverOption || deriveProviderSettingsFields(driverOption).length > 0
+                  ? runtimeFields
+                  : null}
+              <ProviderEnvironmentSection
+                environment={genericEnvironment}
+                onChange={updateGenericEnvironment}
+              />
+            </div>
+            {environmentId !== undefined && liveProvider?.driver === "acpRegistry" ? (
+              <AcpSessionManagementSection
+                environmentId={environmentId}
+                instanceId={instanceId}
+                provider={liveProvider}
+                projects={acpProjects}
+                readOnly={readOnly}
+              />
+            ) : null}
+            {driverOption !== undefined ? (
+              <SettingsSection title="Models">
+                <div className="px-3 py-3 sm:px-4">
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    Model preferences and custom models are saved on the selected environment and
+                    shared across connected devices.
+                  </p>
+                  <ProviderModelsSection
+                    canManageCustomModels={!readOnly}
+                    canWritePreferences={canWriteSettings}
+                    instanceId={instanceId}
+                    driverKind={driverKind}
+                    models={modelsForDisplay}
+                    customModels={customModels}
+                    hiddenModels={hiddenModels}
+                    favoriteModels={favoriteModels}
+                    modelOrder={modelOrder}
+                    onChange={updateCustomModels}
+                    onHiddenModelsChange={onHiddenModelsChange}
+                    onFavoriteModelsChange={onFavoriteModelsChange}
+                    onToggleFavorite={onToggleFavorite}
+                    onModelOrderChange={onModelOrderChange}
+                  />
+                </div>
+              </SettingsSection>
+            ) : null}
           </FoldedSettingsSection>
         </div>
-      ) : !driverOption || deriveProviderSettingsFields(driverOption).length > 0 ? (
-        <SettingsSection
-          title="Runtime"
-          inert={readOnly}
-          aria-disabled={readOnly || undefined}
-          className={readOnly ? "opacity-50 select-none" : undefined}
-        >
-          {runtimeFields}
-        </SettingsSection>
-      ) : null}
-
-      <SettingsSection
-        title="Environment"
-        inert={readOnly}
-        aria-disabled={readOnly || undefined}
-        className={readOnly ? "opacity-50 select-none" : undefined}
-      >
-        <ProviderEnvironmentSection
-          environment={genericEnvironment}
-          onChange={updateGenericEnvironment}
-        />
-      </SettingsSection>
-      {environmentId !== undefined && liveProvider?.driver === "acpRegistry" ? (
-        <AcpSessionManagementSection
-          environmentId={environmentId}
-          instanceId={instanceId}
-          provider={liveProvider}
-          projects={acpProjects}
-          readOnly={readOnly}
-        />
-      ) : null}
-
-      {driverOption !== undefined ? (
-        <SettingsSection title="Models">
-          <div className="px-3 py-3 sm:px-4">
-            <p className="mb-3 text-xs text-muted-foreground">
-              Model preferences and custom models are saved on the selected environment and shared
-              across connected devices.
-            </p>
-            <ProviderModelsSection
-              canManageCustomModels={!readOnly}
-              canWritePreferences={canWriteSettings}
-              instanceId={instanceId}
-              driverKind={driverKind}
-              models={modelsForDisplay}
-              customModels={customModels}
-              hiddenModels={hiddenModels}
-              favoriteModels={favoriteModels}
-              modelOrder={modelOrder}
-              onChange={updateCustomModels}
-              onHiddenModelsChange={onHiddenModelsChange}
-              onFavoriteModelsChange={onFavoriteModelsChange}
-              onToggleFavorite={onToggleFavorite}
-              onModelOrderChange={onModelOrderChange}
-            />
-          </div>
-        </SettingsSection>
-      ) : null}
-    </>
+      </SettingsGroup>
+    </section>
   );
 }

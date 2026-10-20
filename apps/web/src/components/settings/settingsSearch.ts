@@ -91,7 +91,7 @@ export interface SettingsSearchAvailability {
 }
 
 /**
- * Section labels in sidebar order. The sidebar nav and the search-result
+ * Section labels. The sidebar nav and the search-result
  * subtitles both render from this record, so each label exists once.
  */
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
@@ -101,9 +101,9 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
-  "/settings/providers": "Providers",
+  "/settings/providers": "Agents & accounts",
   "/settings/permissions": "Permissions",
-  "/settings/mcp-servers": "MCP servers",
+  "/settings/mcp-servers": "Connected tools",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Scheduled Tasks",
   "/settings/source-control": "Source Control",
@@ -111,6 +111,39 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
 };
+
+/** Keep existing URLs stable while organizing the navigation by the user's task. */
+export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
+  readonly label: string;
+  readonly paths: ReadonlyArray<SettingsPath>;
+}> = [
+  {
+    label: "Workspace",
+    paths: [
+      "/settings/general",
+      "/settings/appearance",
+      "/settings/keybindings",
+      "/settings/projects",
+      "/settings/archived",
+    ],
+  },
+  {
+    label: "Agents",
+    paths: ["/settings/providers", "/settings/mcp-servers", "/settings/permissions"],
+  },
+  {
+    label: "Advanced",
+    paths: [
+      "/settings/scheduled-tasks",
+      "/settings/source-control",
+      "/settings/connections",
+      "/settings/integrations",
+      "/settings/snap-shot",
+      "/settings/storage",
+      "/settings/diagnostics",
+    ],
+  },
+];
 
 /** Anchor id of the first row bound to `command` on the Keybindings page. */
 export function keybindingSearchAnchorId<Command extends KeybindingCommand>(command: Command) {
@@ -177,9 +210,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "mcp-servers",
-    title: "MCP servers",
+    title: "Connected tools",
     to: "/settings/mcp-servers",
-    searchTerms: ["tools connector plugin status reconnect enable disable OAuth sign in"],
+    searchTerms: [
+      "MCP servers tools connector plugin status reconnect enable disable OAuth sign in",
+    ],
     environmentOnly: true,
   },
   {
@@ -671,11 +706,20 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "providers",
-    title: "Providers",
+    title: "Agents & accounts",
     to: "/settings/providers",
     searchTerms: [
-      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
+      "providers agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration custom favorite hidden auto compact",
     ],
+  },
+  {
+    id: "provider-runtime",
+    title: "Advanced agent settings",
+    to: "/settings/providers",
+    searchTerms: [
+      "binary path executable config directory home endpoint launch arguments environment variables display name accent color runtime",
+    ],
+    providerSettingsOnly: true,
   },
   {
     id: "claude-organizations",

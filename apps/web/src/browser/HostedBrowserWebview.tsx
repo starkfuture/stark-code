@@ -1,9 +1,10 @@
 "use client";
 
-import type {
-  DesktopPreviewColorScheme,
-  PreviewViewportSetting,
-  ScopedThreadRef,
+import {
+  AGENT_BROWSER_PROFILE_ID,
+  type DesktopPreviewColorScheme,
+  type PreviewViewportSetting,
+  type ScopedThreadRef,
 } from "@starkfuture/contracts";
 import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -80,9 +81,10 @@ export function HostedBrowserWebview(props: {
     pictureInPicture,
     zoomFactor,
     profileId,
-    serverDriven = false,
+    serverDriven: requestedServerDriven = false,
     serverRendering,
   } = props;
+  const serverDriven = requestedServerDriven && profileId === AGENT_BROWSER_PROFILE_ID;
   const clientSettingsHydrated = useClientSettingsHydrated();
   const config = usePreviewWebviewConfig(threadRef.environmentId, profileId);
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
@@ -111,8 +113,8 @@ export function HostedBrowserWebview(props: {
   const recordingActive = useActiveBrowserRecordingTabIds().has(runtimeTabId);
   usePreviewBridge({ threadRef, tabId, runtimeTabId, serverDriven });
 
-  const serverColorScheme = serverRendering?.colorScheme;
-  const serverZoomFactor = serverRendering?.zoomFactor;
+  const serverColorScheme = serverDriven ? serverRendering?.colorScheme : undefined;
+  const serverZoomFactor = serverDriven ? serverRendering?.zoomFactor : undefined;
 
   useEffect(() => {
     if (!clientSettingsHydrated) return;

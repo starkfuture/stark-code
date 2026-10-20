@@ -15,7 +15,6 @@ import {
   formatResetsIn,
   type LimitPace,
   paceOf,
-  remainingPercent,
 } from "@starkfuture/shared/usageLimits";
 import { GaugeIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
 import { Fragment, type ReactNode, useState } from "react";
@@ -96,16 +95,15 @@ function WindowBar({
   readonly now: number;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const remaining = remainingPercent(window);
+  const used = Math.round(Math.max(0, Math.min(100, window.usedPercent)));
   const elapsed = elapsedShare(window, now);
-  // The fill is quota left, so the even-spending mark is the time left.
-  const timeLeft = elapsed === null ? null : Math.round((1 - elapsed) * 100);
+  const elapsedPercent = elapsed === null ? null : Math.round(elapsed * 100);
   const resetsIn = formatResetsIn(window, now);
   const resetsAt = window.resetsAt
     ? formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)
     : null;
-  const summary = `${window.label}: ${remaining}% left${
-    timeLeft === null ? "" : `, ${timeLeft}% of the window left`
+  const summary = `${window.label}: ${used}% used${
+    elapsedPercent === null ? "" : `, ${elapsedPercent}% of the window elapsed`
   }${resetsIn ? `, ${resetsIn}` : ""}`;
 
   return (
@@ -121,26 +119,27 @@ function WindowBar({
         }
       >
         <div className="absolute inset-x-0 inset-y-1.5 rounded-full bg-muted" />
-        {remaining > 0 ? (
+        {used > 0 ? (
           <div
             className="absolute inset-y-1.5 left-0 rounded-full"
-            style={{ width: `${remaining}%`, backgroundColor: color }}
+            style={{ width: `${used}%`, backgroundColor: color }}
           />
         ) : null}
-        {timeLeft !== null ? (
+        {elapsedPercent !== null ? (
           <span
             aria-hidden
             className="absolute inset-y-0.5 w-px -translate-x-1/2 bg-foreground/60"
-            style={{ left: `${timeLeft}%` }}
+            style={{ left: `${elapsedPercent}%` }}
           />
         ) : null}
       </TooltipTrigger>
       <TooltipPopup side="top">
         <div className="flex flex-col gap-0.5">
           <span className="text-foreground">
-            {remaining}% left{timeLeft !== null ? ` · ${timeLeft}% of the window left` : ""}
+            {used}% used
+            {elapsedPercent !== null ? ` · ${elapsedPercent}% of the window elapsed` : ""}
           </span>
-          {timeLeft !== null ? (
+          {elapsedPercent !== null ? (
             <span className="text-muted-foreground">The line is where even spending would be.</span>
           ) : null}
           {resetsAt ? (
@@ -187,7 +186,7 @@ export function LimitWindows({
             <span className="flex min-w-0 items-center gap-2 text-xs">
               <span className="truncate text-muted-foreground">{window.label}</span>
               <span className="ms-auto shrink-0 font-medium text-foreground tabular-nums">
-                {remainingPercent(window)}% left
+                {Math.round(window.usedPercent)}% used
               </span>
             </span>
             <WindowBar color={color} window={window} now={now} />

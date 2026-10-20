@@ -1,4 +1,5 @@
 import {
+  AGENT_BROWSER_PROFILE_ID,
   DEFAULT_CLIENT_SETTINGS,
   EnvironmentId,
   FILL_PREVIEW_VIEWPORT,
@@ -99,6 +100,41 @@ afterEach(async () => {
 });
 
 describe("HostedBrowserWebview settings hydration", () => {
+  it.each([undefined, "default", "personal-imported", "work", AGENT_BROWSER_PROFILE_ID])(
+    "only attaches the isolated Agent browser to automation (%s)",
+    async (profileId) => {
+      mocks.getClientSettings.mockResolvedValue(DEFAULT_CLIENT_SETTINGS);
+      await act(async () => ensureClientSettingsHydrated());
+      const acquire = vi.spyOn(desktopTabLifetime, "acquireDesktopTab");
+      const threadRef = {
+        environmentId: EnvironmentId.make("profile-isolation"),
+        threadId: ThreadId.make("thread-profile-isolation"),
+      };
+      const runtimeTabId = `profile-${profileId ?? "default"}`;
+      await act(() => {
+        renderer = create(
+          <HostedBrowserWebview
+            threadRef={threadRef}
+            tabId="server-tab"
+            runtimeTabId={runtimeTabId}
+            initialUrl={null}
+            viewport={FILL_PREVIEW_VIEWPORT}
+            pictureInPicture={false}
+            profileId={profileId}
+            zoomFactor={1}
+            serverDriven
+          />,
+        );
+      });
+      expect(acquire).toHaveBeenCalledWith(
+        runtimeTabId,
+        profileId === AGENT_BROWSER_PROFILE_ID
+          ? { threadId: threadRef.threadId, tabId: "server-tab" }
+          : undefined,
+      );
+    },
+  );
+
   it("starts a retained background tab only after a settings read succeeds on retry", async () => {
     const firstRead = deferred<ClientSettings | null>();
     const retryRead = deferred<ClientSettings | null>();

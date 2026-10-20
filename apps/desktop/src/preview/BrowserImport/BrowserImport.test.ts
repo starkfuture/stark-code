@@ -90,10 +90,13 @@ describe("BrowserImport.importCookies", () => {
           input: {
             sourceId: "helium",
             sourceProfileDirectory: "../../../../secrets",
-            targetProfileId: "default",
+            targetProfileId: "personal-imported",
+            selectedDomains: ["rejected.example"],
+            consent: true,
           },
           scope: "persist:starkcode-preview-test",
           persistent: true,
+          namespace: "profile",
         })
         .pipe(Effect.flip);
 
@@ -117,10 +120,13 @@ describe("BrowserImport.importCookies", () => {
             input: {
               sourceId: "helium",
               sourceProfileDirectory: "Default",
-              targetProfileId: "default",
+              targetProfileId: "personal-imported",
+              selectedDomains: ["rejected.example"],
+              consent: true,
             },
             scope: "persist:starkcode-preview-test",
             persistent: true,
+            namespace: "profile",
           })
           .pipe(Effect.flip);
 
@@ -130,6 +136,36 @@ describe("BrowserImport.importCookies", () => {
 });
 
 describe("BrowserImport.writeCookies", () => {
+  it.effect("imports only the exact selected host, never its parent or a sibling", () =>
+    Effect.gen(function* () {
+      const written: Array<string> = [];
+      const result = yield* BrowserImport.writeCookies(
+        {
+          cookies: {
+            set: (value) => {
+              written.push(value.url);
+              return Promise.resolve();
+            },
+            flushStore: () => Promise.resolve(),
+          },
+        },
+        {
+          cookies: [
+            { ...cookie, url: "https://docs.example.com/", domain: undefined },
+            { ...cookie, url: "https://example.com/", domain: ".example.com" },
+            { ...cookie, url: "https://mail.example.com/", domain: undefined },
+          ],
+          undecryptable: 0,
+          undecryptableHosts: [],
+        },
+        ["docs.example.com"],
+      );
+      assert.deepEqual(written, ["https://docs.example.com/"]);
+      assert.equal(result.imported, 1);
+      assert.equal(result.skipped, 2);
+    }),
+  );
+
   it.effect("counts a rejected cookie and its domain as skipped", () =>
     Effect.gen(function* () {
       let flushes = 0;
@@ -144,6 +180,7 @@ describe("BrowserImport.writeCookies", () => {
           },
         },
         { cookies: [cookie], undecryptable: 0, undecryptableHosts: [] },
+        ["rejected.example"],
       );
 
       assert.deepEqual(result, {
@@ -173,6 +210,7 @@ describe("BrowserImport.writeCookies", () => {
           },
         },
         { cookies: [cookie, cookie], undecryptable: 0, undecryptableHosts: [] },
+        ["rejected.example"],
       );
 
       // One flush after every write, not one per cookie; the cookies are in
@@ -192,6 +230,7 @@ describe("BrowserImport.writeCookies", () => {
           },
         },
         { cookies: [cookie], undecryptable: 0, undecryptableHosts: [] },
+        ["rejected.example"],
       );
 
       const interrupted = yield* Ref.make(false);

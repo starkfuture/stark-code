@@ -841,7 +841,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     assert.deepEqual(overrides, { allowedTools: ["Read"] });
   });
 
-  it("pre-approves all stark-code tools when attaching an MCP session without an allowlist", () => {
+  it("pre-approves only read-only tools when attaching an MCP session", () => {
     const threadId = ThreadId.make("thread-claude-mcp-no-allowlist");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
@@ -850,12 +850,12 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     });
 
     assert.deepEqual(overrides, {
-      allowedTools: [ClaudeAdapterV2.CLAUDE_STARK_MCP_TOOL_WILDCARD],
+      allowedTools: [...ClaudeAdapterV2.CLAUDE_READ_ONLY_STARK_MCP_ALLOWED_TOOLS],
       mcpServers: STARK_MCP_SERVERS,
     });
   });
 
-  it("extends an explicit allowlist with the stark-code wildcard", () => {
+  it("removes a legacy wildcard instead of pre-approving browser actions", () => {
     const threadId = ThreadId.make("thread-claude-mcp-with-allowlist");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
@@ -865,7 +865,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     });
 
     assert.deepEqual(overrides, {
-      allowedTools: ["Read", "mcp__stark-code__*"],
+      allowedTools: ["Read", ...ClaudeAdapterV2.CLAUDE_READ_ONLY_STARK_MCP_ALLOWED_TOOLS],
       mcpServers: STARK_MCP_SERVERS,
     });
   });
@@ -1000,7 +1000,7 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
       allowedTools: ["Read"],
     });
     assert.deepEqual(overrides, {
-      allowedTools: ["Read", "mcp__stark-code__*"],
+      allowedTools: ["Read", ...ClaudeAdapterV2.CLAUDE_READ_ONLY_STARK_MCP_ALLOWED_TOOLS],
       mcpServers: {
         "stark-code": {
           type: "http",
@@ -12458,6 +12458,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           );
           assert.isTrue(yield* hasPendingBackgroundWork);
 
+          // A detached shell keeps its query alive but does not use MCP.
+          assert.isFalse(yield* runtime.mcpServers!.isBusy!);
           const alternateModel = {
             ...CLAUDE_TEST_MODEL_SELECTION,
             model: "claude-haiku-4-5-20251001",

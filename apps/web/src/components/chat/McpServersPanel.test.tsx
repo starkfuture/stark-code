@@ -14,8 +14,8 @@ const state = vi.hoisted(() => ({
       servers: [] as McpServerStatusEntry[],
       live: true,
       canReload: true as boolean | undefined,
-    } as McpServersListResult,
-    error: null,
+    } as McpServersListResult | null,
+    error: null as string | null,
     isPending: false,
     refresh: vi.fn(),
   },
@@ -98,6 +98,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("window", { setInterval, clearInterval, setTimeout, clearTimeout });
   state.query.data = { servers: [server()], live: true, canReload: true, reconnectScope: "server" };
+  state.query.error = null;
+  state.query.isPending = false;
   state.canOperate = true;
   state.localHost = true;
   state.query.refresh.mockReset();
@@ -243,9 +245,10 @@ it.each(["read-only", "remote", "no session", "unsupported", "older server"])(
   async (reason) => {
     if (reason === "read-only") state.canOperate = false;
     if (reason === "remote") state.localHost = false;
-    if (reason === "no session") state.query.data = { ...state.query.data, live: false };
-    if (reason === "unsupported") state.query.data = { ...state.query.data, canReload: false };
-    if (reason === "older server") state.query.data = { ...state.query.data, canReload: undefined };
+    if (reason === "no session") state.query.data = { ...state.query.data!, live: false };
+    if (reason === "unsupported") state.query.data = { ...state.query.data!, canReload: false };
+    if (reason === "older server")
+      state.query.data = { ...state.query.data!, canReload: undefined };
     await act(async () => {
       renderer = create(panel());
     });
@@ -255,8 +258,8 @@ it.each(["read-only", "remote", "no session", "unsupported", "older server"])(
   },
 );
 
-it("keeps Settings reload disabled even if the server advertises support for the inspection target", async () => {
-  state.query.data = { ...state.query.data, canReload: true };
+it("keeps conversation reload out of Settings and points to the existing connections menu", async () => {
+  state.query.data = { ...state.query.data!, canReload: true };
   await act(async () => {
     renderer = create(
       <McpServersPanel
@@ -268,9 +271,10 @@ it("keeps Settings reload disabled even if the server advertises support for the
       />,
     );
   });
-  expect(button("Reload MCPs").props.disabled).toBe(true);
-  expect(paragraphs()).toContain("Open the conversation's Tools → MCP panel");
-  await act(async () => button("Reload MCPs").props.onClick());
+  expect(
+    renderer!.root.findAllByType("button").some((item) => item.children.join("") === "Reload MCPs"),
+  ).toBe(false);
+  expect(paragraphs()).toContain("+ → Connectors → Manage connections");
   expect(state.reload).not.toHaveBeenCalled();
 });
 
@@ -483,4 +487,28 @@ it("rejects unsafe sign-in URLs and ignores a late auth result from a previous t
     resolve({ _tag: "Success", value: { url: "https://auth.example.com/late" } }),
   );
   expect(state.open).not.toHaveBeenCalled();
+});
+
+it("offers a status-only retry after a slow inspection and accepts the eventual result", async () => {
+  state.query.data = null;
+  state.query.isPending = true;
+  await act(() => {
+    renderer = create(panel());
+  });
+  expect(paragraphs()).toContain("Checking connected tools");
+  await act(() => {
+    vi.advanceTimersByTime(10_000);
+  });
+  expect(paragraphs()).toContain("Status is taking longer than expected");
+  expect(state.query.refresh).not.toHaveBeenCalled();
+  await act(() => button("Retry status check").props.onClick());
+  expect(state.query.refresh).toHaveBeenCalledOnce();
+  expect(paragraphs()).not.toContain("Status is taking longer than expected");
+  expect(state.reload).not.toHaveBeenCalled();
+  expect(state.reconnect).not.toHaveBeenCalled();
+  state.query.data = { servers: [server({ status: "connected" })], live: true };
+  state.query.isPending = false;
+  await act(() => renderer!.update(panel()));
+  expect(paragraphs()).not.toContain("Checking connected tools");
+  expect(paragraphs()).toContain("Connected");
 });

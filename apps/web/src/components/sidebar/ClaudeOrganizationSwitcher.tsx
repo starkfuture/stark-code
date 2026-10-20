@@ -1,21 +1,24 @@
 import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@starkfuture/client-runtime/state/runtime";
 import type { ClaudeAccount, ClaudeAccountsSnapshot, EnvironmentId } from "@starkfuture/contracts";
-import { CheckIcon, ChevronsUpDownIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { CheckIcon, ChevronDownIcon, InfoIcon, RefreshCwIcon } from "lucide-react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import { claudeAccountsEnvironment } from "../../state/claudeAccounts";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useNowMinute } from "../../hooks/useNowMinute";
+import { usePrimarySettings } from "../../hooks/useSettings";
+import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { ClaudeAI } from "../Icons";
-import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { SidebarMenuButton } from "../ui/sidebar";
+import { AccountUsageSummary } from "./AccountUsageSummary";
 
 interface ClaudeOrganizationSwitcherProps {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly isConnected: boolean;
   readonly onManage: () => void;
+  readonly onUsage?: () => void;
 }
 
 function organizationLabel(account: ClaudeAccount) {
@@ -27,17 +30,16 @@ function organizationLabel(account: ClaudeAccount) {
   );
 }
 
-function usageLabel(account: ClaudeAccount) {
+function usageUnavailable(account: ClaudeAccount) {
+  if (account.usageStatus === "relogin_required") return "Sign in again to see usage.";
+  if (account.usageStatus !== "ok") return "Usage could not be refreshed.";
   if (
-    account.usageStatus !== "ok" ||
     account.usageAgeSeconds === null ||
-    account.usageAgeSeconds > 120 ||
+    !Number.isFinite(account.usageAgeSeconds) ||
     account.windows.length === 0
   )
-    return null;
-  return account.windows
-    .map((window) => `${window.name}: ${Math.round(window.percent)}% used`)
-    .join(" · ");
+    return "Usage not reported.";
+  return null;
 }
 
 /** A saved organization changes the machine's shared login, not one conversation. */
@@ -50,6 +52,7 @@ function ClaudeOrganizationSwitcherContent({
   environmentLabel,
   isConnected,
   onManage,
+  onUsage,
 }: ClaudeOrganizationSwitcherProps) {
   const canRead = useAtomValue(claudeAccountsEnvironment.snapshot.permissionAtom(environmentId));
   const canWrite = useAtomValue(claudeAccountsEnvironment.command.permissionAtom(environmentId));
@@ -57,10 +60,16 @@ function ClaudeOrganizationSwitcherContent({
   const sendCommand = useAtomCommand(claudeAccountsEnvironment.command, { reportFailure: false });
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<ClaudeAccountsSnapshot | null>(null);
+  const [snapshotReceivedAt, setSnapshotReceivedAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [switching, setSwitching] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showLoginDetails, setShowLoginDetails] = useState(false);
+  const loginDetailsId = useId();
+  const minute = useNowMinute();
+  const now = Date.parse(`${minute}:00Z`);
+  const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const inFlight = useRef(false);
   const mounted = useRef(false);
   const lastSuccessfulRefreshAt = useRef<number | null>(null);
@@ -83,6 +92,7 @@ function ClaudeOrganizationSwitcherContent({
       if (result._tag === "Success") {
         lastSuccessfulRefreshAt.current = Date.now();
         setSnapshot(result.value);
+        setSnapshotReceivedAt(Date.now());
         setError(null);
       } else throw squashAtomCommandFailure(result);
     } catch (cause) {
@@ -146,6 +156,7 @@ function ClaudeOrganizationSwitcherContent({
       if (!mounted.current) return;
       if (result._tag === "Success") {
         setSnapshot(result.value);
+        setSnapshotReceivedAt(now);
         const current = result.value.accounts.find((candidate) => candidate.active);
         setNotice(
           current
@@ -159,7 +170,10 @@ function ClaudeOrganizationSwitcherContent({
         // A switch can finish before a later usage read fails. Reconcile once without replaying it.
         try {
           const latest = await readSnapshot({ environmentId, input: undefined });
-          if (mounted.current && latest._tag === "Success") setSnapshot(latest.value);
+          if (mounted.current && latest._tag === "Success") {
+            setSnapshot(latest.value);
+            setSnapshotReceivedAt(now);
+          }
         } catch {
           /* Keep the last known snapshot and the original action failure. */
         }
@@ -185,42 +199,46 @@ function ClaudeOrganizationSwitcherContent({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        render={<SidebarMenuButton size="lg" aria-label="Switch Claude organization" />}
+        render={
+          <button
+            type="button"
+            className="stark-sidebar-account-trigger"
+            aria-label="Switch Claude organization"
+          />
+        }
       >
-        <ClaudeAI />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate">
-            {active ? organizationLabel(active) : "Claude organizations"}
-          </span>
-          <span className="truncate text-xs text-muted-foreground">
-            Claude organization · {environmentLabel}
-          </span>
+        <span className="stark-sidebar-account-avatar stark-sidebar-account-avatar-claude">
+          <ClaudeAI />
         </span>
-        <ChevronsUpDownIcon />
+        <span className="stark-sidebar-account-identity">
+          <span>{active?.email ?? "Claude organizations"}</span>
+          <span>{active ? organizationLabel(active) : environmentLabel}</span>
+        </span>
+        <ChevronDownIcon className="stark-sidebar-account-chevron" />
       </PopoverTrigger>
       <PopoverPopup
         side="top"
         align="start"
-        width="md"
-        padding="compact"
+        width="account"
+        variant="account"
+        padding="none"
         aria-label="Claude organizations"
       >
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">Claude organizations</h3>
-            <Button
-              size="xs"
-              variant="ghost"
+        <div className="stark-account-menu-content max-h-[min(36rem,75vh)] overflow-y-auto">
+          <div className="stark-account-menu-heading">
+            <h3>
+              <ClaudeAI className="size-4" />
+              Claude organizations
+            </h3>
+            <button
+              type="button"
               disabled={!canRead || !isConnected || busy}
               onClick={() => void refresh()}
             >
+              <RefreshCwIcon aria-hidden />
               {busy && switching === null ? "Refreshing…" : "Refresh"}
-            </Button>
+            </button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Shared Claude login on {environmentLabel}. Running sessions may need restarting to use
-            the new organization.
-          </p>
           {!isConnected ? (
             <p role="status" className="text-xs text-muted-foreground">
               Waiting for {environmentLabel} to connect.
@@ -262,8 +280,8 @@ function ClaudeOrganizationSwitcherContent({
             </p>
           ) : (
             [...groups].map(([email, accounts]) => (
-              <section key={email} aria-label={email} className="space-y-1">
-                <p className="break-all px-2 text-xs text-muted-foreground">{email}</p>
+              <section key={email} aria-label={email}>
+                <p className="stark-account-menu-group">{email}</p>
                 <ul aria-label={`Saved organizations for ${email}`}>
                   {accounts.map((account) => {
                     const label = organizationLabel(account);
@@ -271,31 +289,72 @@ function ClaudeOrganizationSwitcherContent({
                       (other) =>
                         other.number !== account.number && organizationLabel(other) === label,
                     );
-                    const usage = !busy && !error ? usageLabel(account) : null;
+                    const unavailable = !isConnected
+                      ? "Reconnect to see current usage."
+                      : error
+                        ? "Usage could not be refreshed."
+                        : usageUnavailable(account);
+                    const usageAge =
+                      account.usageAgeSeconds === null
+                        ? null
+                        : account.usageAgeSeconds +
+                          Math.max(0, (now - (snapshotReceivedAt ?? now)) / 1000);
                     return (
                       <li key={`${account.number}:${account.organizationUuid ?? ""}`}>
                         <button
                           type="button"
                           aria-pressed={account.active}
                           disabled={!canWrite || !isConnected || busy || account.active}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-60"
+                          data-account-option
+                          className="stark-account-option"
                           onClick={() => void switchOrganization(account)}
                         >
                           <span className="min-w-0 flex-1">
-                            <span className="block break-words">{label}</span>
+                            <span className="stark-account-option-name">{label}</span>
                             {duplicateLabel ? (
                               <span className="block break-all text-xs text-muted-foreground">
                                 {account.organizationUuid ?? `Saved login ${account.number}`}
                               </span>
                             ) : null}
-                            {usage ? (
-                              <span className="block text-xs text-muted-foreground">{usage}</span>
-                            ) : null}
+                            {unavailable ? (
+                              <span className="block text-xs text-muted-foreground">
+                                {unavailable}
+                              </span>
+                            ) : (
+                              <span className="block text-xs text-(--sr-muted)">
+                                <AccountUsageSummary
+                                  items={account.windows.map((window) => {
+                                    const resetAt = window.resetsAt
+                                      ? Date.parse(window.resetsAt)
+                                      : NaN;
+                                    const hasReset = Number.isFinite(resetAt) && resetAt <= now;
+                                    return {
+                                      id: window.name,
+                                      label: window.name,
+                                      percent:
+                                        hasReset || !Number.isFinite(window.percent)
+                                          ? null
+                                          : window.percent,
+                                      detail: hasReset
+                                        ? "This window has reset; refresh to check current usage."
+                                        : window.resetsAt && Number.isFinite(resetAt)
+                                          ? `Resets ${formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)}`
+                                          : "Reset time not reported.",
+                                    };
+                                  })}
+                                />
+                                {usageAge !== null && usageAge > 120 ? (
+                                  <span className="mt-1 block text-2xs">
+                                    Out of date · checked {Math.floor(usageAge / 60)} min ago
+                                  </span>
+                                ) : null}
+                              </span>
+                            )}
                           </span>
                           {account.active ? (
                             <CheckIcon
                               aria-label="Active organization"
-                              className="size-4 shrink-0"
+                              className="size-4 shrink-0 text-(--sr-gold)"
                             />
                           ) : null}
                         </button>
@@ -306,23 +365,46 @@ function ClaudeOrganizationSwitcherContent({
               </section>
             ))
           )}
-          {visibleSnapshot?.notice ? (
-            <details className="text-xs text-muted-foreground">
-              <summary className="cursor-pointer">Connection details</summary>
-              <p className="pt-2">{visibleSnapshot.notice}</p>
-            </details>
-          ) : null}
-          <div className="border-t border-border/60 pt-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setOpen(false);
-                onManage();
-              }}
-            >
-              Manage organizations
-            </Button>
+          <div className="stark-account-menu-footer">
+            {onUsage ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onUsage();
+                }}
+              >
+                Usage &amp; limits
+              </button>
+            ) : null}
+            <div className="stark-account-menu-manage">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onManage();
+                }}
+              >
+                Manage organizations
+              </button>
+              <button
+                type="button"
+                className="stark-account-menu-help"
+                aria-label="About Claude organizations"
+                aria-expanded={showLoginDetails}
+                aria-controls={loginDetailsId}
+                onClick={() => setShowLoginDetails((value) => !value)}
+              >
+                <InfoIcon aria-hidden />
+              </button>
+            </div>
+            <div id={loginDetailsId} hidden={!showLoginDetails}>
+              <p>
+                Shared Claude login on {environmentLabel}. Running sessions may need restarting to
+                use the new organization.
+              </p>
+              {visibleSnapshot?.notice ? <p>{visibleSnapshot.notice}</p> : null}
+            </div>
           </div>
         </div>
       </PopoverPopup>

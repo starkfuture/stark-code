@@ -2,9 +2,9 @@
 import {
   ArchiveIcon,
   FolderPlusIcon,
-  ListFilterIcon,
+  MoreHorizontalIcon,
   SearchIcon,
-  SquarePenIcon,
+  PlusIcon,
   XIcon,
 } from "lucide-react";
 import {
@@ -17,7 +17,8 @@ import {
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
-import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
+import { SidebarMenuButton } from "../ui/sidebar";
+import { SidebarNavigationButton } from "./SidebarNavigationButton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   Menu,
@@ -35,6 +36,7 @@ export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
   /** The folder picker occupies its own labelled row. */
   projectScope: ReactNode;
+  needsYou?: ReactNode;
   onNewProject: () => void;
   groupByStatus: boolean;
   onGroupByStatusChange: (grouped: boolean) => void;
@@ -60,6 +62,7 @@ export function SidebarThreadHeader({
   searchFieldRef,
   hasProjects,
   projectScope,
+  needsYou,
   onNewProject,
   groupByStatus,
   onGroupByStatusChange,
@@ -88,26 +91,28 @@ export function SidebarThreadHeader({
     : "New chat";
 
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      {hasProjects ? (
-        projectScope
-      ) : (
-        <SidebarMenuButton onClick={onNewProject}>
-          <FolderPlusIcon />
-          <span>Open folder</span>
-        </SidebarMenuButton>
-      )}
+    <div className="stark-sidebar-nav">
+      <div className="stark-sidebar-workspace">
+        {hasProjects ? (
+          projectScope
+        ) : (
+          <SidebarNavigationButton data-workspace onClick={onNewProject}>
+            <FolderPlusIcon />
+            <span>Open folder</span>
+          </SidebarNavigationButton>
+        )}
+      </div>
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton
+            <SidebarNavigationButton
               aria-label="New chat"
               disabled={newThreadDisabled}
               onClick={onNewThread}
             />
           }
         >
-          <SquarePenIcon />
+          <PlusIcon />
           <span>New chat</span>
         </TooltipTrigger>
         <TooltipPopup side="right">
@@ -122,14 +127,11 @@ export function SidebarThreadHeader({
           </span>
         </TooltipPopup>
       </Tooltip>
-      <div
-        ref={searchFieldRef}
-        className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-      >
-        <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
-        <SidebarInput
+      {needsYou}
+      <div ref={searchFieldRef} className="stark-sidebar-search">
+        <SearchIcon />
+        <input
           ref={searchInputRef}
-          nativeInput
           type="search"
           value={searchQuery}
           onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
@@ -145,7 +147,7 @@ export function SidebarThreadHeader({
               ? `sidebar-thread-search-result-${activeSearchResultIndex}`
               : undefined
           }
-          className="min-w-0 flex-1"
+          className="stark-sidebar-search-input"
         />
         {isSearching ? (
           <Button
@@ -163,11 +165,11 @@ export function SidebarThreadHeader({
           </Button>
         ) : null}
       </div>
-      <div className="flex items-center justify-between px-2 pt-2 text-xs text-sidebar-muted-foreground">
+      <div className="stark-sidebar-list-heading">
         <span>Chats</span>
         <Menu>
           <MenuTrigger render={<SidebarHeaderIconButton label="Chat list options" />}>
-            <ListFilterIcon />
+            <MoreHorizontalIcon />
           </MenuTrigger>
           <MenuPopup align="start">
             <MenuCheckboxItem checked={groupByStatus} onCheckedChange={onGroupByStatusChange}>

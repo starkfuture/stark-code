@@ -24,6 +24,11 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { createCdpRelayConnection, type CdpRelayConnection } from "./CdpRelay.ts";
+import {
+  authorizeAgentBrowserAccess,
+  isAgentBrowserSession,
+  revokeAgentBrowserAccess,
+} from "./BrowserSession.ts";
 
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(DesktopBrowserEvent));
 const decodeCommand = Schema.decodeUnknownOption(Schema.fromJsonString(DesktopBrowserCommand));
@@ -113,10 +118,53 @@ export const make = Effect.gen(function* () {
     const { webContents, debugger: debuggee } = tab.debuggee;
     const relay: CdpRelayConnection = createCdpRelayConnection(
       {
-        send: (method, params, sessionId) =>
-          sessionId === undefined
+        send: async (method, params, sessionId) => {
+          if (!isAgentBrowserSession(webContents.session))
+            throw new Error("Personal browser profiles are unavailable to agents.");
+          // Raw cookie collection would bypass the per-origin gate. Browsing
+          // uses Chromium's cookie jar; agents never need to extract it.
+          if (
+            /^(?:Network|Storage)\.(?:getAllCookies|getCookies|setCookie|setCookies)$/.test(method)
+          )
+            throw new Error("Agents cannot read or replace browser session cookies.");
+          const currentUrl = webContents.getURL() || "about:blank";
+          if (!(await authorizeAgentBrowserAccess(webContents.session, webContents, currentUrl)))
+            throw new Error("Site access needs your approval in Stark Code.");
+          if (sessionId !== undefined) {
+            // Resolve the real child target through this guest's debugger.
+            // The parent page's grant must not authorize an unrelated iframe
+            // origin, and the backend cannot supply the origin we ask about.
+            const info: unknown = await debuggee.sendCommand("Target.getTargetInfo", {}, sessionId);
+            const childUrl =
+              typeof info === "object" &&
+              info !== null &&
+              "targetInfo" in info &&
+              typeof info.targetInfo === "object" &&
+              info.targetInfo !== null &&
+              "url" in info.targetInfo &&
+              typeof info.targetInfo.url === "string"
+                ? info.targetInfo.url
+                : undefined;
+            if (
+              childUrl === undefined ||
+              !(await authorizeAgentBrowserAccess(webContents.session, webContents, childUrl))
+            )
+              throw new Error("Child-frame site access needs your approval in Stark Code.");
+          }
+          if (
+            method === "Page.navigate" &&
+            typeof params.url === "string" &&
+            !(await authorizeAgentBrowserAccess(webContents.session, webContents, params.url))
+          )
+            throw new Error("Site access needs your approval in Stark Code.");
+          // Approval may outlive the relay or the guest. Never execute a late
+          // accepted command in a replacement connection.
+          if (tab.relay !== relay || tabs.get(keyOf(tab.key)) !== tab || webContents.isDestroyed())
+            throw new Error("The browser connection ended while awaiting approval.");
+          return sessionId === undefined
             ? debuggee.sendCommand(method, params)
-            : debuggee.sendCommand(method, params, sessionId),
+            : debuggee.sendCommand(method, params, sessionId);
+        },
         targetId: () =>
           debuggee
             .sendCommand("Target.getTargetInfo")
@@ -159,12 +207,17 @@ export const make = Effect.gen(function* () {
     const tab = tabs.get(id);
     if (!tab) return;
     tabs.delete(id);
+    revokeAgentBrowserAccess(tab.debuggee.webContents.session, tab.debuggee.webContents);
     tab.debuggee.debugger.off("message", tab.onMessage);
     emit({ type: "detached", ...key });
   };
 
   const attach = (key: DesktopBrowserTabKey, debuggee: DesktopBrowserTabDebugger) => {
     const id = keyOf(key);
+    if (!isAgentBrowserSession(debuggee.webContents.session)) {
+      detach(key);
+      return;
+    }
     if (tabs.get(id)?.debuggee.webContents === debuggee.webContents) return;
     detach(key);
     const tab: AttachedTab = {
@@ -193,6 +246,10 @@ export const make = Effect.gen(function* () {
       if (Option.isNone(command)) return;
       const tab = tabs.get(keyOf(command.value));
       if (!tab) return;
+      if (!isAgentBrowserSession(tab.debuggee.webContents.session)) {
+        detach(tab.key);
+        return;
+      }
       if (command.value.type === "pointer") {
         const { threadId, tabId, phase, x, y } = command.value;
         runFork(PubSub.publish(pointers, { key: { threadId, tabId }, phase, x, y }));
@@ -200,6 +257,7 @@ export const make = Effect.gen(function* () {
       }
       if (command.value.type === "release") {
         // A new server connection starts with a fresh relay and fresh sessions.
+        revokeAgentBrowserAccess(tab.debuggee.webContents.session, tab.debuggee.webContents);
         tab.relay = null;
         return;
       }

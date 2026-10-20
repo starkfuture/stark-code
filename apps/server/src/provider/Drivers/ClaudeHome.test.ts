@@ -11,10 +11,57 @@ import {
   makeClaudeContinuationGroupKey,
   makeClaudeEnvironment,
   resolveClaudeHomePath,
+  usesSharedClaudeLoginHome,
 } from "./ClaudeHome.ts";
 
 it.layer(NodeServices.layer)("ClaudeHome", (it) => {
   describe("Claude home resolution", () => {
+    it.effect("identifies the actual host login home without credential access", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const shared = path.resolve(NodeOS.homedir(), ".claude");
+        expect(yield* usesSharedClaudeLoginHome({ homePath: "" }, {})).toBe(true);
+        expect(yield* usesSharedClaudeLoginHome({ homePath: "~/.claude" }, {})).toBe(true);
+        expect(yield* usesSharedClaudeLoginHome({ homePath: shared }, {})).toBe(true);
+        // The default instance can override homePath too; its name is no proof of identity.
+        expect(yield* usesSharedClaudeLoginHome({ homePath: "~/.claude-work" }, {})).toBe(false);
+        expect(
+          yield* usesSharedClaudeLoginHome(
+            { homePath: "" },
+            { CLAUDE_CONFIG_DIR: "/tmp/other/.claude" },
+          ),
+        ).toBe(false);
+        expect(
+          yield* usesSharedClaudeLoginHome({ homePath: "" }, { CLAUDE_CONFIG_DIR: shared }),
+        ).toBe(true);
+        expect(
+          yield* usesSharedClaudeLoginHome({ homePath: shared }, { HOME: "/tmp/other-home" }),
+        ).toBe(false);
+      }),
+    );
+
+    it.effect("does not advertise shared switching when credentials are overridden", () =>
+      Effect.gen(function* () {
+        for (const name of [
+          "ANTHROPIC_API_KEY",
+          "ANTHROPIC_AUTH_TOKEN",
+          "CLAUDE_CODE_OAUTH_TOKEN",
+          "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+          "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+          "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+          "ANTHROPIC_BASE_URL",
+          "CLAUDE_CODE_USE_BEDROCK",
+          "CLAUDE_CODE_USE_VERTEX",
+          "CLAUDE_CODE_USE_FOUNDRY",
+        ]) {
+          expect(
+            yield* usesSharedClaudeLoginHome({ homePath: "~/.claude" }, { [name]: "configured" }),
+            name,
+          ).toBe(false);
+        }
+      }),
+    );
+
     it.effect("overrides inherited helper choices without mutating the caller's environment", () =>
       Effect.gen(function* () {
         const environment = {

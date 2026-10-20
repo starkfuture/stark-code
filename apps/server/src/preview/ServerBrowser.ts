@@ -2,6 +2,7 @@
 // Screencasts ignore emulated device scale; real 2x keeps captures sharp.
 // --disable-gpu uses cheaper software compositing while preserving SwiftShader WebGL.
 import {
+  AGENT_BROWSER_PROFILE_ID,
   BUILT_IN_BROWSER_PROFILES,
   DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
@@ -306,6 +307,8 @@ interface ServerTab {
    */
   readonly desktop: { readonly close: () => Promise<void> } | null;
   readonly profileId: string | undefined;
+  readonly approvedSiteOrigins: Set<string>;
+  pendingSiteOrigin: string | null;
   /** Set when a page in another tab opened this one with `window.open` or a link. */
   readonly openerTabId: string | undefined;
   /** Finished downloads, newest last; files live until the tab closes. */
@@ -742,6 +745,63 @@ const make = Effect.gen(function* () {
     }
   };
 
+  const assertAgentSiteAccess = async (
+    tab: ServerTab,
+    url: string,
+    networkCredentials?: boolean,
+  ) => {
+    // The desktop makes its own native decision before CDP or credentialed
+    // requests; a server-side banner must not ask a second time.
+    if (tab.desktop) {
+      // Even status (URL, dialog and downloads) crosses the native gate. A
+      // swallowed page.title() failure must not leak metadata after denial.
+      try {
+        await tab.cdp.send("Runtime.evaluate", { expression: "void 0", returnByValue: true });
+      } catch {
+        throw new BrowserControlInterrupted("Site access needs your approval in Stark Code.");
+      }
+      return;
+    }
+    let origin: string;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "about:" && parsed.pathname === "blank") return;
+      if (
+        !["http:", "https:", "ws:", "wss:"].includes(parsed.protocol) ||
+        parsed.username ||
+        parsed.password
+      )
+        throw new Error("Unsupported site origin");
+      origin = parsed.origin;
+    } catch {
+      throw new BrowserControlInterrupted("This browser address is unavailable to agents.");
+    }
+    if (tab.approvedSiteOrigins.has(origin)) return;
+    // Page access always asks: localStorage/IndexedDB may hold login state
+    // without cookies. Subresource requests ask only when carrying credentials.
+    if (networkCredentials !== undefined) {
+      const cookieUrl = new URL(url);
+      if (cookieUrl.protocol === "ws:") cookieUrl.protocol = "http:";
+      if (cookieUrl.protocol === "wss:") cookieUrl.protocol = "https:";
+      const cookies = await tab.page.context().cookies(cookieUrl.href);
+      if (!networkCredentials && cookies.length === 0) return;
+    }
+    if (tab.pendingSiteOrigin === null) {
+      tab.pendingSiteOrigin = origin;
+      await Effect.runPromise(
+        manager.requestReveal({
+          threadId: tab.threadId,
+          tabId: tab.tabId,
+          force: true,
+          agentSiteOrigin: origin,
+        }),
+      );
+    }
+    throw new BrowserControlInterrupted(
+      `Ask the user to allow agent access to ${origin} in the browser panel, then retry.`,
+    );
+  };
+
   const createTab = async (snapshot: PreviewSessionSnapshot): Promise<ServerTab> => {
     const adopted = adoptedPages.get(tabKey(snapshot.threadId, snapshot.tabId));
     adoptedPages.delete(tabKey(snapshot.threadId, snapshot.tabId));
@@ -753,7 +813,7 @@ const make = Effect.gen(function* () {
     const isolatedContext =
       adopted === undefined &&
       desktop === null &&
-      ((snapshot.automationOwner !== undefined && snapshot.profileId === undefined) ||
+      (snapshot.automationOwner !== undefined ||
         snapshot.profileId === INCOGNITO_BROWSER_PROFILE_ID);
     const context =
       adopted?.page.context() ??
@@ -790,6 +850,8 @@ const make = Effect.gen(function* () {
       isolatedContext,
       desktop: desktop === null ? null : { close: desktop.close },
       profileId: snapshot.profileId,
+      approvedSiteOrigins: new Set(),
+      pendingSiteOrigin: null,
       openerTabId: adopted?.openerTabId,
       downloads: [],
       fileChooser: null,
@@ -906,6 +968,34 @@ const make = Effect.gen(function* () {
     }
     page.on("close", () => dropTab(tab, true));
     page.on("crash", () => dropTab(tab, true));
+    if (snapshot.automationOwner !== undefined && !desktop && !adopted) {
+      // Includes redirects, subframes and fetches initiated by evaluated scripts.
+      await context.route("**/*", async (route) => {
+        try {
+          const headers = await route.request().allHeaders();
+          const credentials = Object.keys(headers).some((name) =>
+            /^(cookie|authorization|proxy-authorization)$/i.test(name),
+          );
+          await assertAgentSiteAccess(
+            tab,
+            route.request().url(),
+            route.request().isNavigationRequest() ? undefined : credentials,
+          );
+        } catch {
+          await route.abort("blockedbyclient");
+          return;
+        }
+        await route.continue();
+      });
+      await context.routeWebSocket("**/*", async (socket) => {
+        try {
+          await assertAgentSiteAccess(tab, socket.url());
+          socket.connectToServer();
+        } catch {
+          await socket.close({ code: 1008, reason: "Agent site approval required" });
+        }
+      });
+    }
     tabs.set(key, tab);
     reportLiveTabs();
     // A popup is already loading its own URL, and the desktop loads its tab's.
@@ -1247,7 +1337,11 @@ const make = Effect.gen(function* () {
    * thread's tab the user is looking at or used last, so "this page" works.
    */
   const latestThreadTab = (threadId: string, agentSessionId?: string) => {
-    const threadTabs = [...tabs.values()].filter((tab) => tab.threadId === threadId);
+    const threadTabs = [...tabs.values()].filter(
+      (tab) =>
+        tab.threadId === threadId &&
+        (agentSessionId === undefined || tab.profileId === AGENT_BROWSER_PROFILE_ID),
+    );
     return (
       threadTabs
         .filter((tab) => tab.control.agentId === agentSessionId)
@@ -1286,29 +1380,33 @@ const make = Effect.gen(function* () {
   const profileStatus = () => {
     const profiles = reportedProfiles?.profiles ?? BUILT_IN_BROWSER_PROFILES;
     return {
-      profiles: profiles.map((profile) => ({
-        id: profile.id,
-        name: profile.name,
-        ...(profile.kind === "incognito" ? { incognito: true } : {}),
-      })),
-      ...(reportedProfiles ? { defaultProfileId: reportedProfiles.defaultProfileId } : {}),
+      profiles: profiles
+        .filter((profile) => profile.id === AGENT_BROWSER_PROFILE_ID)
+        .map((profile) => ({
+          id: profile.id,
+          name: profile.name,
+          ...(profile.kind === "incognito" ? { incognito: true } : {}),
+        })),
+      defaultProfileId: AGENT_BROWSER_PROFILE_ID,
     };
   };
 
   /** Matches an id, then a case-insensitive name. Omitted means the reported default. */
   const resolveOpenProfile = (requested: string | undefined): string | undefined => {
-    if (requested === undefined) return reportedProfiles?.defaultProfileId;
+    if (requested === undefined) return AGENT_BROWSER_PROFILE_ID;
     const profiles = reportedProfiles?.profiles ?? BUILT_IN_BROWSER_PROFILES;
     const wanted = requested.toLowerCase();
     const match =
       findBrowserProfile(profiles, requested) ??
       profiles.find((profile) => profile.name.toLowerCase() === wanted);
-    if (match) return match.id;
+    if (match?.id === AGENT_BROWSER_PROFILE_ID) return match.id;
+    if (match)
+      throw new BrowserControlInterrupted(
+        "Personal browser profiles are unavailable to agents. Use the isolated Agent browser.",
+      );
     throw new ServerBrowserPage.ServerBrowserOperationError(
       "PreviewAutomationUnknownProfileError",
-      `No browser profile is named "${requested}". Use one of: ${profiles
-        .map((profile) => `${profile.name} (id ${profile.id})`)
-        .join(", ")}.`,
+      "That profile is unavailable to agents. Use the isolated Agent browser.",
     );
   };
 
@@ -1316,7 +1414,7 @@ const make = Effect.gen(function* () {
     tab: ServerTab | undefined,
     agentSessionId?: string,
   ): Promise<PreviewAutomationStatus> => {
-    if (!tab) {
+    if (!tab || (agentSessionId !== undefined && tab.profileId !== AGENT_BROWSER_PROFILE_ID)) {
       return {
         available: false,
         visible: false,
@@ -1328,6 +1426,7 @@ const make = Effect.gen(function* () {
       };
     }
     const url = tab.page.url();
+    if (agentSessionId !== undefined) await assertAgentSiteAccess(tab, url);
     const viewport = tab.page.viewportSize();
     const status = {
       available: true,
@@ -1348,7 +1447,20 @@ const make = Effect.gen(function* () {
       viewportSetting: tab.setting,
       ...(viewport ? { viewport } : {}),
       tabs: [...tabs.values()]
-        .filter((candidate) => candidate.threadId === tab.threadId)
+        .filter(
+          (candidate) =>
+            candidate.threadId === tab.threadId &&
+            candidate.profileId === AGENT_BROWSER_PROFILE_ID &&
+            (candidate === tab ||
+              candidate.page.url() === "about:blank" ||
+              (() => {
+                try {
+                  return candidate.approvedSiteOrigins.has(new URL(candidate.page.url()).origin);
+                } catch {
+                  return false;
+                }
+              })()),
+        )
         .map((candidate) => ({
           tabId: candidate.tabId,
           url: candidate.page.url() === "about:blank" ? null : candidate.page.url(),
@@ -1655,13 +1767,16 @@ const make = Effect.gen(function* () {
         : await Effect.runPromise(
             findTab(request.threadId, request.tabId).pipe(Effect.orElseSucceed(constVoid)),
           );
+    if (tab && tab.profileId !== AGENT_BROWSER_PROFILE_ID)
+      throw new BrowserControlInterrupted("Personal browser tabs are unavailable to agents.");
     if (!tab) {
       throw new ServerBrowserPage.ServerBrowserOperationError(
         "PreviewAutomationTabNotFoundError",
         "No server preview tab is open for this thread. Call preview_open first.",
       );
     }
-    // Any tab in the thread can be read; acting is checked by its control.
+    await assertAgentSiteAccess(tab, tab.page.url());
+    // Personal profiles are never readable, even through explicit tab ids.
     if (!READ_OPERATIONS.has(request.operation) && !tab.control.agentMayAct(request.agentSessionId))
       throw new BrowserControlInterrupted(
         "This tab belongs to another agent session. You can read it, but open your own tab to act.",
@@ -1686,6 +1801,8 @@ const make = Effect.gen(function* () {
   };
 
   const runOperation = async (request: PreviewAutomationRequest): Promise<unknown> => {
+    if (!request.agentSessionId)
+      throw new BrowserControlInterrupted("The agent session is missing. Reconnect the provider.");
     const input = request.input;
     switch (request.operation) {
       case "status":
@@ -1733,6 +1850,8 @@ const make = Effect.gen(function* () {
             ? found
             : undefined;
         const navigationTimeout = Math.min(request.timeoutMs, NAVIGATION_TIMEOUT_MS);
+        if (existing && existing.profileId !== AGENT_BROWSER_PROFILE_ID)
+          throw new BrowserControlInterrupted("Personal browser tabs are unavailable to agents.");
         const profileId = existing ? undefined : resolveOpenProfile(open.profileId);
         if (!existing) {
           closeIdleAgentTabs();
@@ -1752,6 +1871,11 @@ const make = Effect.gen(function* () {
               }),
             ),
           ));
+        if (existing) {
+          await assertAgentSiteAccess(existing, existing.page.url());
+          if (url) await assertAgentSiteAccess(existing, url);
+        }
+        if (!existing && url) await assertAgentSiteAccess(tab, url);
         if (existing?.dialog)
           throw new BrowserControlInterrupted(
             "A browser dialog is pending. Read preview_status and use preview_dialog first.",
@@ -1800,9 +1924,14 @@ const make = Effect.gen(function* () {
             "Multiple tabs belong to this agent session. Pass a tabId from preview_open or preview_status tabs.",
             "tabRequired",
           );
+        if (!request.agentSessionId)
+          throw new BrowserControlInterrupted(
+            "The agent session is missing. Reconnect the provider.",
+          );
         const recordings = [...tabs.values()].filter(
           (candidate) =>
             candidate.threadId === request.threadId &&
+            candidate.profileId === AGENT_BROWSER_PROFILE_ID &&
             candidate.control.agentMayAct(request.agentSessionId ?? "") &&
             (candidate.recording || candidate.recordingStart),
         );
@@ -1817,6 +1946,7 @@ const make = Effect.gen(function* () {
             "No recording is active for this thread.",
           );
         }
+        await assertAgentSiteAccess(tab, tab.page.url());
         return tab.control.agent(request.agentSessionId ?? "", () => stopRecording(tab));
       }
     }
@@ -1882,6 +2012,7 @@ const make = Effect.gen(function* () {
     switch (request.operation) {
       case "navigate": {
         const navigateInput = input as PreviewAutomationNavigateInput;
+        await assertAgentSiteAccess(tab, resolveNavigationUrl(navigateInput));
         await recordAction(tab, "navigate", () =>
           navigate(
             tab,
@@ -2021,6 +2152,14 @@ const make = Effect.gen(function* () {
             }
             await applyRendering(tab, event.snapshot);
             const request = event.request;
+            if (request?.allowAgentSite && tab.pendingSiteOrigin === request.allowAgentSite) {
+              tab.approvedSiteOrigins.add(request.allowAgentSite);
+              tab.pendingSiteOrigin = null;
+            }
+            if (request?.clear === "cookies") {
+              tab.approvedSiteOrigins.clear();
+              tab.pendingSiteOrigin = null;
+            }
             if (request?.clear === "cookies") await tab.cdp.send("Network.clearBrowserCookies");
             if (request?.clear === "cache") await tab.cdp.send("Network.clearBrowserCache");
             if (request?.hardReload) await tab.cdp.send("Page.reload", { ignoreCache: true });

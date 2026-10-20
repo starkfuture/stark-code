@@ -26,6 +26,11 @@ import {
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
 import {
+  ChangesetCheckInput,
+  ChangesetCheckResult,
+  ChangesetCheckError,
+} from "./changesetCheck.ts";
+import {
   CheckpointFileRestoreInput,
   CheckpointRestorePreview,
   CheckpointFileRestoreResult,
@@ -268,6 +273,7 @@ import {
 } from "./project.ts";
 import {
   NativeAgentReply,
+  NativeAgentAttention,
   TerminalNativeRepliesInput,
   TerminalAttachInput,
   TerminalObserveInput,
@@ -490,6 +496,7 @@ export const WS_METHODS = {
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
+  gitCheckChangesets: "git.checkChangesets",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -502,6 +509,7 @@ export const WS_METHODS = {
   claudeAccountsCommand: "claudeAccounts.command",
   responseVisualsFormat: "responseVisuals.format",
   terminalNativeReplies: "terminal.nativeReplies",
+  terminalNativeAttention: "terminal.nativeAttention",
   terminalOpen: "terminal.open",
   terminalAttach: "terminal.attach",
   terminalObserve: "terminal.observe",
@@ -1589,6 +1597,12 @@ const WsClaudeAccountsCommandRpc = Rpc.make(WS_METHODS.claudeAccountsCommand, {
   error: Schema.Union([ClaudeAccountsError, EnvironmentAuthorizationError]),
 });
 
+const WsGitCheckChangesetsRpc = Rpc.make(WS_METHODS.gitCheckChangesets, {
+  payload: ChangesetCheckInput,
+  success: ChangesetCheckResult,
+  error: Schema.Union([ChangesetCheckError, EnvironmentAuthorizationError]),
+});
+
 const WsResponseVisualsFormatRpc = Rpc.make(WS_METHODS.responseVisualsFormat, {
   payload: ResponseVisualsInput,
   success: ResponseVisualsResult,
@@ -1598,6 +1612,13 @@ const WsResponseVisualsFormatRpc = Rpc.make(WS_METHODS.responseVisualsFormat, {
 const WsTerminalNativeRepliesRpc = Rpc.make(WS_METHODS.terminalNativeReplies, {
   payload: TerminalNativeRepliesInput,
   success: Schema.Array(NativeAgentReply),
+  error: Schema.Union([TerminalError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsTerminalNativeAttentionRpc = Rpc.make(WS_METHODS.terminalNativeAttention, {
+  payload: Schema.Null,
+  success: Schema.Array(NativeAgentAttention),
   error: Schema.Union([TerminalError, EnvironmentAuthorizationError]),
   stream: true,
 });
@@ -2186,6 +2207,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
+  WsGitCheckChangesetsRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,
@@ -2200,6 +2222,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsClaudeAccountsCommandRpc,
   WsResponseVisualsFormatRpc,
   WsTerminalNativeRepliesRpc,
+  WsTerminalNativeAttentionRpc,
   WsTerminalOpenRpc,
   WsTerminalAttachRpc,
   WsTerminalObserveRpc,

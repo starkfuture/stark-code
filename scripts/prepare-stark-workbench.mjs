@@ -3,6 +3,10 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeChildProcess from "node:child_process";
+import {
+  adaptStarkPagesPanel,
+  STARK_PAGES_PRESENTATION_VERSION,
+} from "./adapt-stark-pages-panel.mjs";
 
 // oxlint-disable-next-line starkcode/no-global-process-runtime -- Standalone offline build utility has no Effect runtime.
 const hostPlatform = process.platform;
@@ -27,6 +31,8 @@ export function prepareStarkWorkbench({
     if (
       !force &&
       JSON.parse(NodeFS.readFileSync(stamp, "utf8")).archiveSha256 === digest &&
+      JSON.parse(NodeFS.readFileSync(stamp, "utf8")).panelPresentationVersion ===
+        STARK_PAGES_PRESENTATION_VERSION &&
       NodeFS.existsSync(NodePath.join(destination, ".claude-plugin/plugin.json")) &&
       NodeFS.existsSync(NodePath.join(destination, "packages/spage/bin/spage.js")) &&
       NodeFS.existsSync(NodePath.join(destination, "node_modules/markdown-it/package.json"))
@@ -45,9 +51,14 @@ export function prepareStarkWorkbench({
       ["-xzf", archive, "-C", temporary],
       { stdio: "pipe" },
     );
+    const panelPath = NodePath.join(temporary, "packages/spage/src/panel.js");
+    NodeFS.writeFileSync(panelPath, adaptStarkPagesPanel(NodeFS.readFileSync(panelPath, "utf8")));
     NodeFS.writeFileSync(
       NodePath.join(temporary, ".stark-bundle.json"),
-      JSON.stringify(provenance) + "\n",
+      JSON.stringify({
+        ...provenance,
+        panelPresentationVersion: STARK_PAGES_PRESENTATION_VERSION,
+      }) + "\n",
     );
     NodeFS.rmSync(destination, { recursive: true, force: true });
     NodeFS.renameSync(temporary, destination);

@@ -13,6 +13,8 @@ export interface ThreadPendingApproval {
   readonly requestKind: ProviderRequestKind;
   readonly createdAt: string;
   readonly detail?: string;
+  /** Exact input from the approval's own command item; never inferred from its prose prompt. */
+  readonly command?: string;
   /** App requesting access for mcp-elicitation approvals (#8058). */
   readonly appName?: string;
   /** Approval choices advertised by the provider (#8058); defaults apply when absent. */
@@ -64,7 +66,8 @@ export function seedUserInputDraftAnswers<Draft extends { readonly customAnswer?
 
 /** Joins pending request entities to the request items that carry display data. */
 export function derivePendingThreadRequests(
-  projection: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems">,
+  projection: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems"> &
+    Partial<Pick<OrchestrationV2ThreadProjection, "nodes">>,
 ): PendingThreadRequests {
   const approvals: ThreadPendingApproval[] = [];
   const userInputs: ThreadPendingUserInput[] = [];
@@ -98,11 +101,31 @@ export function derivePendingThreadRequests(
     const item = projection.turnItems.findLast(
       (candidate) => candidate.type === "approval_request" && candidate.requestId === request.id,
     );
+    const approvalNode = projection.nodes?.find(
+      (node) => node.id === request.nodeId && node.runtimeRequestId === request.id,
+    );
+    // A sibling or most recent command can belong to a different tool or agent.
+    // Only a directly linked parent in the same run/provider turn is evidence.
+    const commandItem =
+      request.kind === "command" && approvalNode?.parentNodeId
+        ? projection.turnItems.findLast(
+            (candidate) =>
+              candidate.type === "command_execution" &&
+              candidate.nodeId === approvalNode.parentNodeId &&
+              candidate.threadId === approvalNode.threadId &&
+              candidate.runId === approvalNode.runId &&
+              candidate.providerTurnId === approvalNode.providerTurnId &&
+              candidate.providerThreadId === approvalNode.providerThreadId,
+          )
+        : undefined;
     approvals.push({
       requestId: request.id,
       requestKind: request.kind,
       createdAt: DateTime.formatIso(request.createdAt),
       ...(item?.type === "approval_request" && item.prompt ? { detail: item.prompt } : {}),
+      ...(commandItem?.type === "command_execution" && commandItem.input.trim()
+        ? { command: commandItem.input }
+        : {}),
       ...(item?.type === "approval_request" && item.appName ? { appName: item.appName } : {}),
       ...(item?.type === "approval_request" && item.options !== undefined
         ? { options: item.options }

@@ -55,6 +55,8 @@ interface BrowserImportWizardProps {
   readonly onImport: (input: {
     readonly sourceProfileDirectory: string;
     readonly target: WizardTarget;
+    readonly selectedDomains: string[];
+    readonly consent: true;
   }) => Promise<ImportOutcome>;
   /** Re-checks the source's availability after the user quits the browser. */
   readonly onRefreshSource: () => Promise<BrowserImportSource | undefined>;
@@ -91,6 +93,17 @@ export function BrowserImportWizard({
     initialTargetSelection(canCreateProfile, targetProfiles),
   );
   const [targetError, setTargetError] = useState<string>();
+  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
+  const [consent, setConsent] = useState(false);
+  const [siteDraft, setSiteDraft] = useState("");
+  const availableDomains =
+    source.profiles.find((profile) => profile.directory === sourceProfileDirectory)?.domains ?? [];
+  const addSite = () => {
+    const host = siteDraft.trim().toLowerCase().replace(/^\./, "");
+    if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9-]+$/.test(host)) return;
+    setSelectedDomains((current) => [...new Set([...current, host])].slice(0, 100));
+    setSiteDraft("");
+  };
   // Stable across retries so a keychain re-approval lands in one profile, not
   // a new one each time.
   const newProfileId = useRef(`profile-${randomUUID()}`);
@@ -101,7 +114,7 @@ export function BrowserImportWizard({
   const importInFlight = useRef(false);
 
   const runImport = () => {
-    if (importInFlight.current) return;
+    if (importInFlight.current || !consent || selectedDomains.length === 0) return;
     const chosen = resolveWizardTarget(target, newProfileId.current, targetProfiles);
     if (chosen === undefined) {
       setTargetError("That profile is no longer available. Choose where to import these cookies.");
@@ -111,7 +124,7 @@ export function BrowserImportWizard({
     setTargetError(undefined);
     importInFlight.current = true;
     setStep({ step: "importing" });
-    void onImport({ sourceProfileDirectory, target: chosen })
+    void onImport({ sourceProfileDirectory, target: chosen, selectedDomains, consent: true })
       .then((outcome) => setStep(outcomeToStep(outcome)))
       .catch(() => setStep({ step: "blocked", reason: "readFailed" }))
       .finally(() => {
@@ -130,9 +143,14 @@ export function BrowserImportWizard({
       .then((refreshed) => {
         if (refreshed) {
           setSource(refreshed);
-          setSourceProfileDirectory((current) =>
-            refreshedSourceProfileDirectory(current, refreshed),
-          );
+          const nextDirectory = refreshedSourceProfileDirectory(sourceProfileDirectory, refreshed);
+          if (nextDirectory !== sourceProfileDirectory) {
+            // Consent belongs to the account profile the user chose. A
+            // post-quit refresh must not transfer it to a replacement profile.
+            setSelectedDomains([]);
+            setConsent(false);
+          }
+          setSourceProfileDirectory(nextDirectory);
         }
         setStep(nextStep(refreshed));
       })
@@ -185,13 +203,73 @@ export function BrowserImportWizard({
             targetProfiles={targetProfiles}
             canCreateProfile={canCreateProfile}
             sourceProfileDirectory={sourceProfileDirectory}
-            onSourceProfileChange={setSourceProfileDirectory}
+            onSourceProfileChange={(directory) => {
+              setSourceProfileDirectory(directory);
+              setSelectedDomains([]);
+              setConsent(false);
+            }}
             target={target}
             onTargetChange={(selection) => {
               setTarget(selection);
               setTargetError(undefined);
             }}
             targetError={targetError}
+            importReady={consent && selectedDomains.length > 0}
+            sitePicker={
+              <div className="mt-5 space-y-3">
+                <p className="text-sm font-medium">Choose sites to import</p>
+                <p className="text-xs text-muted-foreground">
+                  Nothing is selected automatically. Select only the exact sites you need, including
+                  any separate sign-in domains.
+                </p>
+                <div className="max-h-40 overflow-auto space-y-2">
+                  {[...new Set([...selectedDomains, ...availableDomains])]
+                    .slice(0, 100)
+                    .map((domain) => (
+                      <label key={domain} className="flex min-w-0 items-start gap-2 text-sm">
+                        <input
+                          className="mt-1 shrink-0"
+                          type="checkbox"
+                          checked={selectedDomains.includes(domain)}
+                          onChange={(event) =>
+                            setSelectedDomains((current) =>
+                              event.target.checked
+                                ? [...new Set([...current, domain])]
+                                : current.filter((item) => item !== domain),
+                            )
+                          }
+                        />
+                        <span className="min-w-0 wrap-anywhere">{domain}</span>
+                      </label>
+                    ))}
+                </div>
+                <label className="block text-sm">
+                  Add an exact site
+                  <input
+                    aria-label="Site domain"
+                    placeholder="pages.starkfuture.com"
+                    value={siteDraft}
+                    onChange={(event) => setSiteDraft(event.target.value)}
+                    className="mt-1 block w-full rounded-md border border-input bg-background p-2"
+                  />
+                </label>
+                <Button variant="outline" size="sm" onClick={addSite}>
+                  Add site
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Imported sign-ins can access your accounts. Copies stay in Personal imported
+                  sessions, which agents cannot open. Clearing that profile signs it out.
+                </p>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={consent}
+                    onChange={(event) => setConsent(event.target.checked)}
+                  />
+                  I understand and want to copy sign-ins for the selected sites.
+                </label>
+              </div>
+            }
             onCancel={onClose}
             onImport={runImport}
           />
@@ -248,6 +326,8 @@ type ConfigureStepProps = {
   readonly onSourceProfileChange: (directory: string) => void;
   readonly target: WizardTargetSelection;
   readonly targetError: string | undefined;
+  readonly sitePicker: import("react").ReactNode;
+  readonly importReady: boolean;
   readonly onTargetChange: (target: WizardTargetSelection) => void;
   readonly onCancel: () => void;
   readonly onImport: () => void;
@@ -348,6 +428,8 @@ function ConfigureStep({
   onSourceProfileChange,
   target,
   targetError,
+  sitePicker,
+  importReady,
   onTargetChange,
   onCancel,
   onImport,
@@ -375,9 +457,9 @@ function ConfigureStep({
         </DialogDescription>
       </DialogHeader>
       <DialogPanel>
-        {/* Side by side when the dialog has room, stacked when it doesn't. */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-          <section className="flex-1 space-y-2">
+        {/* Zero-minimum columns keep long account names inside the dialog. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-4">
+          <section className="min-w-0 space-y-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               From
             </p>
@@ -395,7 +477,7 @@ function ConfigureStep({
             <ArrowDownIcon className="size-4 sm:hidden" />
             <ArrowRightIcon className="hidden size-4 sm:block" />
           </div>
-          <section className="flex-1 space-y-2">
+          <section className="min-w-0 space-y-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Into
             </p>
@@ -418,6 +500,7 @@ function ConfigureStep({
             ))}
           </section>
         </div>
+        {sitePicker}
         {targetFeedback ? (
           <p role="alert" className="mt-3 text-sm text-destructive">
             {targetFeedback}
@@ -429,7 +512,9 @@ function ConfigureStep({
           Cancel
         </Button>
         <Button
-          disabled={sourceProfileDirectory === "" || targetMissing || targetUncreatable}
+          disabled={
+            !importReady || sourceProfileDirectory === "" || targetMissing || targetUncreatable
+          }
           onClick={onImport}
         >
           Import
@@ -464,9 +549,9 @@ function SelectableTile({
       )}
     >
       <span className="min-w-0">
-        <span className="block truncate text-sm font-medium text-foreground">{title}</span>
+        <span className="block wrap-anywhere text-sm font-medium text-foreground">{title}</span>
         {subtitle ? (
-          <span className="block truncate text-xs tabular-nums text-muted-foreground">
+          <span className="block wrap-anywhere text-xs tabular-nums text-muted-foreground">
             {subtitle}
           </span>
         ) : null}

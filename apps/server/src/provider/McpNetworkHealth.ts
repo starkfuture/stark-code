@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- bounded host diagnostic uses argv, never a shell
 import * as NodeChildProcess from "node:child_process";
 import type { McpServerStatusEntry } from "@starkfuture/contracts";
-import { isTailnetHost } from "@starkfuture/shared/hostClassification";
+import { isLocalLoopbackHost, isTailnetHost } from "@starkfuture/shared/hostClassification";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
@@ -45,14 +45,16 @@ const runHostStatus: HostRunner = (command) =>
     }
   });
 
-function isKnownTailnetEndpoint(host: string | undefined): boolean {
-  if (!host || host.length > 253 || /[\s/@?#%]/u.test(host)) return false;
+function remoteEndpointHost(host: string | undefined): string | undefined {
+  if (!host || host.length > 253 || /[\s/@?#%]/u.test(host)) return undefined;
   try {
     const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
     const url = new URL(`https://${authority}`);
-    return !url.port && url.pathname === "/" && isTailnetHost(url.hostname);
+    return !url.port && url.pathname === "/" && !isLocalLoopbackHost(url.hostname)
+      ? url.hostname
+      : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -108,7 +110,7 @@ export function makeNetworkInspector(runner: HostRunner, platform: NodeJS.Platfo
             : platform === "win32"
               ? "tailscale.exe"
               : "tailscale",
-        args: kind === "forticlient" ? ["--nc", "list"] : ["status", "--json"],
+        args: kind === "forticlient" ? ["--nc", "list"] : ["status", "--json", "--peers=false"],
         timeout: 1500,
         maxBuffer: 65_536,
         killSignal: "SIGKILL",
@@ -128,17 +130,21 @@ export function makeNetworkInspector(runner: HostRunner, platform: NodeJS.Platfo
   return (server: McpServerStatusEntry): Effect.Effect<NetworkState> =>
     Effect.gen(function* () {
       if (server.status !== "failed") return "unknown";
+      const host = remoteEndpointHost(server.endpointHost);
+      // Stdio tools often include a subprocess' network errors. Those errors
+      // cannot establish that this MCP connection itself needs a VPN.
+      if (host === undefined) return "unknown";
       const networkFailure = NETWORK_FAILURE.test(server.error?.slice(0, 2048) ?? "");
+      if (isTailnetHost(host)) {
+        const state = yield* readState("tailscale");
+        if (state === "disconnected") return "vpn-off";
+        if (state === "running") return "unknown";
+        // A FortiClient state says nothing about a known Tailscale route.
+        return networkFailure ? "network-unavailable" : "unknown";
+      }
       if (networkFailure && platform === "darwin") {
         const state = yield* readState("forticlient");
         if (state === "disconnected") return "vpn-off";
-        if (state === "running") return "unknown";
-      }
-      if (isKnownTailnetEndpoint(server.endpointHost)) {
-        const state = yield* readState("tailscale");
-        if (state === "disconnected") return "vpn-off";
-        // A restored VPN permits a bounded reconnect; an old connection error
-        // must not keep recovery suspended after the host network has changed.
         if (state === "running") return "unknown";
       }
       return networkFailure ? "network-unavailable" : "unknown";

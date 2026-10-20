@@ -1384,11 +1384,9 @@ export const CLAUDE_READ_ONLY_STARK_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
 export const CLAUDE_STARK_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 
 // The SDK's `allowedTools` only pre-approves tool calls; availability is the
-// separate `tools` option. Attaching the stark-code MCP server therefore always
-// pre-approves its tools (headless modes like `dontAsk` deny anything that is
-// not pre-approved), but read-only sandboxes pre-approve only the annotated
-// read-only orchestrator tools so a read-only session cannot silently spawn
-// threads or scheduled tasks.
+// separate `tools` option. Only the annotated read-only orchestrator tools are
+// pre-approved. Browser actions and other mutations retain the permission
+// callback in every sandbox; a broad MCP wildcard would bypass that callback.
 //
 // The header carries the credential itself: the query runner sends
 // `mcpServers` over the CLI's stdin, never its argv or environment.
@@ -1405,11 +1403,18 @@ export function claudeMcpQueryOverrides(input: {
   if (session === undefined) {
     return input.allowedTools === undefined ? {} : { allowedTools: input.allowedTools };
   }
-  const mcpAllowedTools = input.readOnlySandbox
-    ? CLAUDE_READ_ONLY_STARK_MCP_ALLOWED_TOOLS
-    : [CLAUDE_STARK_MCP_TOOL_WILDCARD];
+  const mcpAllowedTools = CLAUDE_READ_ONLY_STARK_MCP_ALLOWED_TOOLS;
   return {
-    allowedTools: Array.from(new Set([...(input.allowedTools ?? []), ...mcpAllowedTools])),
+    allowedTools: Array.from(
+      new Set([
+        ...(input.allowedTools ?? []).filter(
+          (tool) =>
+            tool !== CLAUDE_STARK_MCP_TOOL_WILDCARD &&
+            !tool.startsWith("mcp__stark-code__preview_"),
+        ),
+        ...mcpAllowedTools,
+      ]),
+    ),
     mcpServers: {
       "stark-code": {
         type: "http",
@@ -10166,8 +10171,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 if (buffer.messages.length > 0) return true;
               for (const frames of (yield* Ref.get(pendingSubagentFramesByToolUseId)).values())
                 if (frames.length > 0) return true;
-              for (const roster of (yield* Ref.get(pendingBackgroundTasksByNativeThread)).values())
-                if (roster.size > 0) return true;
+              // Detached local shells may run for hours without touching MCP.
+              // Running subagents remain guarded below, as do active tool calls.
               for (const subagent of (yield* Ref.get(sessionSubagentsByTaskId)).values())
                 if (subagent.task.status === "running") return true;
               return false;

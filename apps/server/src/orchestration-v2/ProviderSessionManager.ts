@@ -2446,9 +2446,9 @@ export const layerWithOptions = (
                         )
                       )
                         return true;
-                      return yield* (
-                        runtime.hasPendingBackgroundWork ?? Effect.succeed(false)
-                      ).pipe(Effect.orElseSucceed(() => true));
+                      // A detached shell (for example a dev server) does not use
+                      // MCP. The adapter tracks active provider/MCP work above.
+                      return false;
                     }),
                     inspectNetwork: inspectMcpNetwork,
                   }).pipe(Effect.provideService(Scope.Scope, sessionScope))

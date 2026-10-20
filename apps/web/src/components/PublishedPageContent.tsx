@@ -63,8 +63,10 @@ function PublishedHtml({
         referrerPolicy="no-referrer"
         srcDoc={document.html}
         className={cn(
-          "w-full rounded-lg border border-border bg-white",
-          expanded ? "min-h-0 flex-1" : "h-[65vh] min-h-96",
+          "w-full bg-white",
+          expanded
+            ? "min-h-0 flex-1 border-0"
+            : "h-[65vh] min-h-96 rounded-lg border border-border",
         )}
       />
       {document.warnings.length > 0 ? (

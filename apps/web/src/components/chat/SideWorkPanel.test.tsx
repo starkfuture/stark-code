@@ -35,8 +35,15 @@ const state = vi.hoisted(() => ({
     retry: vi.fn(),
   },
 }));
+vi.mock("./CappedReviewPanel", () => ({ CappedReviewPanel: () => <div>Review panel</div> }));
 vi.mock("./useThreadTurnIndex", () => ({ useThreadTurnIndex: () => state.turnIndex }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => state.allowed }));
+vi.mock("../../state/changesetCheck", () => ({
+  checkChangesets: { permissionAtom: () => "changeset-permission" },
+}));
+vi.mock("../../composerDraftStore", () => ({
+  useComposerDraftStore: { getState: () => ({ getComposerDraft: () => null, setPrompt: vi.fn() }) },
+}));
 vi.mock("../../state/responseVisuals", () => ({
   responseVisualsEnvironment: { format: { permissionAtom: () => "visual-permission" } },
 }));

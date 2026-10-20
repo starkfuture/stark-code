@@ -3,7 +3,6 @@ import * as ProviderAdapter from "@starkfuture/provider-core/server/ProviderAdap
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 
@@ -31,6 +30,8 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
   let checking = false;
   let closed = false;
   let maintenancePending = false;
+  let maintenanceSettled: Deferred.Deferred<void> | undefined;
+  let activeRequests = 0;
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
       closed = true;
@@ -39,8 +40,7 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
   const busyError = () =>
     new ProviderAdapter.ProviderAdapterProtocolError({
       driver: input.driver,
-      detail:
-        "Wait for the agent and its background tools to finish before changing MCP connections.",
+      detail: "Wait for the agent's active tool calls to finish before changing MCP connections.",
     });
   const decorate = () =>
     snapshot.map((server) => {
@@ -65,7 +65,9 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
         // A briefly successful reconnect must not grant an infinite retry budget.
         if (now - episode.healthySince >= 60_000) episodes.delete(row.name);
       } else if (row.status === "failed") {
-        if (episode) delete episode.healthySince;
+        if (episode?.healthySince !== undefined && now - episode.healthySince >= 60_000)
+          episodes.set(row.name, { attempts: 0, nextAt: 0, state: "waiting" });
+        else if (episode) delete episode.healthySince;
         else episodes.set(row.name, { attempts: 0, nextAt: 0, state: "waiting" });
       }
     }
@@ -82,7 +84,7 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
         driver: input.driver,
         detail: "MCP health could not be refreshed. No connections were changed.",
       });
-    const busy = yield* input.isBusy;
+    const busy = activeRequests > 0 || (yield* input.isBusy);
     if (maintenancePending) return decorate();
     const now = yield* Clock.currentTimeMillis;
     for (const server of fresh.success) {
@@ -93,17 +95,15 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
         episode.state = "manual";
         continue;
       }
-      if (episode.attempts >= 3) {
-        episode.state = "exhausted";
-        continue;
-      }
-      if (busy || episode.nextAt > now) {
+      if (busy) {
         episode.state = "waiting";
         continue;
       }
+      if (episode.nextAt > now) continue;
       const network = yield* input.inspectNetwork(server);
-      if (network !== "unknown") {
+      if (network === "vpn-off") {
         episode.state = network;
+        episode.nextAt = now + 30_000;
         continue;
       }
       // Recheck immediately before mutating; another provider action may have
@@ -115,33 +115,34 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
         continue;
       episode.attempts += 1;
       episode.state = "reconnecting";
-      episode.nextAt = now + (episode.attempts === 1 ? 8_000 : 30_000);
+      // A new failure starts promptly, then retries at 30s, 1m, 2m and at
+      // most once per five minutes. Missing VPN software is not a stop signal.
+      const retryDelay = Math.min(300_000, 30_000 * 2 ** Math.min(episode.attempts - 1, 4));
+      episode.nextAt = now + retryDelay;
       const settled = yield* Deferred.make<void>();
       yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           maintenancePending = true;
+          maintenanceSettled = settled;
           yield* restore(input.api.reconnect(server.name)).pipe(
             Effect.ignore,
             Effect.ensuring(
-              Effect.sync(() => {
+              Effect.gen(function* () {
+                episode.nextAt = (yield* Clock.currentTimeMillis) + retryDelay;
+                episode.state = network === "network-unavailable" ? network : "waiting";
                 maintenancePending = false;
+                maintenanceSettled = undefined;
               }).pipe(Effect.andThen(Deferred.succeed(settled, undefined))),
             ),
             Effect.forkIn(scope),
           );
         }),
       );
-      const outcome = yield* Deferred.await(settled).pipe(Effect.timeoutOption("8 seconds"));
-      if (Option.isNone(outcome)) {
-        // Stopping an SDK Promise wait does not cancel its provider RPC. Keep
-        // starts/tools blocked until the real request settles or this session
-        // closes, while letting the UI display the pending reconnect.
-        episode.attempts = 3;
-      }
+      yield* Deferred.await(settled).pipe(Effect.timeoutOption("8 seconds"));
       episode.state = maintenancePending
         ? "reconnecting"
-        : episode.attempts >= 3
-          ? "exhausted"
+        : network === "network-unavailable"
+          ? network
           : "waiting";
       yield* refresh;
       // Bound the pause before a pending turn; additional failed servers are
@@ -175,7 +176,8 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
   }).pipe(Effect.forkScoped);
   const idle = <A, E>(operation: Effect.Effect<A, E>) =>
     Effect.gen(function* () {
-      if (closed || maintenancePending || (yield* input.isBusy)) return yield* busyError();
+      if (closed || maintenancePending || activeRequests > 0 || (yield* input.isBusy))
+        return yield* busyError();
       return yield* ownedRequest(operation);
     }).pipe(gate.withPermits(1));
   // A disconnected UI stops waiting, not the provider's underlying request.
@@ -184,14 +186,17 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
     Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
         const settled = yield* Deferred.make<A, E>();
+        const finished = yield* Deferred.make<void>();
         maintenancePending = true;
+        maintenanceSettled = finished;
         yield* restore(operation).pipe(
           Effect.exit,
           Effect.flatMap((exit) => Deferred.done(settled, exit)),
           Effect.ensuring(
             Effect.sync(() => {
               maintenancePending = false;
-            }),
+              maintenanceSettled = undefined;
+            }).pipe(Effect.andThen(Deferred.succeed(finished, undefined))),
           ),
           Effect.forkIn(scope),
         );
@@ -225,25 +230,59 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
   };
   const withActivity = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
-      if (maintenancePending || closed)
-        return yield* new ProviderAdapter.ProviderAdapterProtocolError({
-          driver: input.driver,
-          detail:
-            "An MCP operation is still finishing. Wait before starting more work, or close this session.",
-        });
-      return yield* operation;
-    }).pipe(gate.withPermits(1));
+      while (true) {
+        const result = yield* Effect.gen(function* () {
+          if (closed) return yield* busyError();
+          if (maintenanceSettled) return { wait: maintenanceSettled } as const;
+          return { value: yield* operation } as const;
+        }).pipe(gate.withPermits(1));
+        if ("value" in result) return result.value;
+        // Release the gate while waiting so status reads can show "reconnecting".
+        // Closing the session interrupts this wait along with the owned request.
+        yield* Deferred.await(result.wait);
+      }
+    });
   const withToolActivity = <A, E>(operation: Effect.Effect<A, E>) =>
-    withActivity(ownedRequest(operation));
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        let reserved = false;
+        yield* restore(
+          withActivity(
+            Effect.sync(() => {
+              activeRequests += 1;
+              reserved = true;
+            }),
+          ),
+        ).pipe(
+          Effect.onError(() =>
+            Effect.sync(() => {
+              if (reserved) activeRequests -= 1;
+            }),
+          ),
+        );
+        const settled = yield* Deferred.make<A, E>();
+        yield* restore(operation).pipe(
+          Effect.exit,
+          Effect.flatMap((exit) => Deferred.done(settled, exit)),
+          Effect.ensuring(
+            Effect.sync(() => {
+              activeRequests -= 1;
+            }),
+          ),
+          Effect.forkIn(scope),
+        );
+        return yield* restore(Deferred.await(settled));
+      }),
+    );
   return {
     api,
     trigger,
     check,
     withActivity,
     withToolActivity,
-    hasPendingWork: Effect.sync(() => maintenancePending),
+    hasPendingWork: Effect.sync(() => maintenancePending || activeRequests > 0),
     // Used only inside the manager's atomic idle-entry removal guard.
-    hasPendingWorkNow: () => maintenancePending,
+    hasPendingWorkNow: () => maintenancePending || activeRequests > 0,
   };
 });
 export type McpRecovery = Effect.Success<ReturnType<typeof make>>;

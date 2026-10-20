@@ -115,10 +115,44 @@ export function nativeAgentLaunch(input: {
                   {
                     hooks: [
                       {
+                        // Attention must clear before a new prompt can begin.
+                        // The separate reply hook stays asynchronous.
+                        type: "command",
+                        shell: "bash",
+                        command: `${input.replyCaptureCommand} --attention-only`,
+                        async: false,
+                        timeout: 5,
+                      },
+                      {
                         type: "command",
                         shell: "bash",
                         command: input.replyCaptureCommand,
                         async: true,
+                        timeout: 5,
+                      },
+                    ],
+                  },
+                ],
+                Notification: [
+                  {
+                    matcher: "permission_prompt|elicitation_dialog",
+                    hooks: [
+                      {
+                        type: "command",
+                        shell: "bash",
+                        command: input.replyCaptureCommand,
+                        timeout: 5,
+                      },
+                    ],
+                  },
+                ],
+                UserPromptSubmit: [
+                  {
+                    hooks: [
+                      {
+                        type: "command",
+                        shell: "bash",
+                        command: input.replyCaptureCommand,
                         timeout: 5,
                       },
                     ],

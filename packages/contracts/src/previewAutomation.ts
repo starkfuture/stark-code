@@ -18,7 +18,7 @@ const BoundedUrl = Schema.String.check(Schema.isTrimmed())
 const URL_GUIDANCE =
   "Absolute http(s) URL or a schemeless host such as localhost:5173. Schemeless public hosts use https; loopback hosts use http.";
 const PROFILE_GUIDANCE =
-  "Browser profile for a new tab, by id or name (case-insensitive) from preview_status profiles. Omit to use the user's default profile. A tab keeps the profile it opened with.";
+  "Browser profile for a new tab, by id or name (case-insensitive) from preview_status profiles. Omit to use the isolated Agent browser. Personal/imported profiles are never available to agents.";
 const OptionalTimeoutMs = Schema.optional(
   Schema.Int.check(Schema.isGreaterThan(0))
     .check(Schema.isLessThanOrEqualTo(60_000))
@@ -64,11 +64,11 @@ const PreviewAutomationTabTargetFields = {
   tabId: Schema.optional(
     PreviewTabId.annotate({
       description:
-        "Exact collaborative browser tab to target, including a tab the user opened (see preview_status tabs). Omit to use this agent session's current tab, or the user's visible tab when this session has none.",
+        "Exact collaborative browser tab to target, including a tab the user opened (see preview_status tabs). Omit to use this agent session's current tab, or an isolated agent tab when this session has none.",
     }),
   ).annotate({
     description:
-      "Exact collaborative browser tab to target, including a tab the user opened (see preview_status tabs). Omit to use this agent session's current tab, or the user's visible tab when this session has none.",
+      "Exact collaborative browser tab to target, including a tab the user opened (see preview_status tabs). Omit to use this agent session's current tab, or an isolated agent tab when this session has none.",
   }),
 };
 

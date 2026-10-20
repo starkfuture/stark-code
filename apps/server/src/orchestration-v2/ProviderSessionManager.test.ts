@@ -1024,7 +1024,7 @@ it.effect("ProviderSessionManagerV2 closes every live session for a provider ins
   }),
 );
 
-it.effect("MCP recovery checks startup and waits for turn completion and background work", () =>
+it.effect("MCP recovery waits for turns but does not wait for detached background shells", () =>
   Effect.gen(function* () {
     const state = yield* Ref.make(emptyState);
     const startup = yield* Deferred.make<void>();
@@ -1125,11 +1125,9 @@ it.effect("MCP recovery checks startup and waits for turn completion and backgro
       });
       yield* Fiber.join(terminal);
       yield* runtime.mcpServers!.list();
-      assert.equal(reconnects, 0);
-      yield* Ref.set(background, false);
-      yield* runtime.mcpServers!.list();
       yield* Deferred.await(repaired);
       assert.equal(reconnects, 1);
+      assert.isTrue(yield* Ref.get(background));
       yield* manager.close(providerSessionId);
       yield* TestClock.adjust("60 seconds");
       assert.equal(reconnects, 1);

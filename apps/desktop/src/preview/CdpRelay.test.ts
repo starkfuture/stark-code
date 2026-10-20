@@ -54,6 +54,10 @@ describe("CDP relay", () => {
     const relay = createCdpRelayConnection(makeTarget(send), (raw) =>
       written.push(JSON.parse(raw)),
     );
+    relay.receive(JSON.stringify({ id: 0, method: "Target.setAutoAttach", params: {} }));
+    await settle();
+    relay.event("Target.attachedToTarget", { sessionId: "iframe-session" }, "");
+    written.length = 0;
     relay.receive(
       JSON.stringify({ id: 5, method: "Page.captureScreenshot", sessionId: "stark-preview-page" }),
     );
@@ -78,6 +82,9 @@ describe("CDP relay", () => {
   it("resumes paused child frames, so cross-site iframes run", async () => {
     const send = vi.fn(async () => ({}));
     const relay = createCdpRelayConnection(makeTarget(send), () => {});
+    relay.receive(JSON.stringify({ id: 0, method: "Target.setAutoAttach", params: {} }));
+    await settle();
+    relay.event("Target.attachedToTarget", { sessionId: "iframe-session" }, "");
     // The page's own session is already running; only its children wait.
     relay.receive(
       JSON.stringify({
@@ -117,6 +124,46 @@ describe("CDP relay", () => {
 });
 
 describe("CDP relay extra sessions", () => {
+  it("blocks cross-target and arbitrary-session escapes wrapped in a page command", async () => {
+    const send = vi.fn(async () => ({}));
+    const written: Array<Record<string, unknown>> = [];
+    const relay = createCdpRelayConnection(makeTarget(send), (raw) =>
+      written.push(JSON.parse(raw)),
+    );
+    for (const [index, request] of [
+      {
+        method: "Target.attachToTarget",
+        params: { targetId: "PERSONAL-PROFILE" },
+        sessionId: "stark-preview-page",
+      },
+      {
+        method: "Target.createTarget",
+        params: { url: "https://mail.example" },
+        sessionId: "stark-preview-page",
+      },
+      {
+        method: "Target.sendMessageToTarget",
+        params: { sessionId: "PERSONAL-SESSION", message: "{}" },
+        sessionId: "stark-preview-page",
+      },
+      {
+        method: "Browser.getWindowForTarget",
+        params: { targetId: "PERSONAL-PROFILE" },
+        sessionId: "stark-preview-page",
+      },
+      {
+        method: "Runtime.evaluate",
+        params: { expression: "document.cookie" },
+        sessionId: "PERSONAL-SESSION",
+      },
+    ].entries())
+      relay.receive(JSON.stringify({ id: index + 1, ...request }));
+    await settle();
+    expect(send).not.toHaveBeenCalled();
+    expect(written).toHaveLength(5);
+    expect(written.every((reply) => reply.error !== undefined)).toBe(true);
+  });
+
   it("gives a second page session the page's commands and events", async () => {
     const send = vi.fn(async () => ({}));
     const written: Array<Record<string, unknown>> = [];

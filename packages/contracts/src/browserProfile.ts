@@ -50,6 +50,9 @@ export type BrowserProfile = typeof BrowserProfile.Type;
 
 export const DEFAULT_BROWSER_PROFILE_ID: BrowserProfileId = "default";
 export const INCOGNITO_BROWSER_PROFILE_ID: BrowserProfileId = "incognito";
+/** Never shares a partition with a human profile, including legacy imports. */
+export const AGENT_BROWSER_PROFILE_ID: BrowserProfileId = "agent";
+export const IMPORTED_BROWSER_PROFILE_ID: BrowserProfileId = "personal-imported";
 
 /**
  * Built-ins are synthesized rather than stored, so they cannot be renamed out
@@ -58,6 +61,8 @@ export const INCOGNITO_BROWSER_PROFILE_ID: BrowserProfileId = "incognito";
 export const BUILT_IN_BROWSER_PROFILES: ReadonlyArray<BrowserProfile> = [
   { id: DEFAULT_BROWSER_PROFILE_ID, name: "Default", kind: "persistent" },
   { id: INCOGNITO_BROWSER_PROFILE_ID, name: "Incognito", kind: "incognito" },
+  { id: AGENT_BROWSER_PROFILE_ID, name: "Agent browser", kind: "incognito" },
+  { id: IMPORTED_BROWSER_PROFILE_ID, name: "Personal imported sessions", kind: "persistent" },
 ];
 
 export function isBuiltInBrowserProfileId(id: string): boolean {

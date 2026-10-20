@@ -20,6 +20,7 @@ export function StarkPagesSidebar(props: {
   readonly showHeader?: boolean;
   readonly initialSlug?: string;
   readonly active?: boolean;
+  readonly onPageChange?: ((page: StarkPageTarget) => void) | undefined;
   readonly onOpenPage?: ((page: StarkPageTarget) => void) | undefined;
 }) {
   const {
@@ -31,6 +32,7 @@ export function StarkPagesSidebar(props: {
     initialSlug,
     active = true,
     onOpenPage,
+    onPageChange,
   } = props;
   const publishingEnabled = canPublish && agent === "claude";
   const frame = useRef<HTMLIFrameElement>(null);
@@ -132,6 +134,7 @@ export function StarkPagesSidebar(props: {
             type: "host",
             canPublish: publishingEnabled,
             agent: agent,
+            ...(initialSlug ? { presentation: "document" } : {}),
           },
           origin,
         );
@@ -174,6 +177,7 @@ export function StarkPagesSidebar(props: {
       if (message.type === "show") {
         shownSlug.current = message.page.slug;
         const page = { kind: "local" as const, ...message.page };
+        onPageChange?.(page);
         if (initialSlug) {
           if (active) onOpenPage?.(page);
         } else {
@@ -236,12 +240,13 @@ export function StarkPagesSidebar(props: {
     initialSlug,
     active,
     onOpenPage,
+    onPageChange,
   ]);
 
   return (
     <aside
       aria-label="Stark Pages"
-      className="flex h-full min-h-0 w-full flex-col border-l border-border bg-background"
+      className="flex h-full min-h-0 w-full min-w-0 flex-col bg-background"
     >
       {props.showHeader !== false ? (
         <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">

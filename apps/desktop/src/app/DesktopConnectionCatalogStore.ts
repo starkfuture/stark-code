@@ -431,9 +431,6 @@ export const make = Effect.gen(function* () {
   });
 
   const migrateLegacyCatalog = Effect.gen(function* () {
-    if (!(yield* encryptionAvailable)) {
-      return Option.none<string>();
-    }
     const records = yield* savedEnvironments.getRegistry.pipe(
       Effect.mapError(
         (cause) =>
@@ -445,6 +442,11 @@ export const make = Effect.gen(function* () {
       ),
     );
     if (records.length === 0) {
+      return Option.none<string>();
+    }
+    // Checking secure storage may ask macOS to unlock a Keychain item. Do not
+    // request that access when there is no legacy data to migrate.
+    if (!(yield* encryptionAvailable)) {
       return Option.none<string>();
     }
     const catalog = yield* migrateSavedEnvironmentRecords(records, savedEnvironments, catalogPath);

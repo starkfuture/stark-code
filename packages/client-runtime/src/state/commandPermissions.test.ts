@@ -14,10 +14,15 @@ import {
   ThreadId,
   EnvironmentId,
   ScheduledTaskId,
+  CommandId,
+  MessageId,
+  ORCHESTRATION_V2_WS_METHODS,
   WS_METHODS,
   type AuthSessionState,
+  type OrchestrationV2Command,
 } from "@starkfuture/contracts";
 import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -25,7 +30,8 @@ import * as TestClock from "effect/testing/TestClock";
 import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
-import { createEnvironmentRpcCommand } from "./runtime.ts";
+import { createEnvironmentCommand, createEnvironmentRpcCommand } from "./runtime.ts";
+import { startThreadTurn, type StartThreadTurnInput } from "../operations/commands.ts";
 
 vi.mock("./session.ts", () => ({
   createEnvironmentSessionAtoms: () => ({ sessionStateAtom: sessions }),
@@ -380,4 +386,85 @@ it.effect("rejects protected unary and streamed RPCs outside a guarded command",
     expect(streamed._tag).toBe("EnvironmentAuthorizationError");
     expect(writes).toBe(0);
   }),
+);
+
+it.effect(
+  "authorizes an existing chat turn at the command boundary and rechecks the destination",
+  () =>
+    Effect.gen(function* () {
+      const writes: OrchestrationV2Command[] = [];
+      const session = {
+        client: {
+          [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
+            Effect.sync(() => {
+              writes.push(command);
+              return { sequence: writes.length };
+            }),
+        },
+      } as unknown as RpcSession;
+      const supervisor = {
+        // A routed command must use the destination's grants, not the origin's.
+        target: { environmentId: other, label: "destination" },
+        session: yield* SubscriptionRef.make(Option.some(session)),
+      } as unknown as EnvironmentSupervisor["Service"];
+      const turnRuntime = Atom.runtime(
+        Layer.mergeAll(
+          Layer.succeed(EnvironmentRegistry, {
+            run: (_id, effect) => Effect.provideService(effect, EnvironmentSupervisor, supervisor),
+          } as EnvironmentRegistry["Service"]),
+          Layer.succeed(
+            Crypto.Crypto,
+            Crypto.make({
+              randomBytes: (size) => new Uint8Array(size),
+              digest: (_algorithm, data) => Effect.succeed(data),
+            }),
+          ),
+        ),
+      );
+      const command = createEnvironmentCommand(turnRuntime, {
+        label: "test.existing-chat-turn",
+        execute: (input: StartThreadTurnInput) => startThreadTurn(input),
+      });
+      const registry = AtomRegistry.make();
+      registry.mount(sessions(env));
+      registry.mount(sessions(other));
+      const target = {
+        environmentId: env,
+        input: {
+          commandId: CommandId.make("follow-up"),
+          threadId: ThreadId.make("existing-thread"),
+          message: {
+            messageId: MessageId.make("follow-up-message"),
+            role: "user",
+            text: "Continue after reconnect.",
+            attachments: [],
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          dispatchMode: "start",
+        } satisfies StartThreadTurnInput,
+      };
+      try {
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect((yield* Effect.promise(() => command.run(registry, target)))._tag).toBe("Failure");
+        expect(writes).toHaveLength(0);
+
+        registry.set(sessions(other), AsyncResult.success(grant(true)));
+        expect((yield* Effect.promise(() => command.run(registry, target)))._tag).toBe("Success");
+        expect(writes).toMatchObject([
+          {
+            type: "message.dispatch",
+            threadId: "existing-thread",
+            text: "Continue after reconnect.",
+          },
+        ]);
+
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect((yield* Effect.promise(() => command.run(registry, target)))._tag).toBe("Failure");
+        expect(writes).toHaveLength(1);
+      } finally {
+        registry.dispose();
+      }
+    }),
 );

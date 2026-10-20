@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - Owns Playwright resources outside the Effect runtime.
-import { INCOGNITO_BROWSER_PROFILE_ID } from "@starkfuture/contracts";
+import { AGENT_BROWSER_PROFILE_ID, INCOGNITO_BROWSER_PROFILE_ID } from "@starkfuture/contracts";
 import { constVoid } from "effect/Function";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
@@ -166,9 +166,13 @@ export class ServerBrowserContexts {
 
   private async createContext(profileId: string, isolationKey?: string) {
     const contextOptions = { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 };
-    if (isolationKey !== undefined || profileId === INCOGNITO_BROWSER_PROFILE_ID) {
+    if (
+      isolationKey !== undefined ||
+      profileId === AGENT_BROWSER_PROFILE_ID ||
+      profileId === INCOGNITO_BROWSER_PROFILE_ID
+    ) {
       const browser = await this.sharedBrowser();
-      return browser.newContext(contextOptions);
+      return browser.newContext({ ...contextOptions, serviceWorkers: "block" });
     }
     const directory = this.profileDirectory(profileId);
     const options = await this.launchOptions();

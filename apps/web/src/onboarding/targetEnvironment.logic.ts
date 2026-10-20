@@ -1,5 +1,6 @@
 import { type ConnectionCatalogEntry, hasRelayRoute } from "@starkfuture/client-runtime/connection";
-import type { EnvironmentId } from "@starkfuture/contracts";
+import type { DesktopEnvironmentBootstrap, EnvironmentId } from "@starkfuture/contracts";
+import { isStarkPagesLocalConnectionTarget } from "../connection/starkPagesConnection";
 
 interface OnboardingEnvironment {
   readonly environmentId: EnvironmentId;
@@ -11,6 +12,22 @@ export function isOnboardingRelayEnvironment(
   environment: Pick<OnboardingEnvironment, "entry">,
 ): boolean {
   return hasRelayRoute(environment.entry);
+}
+
+/** The desktop bootstrap proves which backend belongs to this computer, even
+ * when another connection is primary or a remote uses a loopback tunnel. */
+export function resolveOnboardingLocalEnvironment<TEnvironment extends OnboardingEnvironment>(
+  environments: readonly TEnvironment[],
+  bootstraps: readonly DesktopEnvironmentBootstrap[],
+): TEnvironment | null {
+  if (bootstraps.length === 0) return null;
+  return (
+    environments.find(
+      (environment) =>
+        environment.connection.phase === "connected" &&
+        isStarkPagesLocalConnectionTarget(environment.entry.target, bootstraps),
+    ) ?? null
+  );
 }
 
 /** Keep a directly paired machine pinned while its initial connection completes. */

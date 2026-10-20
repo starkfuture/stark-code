@@ -185,19 +185,28 @@ Stashes containing uploaded files must be restored in their original environment
 Those files are retained for 24 hours. After an upload expires, restore the prompt
 and use **Attach again** or remove the missing file before sending.
 
-## Voice input on Mac
+## Provider voice on desktop
 
-Click the microphone in the message box, speak, then stop to insert the transcript.
-Review or edit it before sending; dictation never sends a message automatically.
-Cancel discards the recording, and switching chats stops it.
+The microphone opens the selected Claude or Codex native session and its **Voice**
+controls. Your chat draft stays saved. The native session has its own conversation;
+voice does not insert a transcript into the chat composer.
 
-Enable **System Settings → Keyboard → Dictation** for your system language if its
-local speech model is not installed. The first recording asks for macOS microphone
-and speech-recognition permission for **Stark Code Dictation**. Speech is processed
-on your Mac, using its system language, without Claude or Codex tokens.
-If on-device speech is unavailable for that language, the app reports it instead
-of sending audio to a transcription service. You can change denied permissions in
-**System Settings → Privacy & Security → Microphone / Speech Recognition**.
+At an empty, idle CLI prompt, choose **Prepare /voice hold** for Claude or
+**Prepare /voice** for Codex, then press Enter in the terminal. Preparing stages
+the command without submitting another draft or answering a permission prompt.
+
+Claude uses its own transcription service and Claude account. Hold Space to speak,
+release to review the transcript, then press Enter to send it. Its terminal shows
+microphone activity and transcription. Esc cancels dictation; `/voice off` disables
+it. API-key-only Claude sessions do not support this voice service.
+
+Codex `/voice` starts a voice conversation through your ChatGPT account and can act
+on spoken instructions. Use `/voice settings` for devices and `/voice` again to
+stop. Voice availability depends on the installed CLI and account.
+
+The provider owns recording, permissions and cancellation. Voice uses the microphone
+on the computer running the CLI; a remote server cannot use this Mac's microphone.
+The desktop composer no longer starts macOS speech recognition.
 
 ## Voice input on iPhone
 

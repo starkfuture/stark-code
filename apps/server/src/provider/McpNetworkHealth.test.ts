@@ -42,7 +42,7 @@ it.effect("checks only a known tailnet destination with bounded shell-free argv"
     assert.deepEqual(commands, [
       {
         executable: "tailscale.exe",
-        args: ["status", "--json"],
+        args: ["status", "--json", "--peers=false"],
         timeout: 1500,
         maxBuffer: 65_536,
         killSignal: "SIGKILL",
@@ -224,13 +224,19 @@ it.effect(
         null,
       ]) {
         const inspect = makeNetworkInspector(() => Effect.succeed(output), "darwin");
-        assert.equal(yield* inspect(server({ error: "ETIMEDOUT" })), "network-unavailable");
+        assert.equal(
+          yield* inspect(server({ endpointHost: "internal.example", error: "ETIMEDOUT" })),
+          "network-unavailable",
+        );
       }
       const inspect = makeNetworkInspector(
         () => Effect.succeed(`${fortiService("Disconnected")}\n${fortiService("Connected")}`),
         "darwin",
       );
-      assert.equal(yield* inspect(server({ error: "ETIMEDOUT" })), "unknown");
+      assert.equal(
+        yield* inspect(server({ endpointHost: "internal.example", error: "ETIMEDOUT" })),
+        "unknown",
+      );
     }),
 );
 
@@ -245,12 +251,58 @@ it.effect("refreshes FortiClient state so reconnect can proceed after the VPN re
         }),
       "darwin",
     );
-    const failed = server({ error: "ECONNRESET" });
+    const failed = server({ endpointHost: "internal.example", error: "ECONNRESET" });
     assert.equal(yield* inspect(failed), "vpn-off");
     assert.equal(yield* inspect(failed), "vpn-off");
     assert.equal(calls, 1);
     yield* TestClock.adjust("15 seconds");
     assert.equal(yield* inspect(failed), "unknown");
     assert.equal(calls, 2);
+  }),
+);
+
+it.effect("does not classify local or stdio subprocess errors as VPN failures", () =>
+  Effect.gen(function* () {
+    let calls = 0;
+    const inspect = makeNetworkInspector(
+      () =>
+        Effect.sync(() => {
+          calls++;
+          return fortiService("Disconnected");
+        }),
+      "darwin",
+    );
+    for (const endpointHost of [
+      undefined,
+      "localhost",
+      "127.0.0.1",
+      "[::1]",
+      "host/path",
+      "user@host",
+    ]) {
+      assert.equal(yield* inspect(server({ endpointHost, error: "ECONNREFUSED" })), "unknown");
+    }
+    assert.equal(calls, 0);
+  }),
+);
+
+it.effect("checks the actual Tailscale route before an unrelated disconnected FortiClient", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const inspect = makeNetworkInspector(
+      (command) =>
+        Effect.sync(() => {
+          calls.push(command.executable);
+          return command.executable === "tailscale"
+            ? '{"BackendState":"Running"}'
+            : fortiService("Disconnected");
+        }),
+      "darwin",
+    );
+    assert.equal(
+      yield* inspect(server({ endpointHost: "docs.tail.ts.net", error: "ENETUNREACH" })),
+      "unknown",
+    );
+    assert.deepEqual(calls, ["tailscale"]);
   }),
 );

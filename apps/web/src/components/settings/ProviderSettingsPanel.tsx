@@ -39,6 +39,7 @@ import { PlusIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
+import { isSharedClaudeOrganizationContext } from "../../claudeSharedLogin";
 import {
   useEnvironmentSettings,
   usePersistEnvironmentProviderInstanceMutation,
@@ -95,6 +96,8 @@ import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ClaudeAccountsPanel } from "./ClaudeAccountsPanel";
+import { SetupDoctorPanel } from "./SetupDoctorPanel";
+import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
@@ -112,10 +115,12 @@ import {
   PolicyTooltip,
   SettingResetButton,
   SettingsPageContainer,
+  SettingsSearchTarget,
   SettingsRow,
   SettingsSection,
   useRelativeTimeTick,
   useSettingsSearchTargetId,
+  scrollToSettingsTarget,
 } from "./settingsLayout";
 import {
   buildProviderEnvironmentOptions,
@@ -186,11 +191,6 @@ function providerEnvironmentDetail(environment: EnvironmentPresentation): string
   return environment.displayUrl ?? "Remote device";
 }
 
-// Shared by the editor grid and the placeholder states so switching devices
-// never changes the card's footprint.
-const providerCardHeightClassName =
-  "@min-[48rem]/providers:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/providers:min-h-[32rem]";
-
 /**
  * Same chrome as the provider editor (section heading, floating device tabs,
  * tall card) for states that cannot render provider settings yet.
@@ -215,10 +215,7 @@ function ProviderSettingsPlaceholder({
       ) : null}
       <SettingsGroup
         divided={false}
-        className={cn(
-          providerCardHeightClassName,
-          "scrollbar-gutter-both flex overflow-x-hidden overflow-y-auto",
-        )}
+        className={cn("scrollbar-gutter-both flex min-h-64 overflow-x-hidden overflow-y-auto")}
       >
         <Empty>
           <EmptyMedia variant="icon">{icon}</EmptyMedia>
@@ -292,7 +289,11 @@ interface ProviderSettingsTarget {
 
 export function ProviderSettingsPanel(target: ProviderSettingsTarget) {
   return (
-    <SettingsPageContainer className="@container/providers gap-8">
+    <SettingsPageContainer
+      className="@container/providers gap-8"
+      heading="Agents & accounts"
+      description="Connect your installed tools. Keep each provider’s own capabilities."
+    >
       <ProviderSettingsPanelContent
         key={`${target.environmentId ?? ""}:${target.instanceId ?? ""}`}
         {...target}
@@ -360,6 +361,7 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     if (
       !target.scoped &&
       (searchTargetId === searchableSetting("provider-health-check-interval").id ||
+        searchTargetId === searchableSetting("provider-runtime").id ||
         searchTargetId === searchableSetting("usage-providers").id ||
         searchTargetId === searchableSetting("claude-organizations").id) &&
       !selectedEnvironmentCanRenderSettings &&
@@ -608,6 +610,10 @@ export function EnvironmentProviderSettings({
   });
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
+  const [organizationsOpenRequest, setOrganizationsOpenRequest] = useState(0);
+  useEffect(() => {
+    if (organizationsOpenRequest > 0) scrollToSettingsTarget("claude-organizations");
+  }, [organizationsOpenRequest]);
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | null>(
     targetInstanceId ?? null,
   );
@@ -830,6 +836,11 @@ export function EnvironmentProviderSettings({
     rows.find((row) => row.instanceId === selectedInstanceId) ??
     (targetInstanceMissing ? null : (rows[0] ?? null));
 
+  useEffect(() => {
+    if (selectedInstanceId === null) return;
+    scrollToSettingsTarget(`provider-instance-${selectedInstanceId}`);
+  }, [selectedInstanceId]);
+
   const updateProviderInstance = async (
     row: InstanceRow,
     next: ProviderInstanceConfig,
@@ -987,6 +998,21 @@ export function EnvironmentProviderSettings({
           ) : undefined
         }
         canWriteSettings={canWriteSettings}
+        accountAction={
+          mode === "editor" &&
+          isSharedClaudeOrganizationContext(liveProvider) &&
+          projectIds.length === 0 ? (
+            <>
+              <Button
+                size="comfortable"
+                variant="subtle-outline"
+                onClick={() => setOrganizationsOpenRequest((request) => request + 1)}
+              >
+                Manage organizations
+              </Button>
+            </>
+          ) : undefined
+        }
         setup={
           mode === "editor" && row.driver === "antigravity" ? (
             <ProviderSetupSection
@@ -1137,6 +1163,7 @@ export function EnvironmentProviderSettings({
       <SettingsSection
         {...searchableSetting("providers")}
         variant="plain"
+        className="stark-agent-section"
         titleAction={
           !readOnly ? (
             <Tooltip>
@@ -1197,70 +1224,69 @@ export function EnvironmentProviderSettings({
             />
           </SettingsGroup>
         ) : null}
-        <SettingsGroup
-          divided={false}
-          className={cn(
-            providerCardHeightClassName,
-            "overflow-hidden @min-[48rem]/providers:grid @min-[48rem]/providers:grid-cols-[17rem_minmax(0,1fr)]",
-          )}
-        >
-          <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/providers:flex @min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-col @min-[48rem]/providers:border-r @min-[48rem]/providers:border-b-0">
-            <ScrollArea
-              scrollFade
-              chainVerticalScroll
-              className="@min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-1"
-            >
-              <div className="divide-y divide-border/50">
-                {rows.map((row) => renderProviderInstance(row, "list"))}
-                {!readOnly ? (
-                  <button
-                    type="button"
-                    className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground sm:px-4"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
-                  >
-                    <PlusIcon className="size-4 shrink-0" />
-                    Add provider
-                  </button>
-                ) : null}
-              </div>
-            </ScrollArea>
-          </div>
-
-          <div className="min-w-0 @min-[48rem]/providers:min-h-0">
-            {selectedRow ? (
-              <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/providers:h-full">
-                <div className="space-y-6 p-4">{renderProviderInstance(selectedRow, "editor")}</div>
-              </ScrollArea>
-            ) : (
-              <div className="p-6 text-sm text-muted-foreground">
-                {targetInstanceMissing
-                  ? "This provider instance is no longer available on this device."
-                  : "No providers configured."}
-              </div>
-            )}
-          </div>
-        </SettingsGroup>
+        {targetInstanceMissing ? (
+          <p role="status" className="px-3 text-sm text-muted-foreground sm:px-4">
+            This provider instance is no longer available on this device.
+          </p>
+        ) : null}
+        <SettingsSearchTarget id="provider-runtime" className="stark-agent-cards outline-none">
+          {rows.map((row) => renderProviderInstance(row, "editor"))}
+          {rows.length === 0 ? (
+            <p className="px-3 py-6 text-sm text-muted-foreground sm:px-4">No agents configured.</p>
+          ) : null}
+        </SettingsSearchTarget>
       </SettingsSection>
 
+      <SetupDoctorPanel
+        key={`doctor:${environmentId}`}
+        environmentId={environmentId}
+        environmentLabel={environmentLabel}
+        providers={serverProviders}
+        projects={
+          projectIds.length
+            ? projects.filter((project) => projectIds.includes(project.id))
+            : projects
+        }
+      />
+
       {projectIds.length === 0 ? (
-        <ClaudeAccountsPanel
+        <FoldedSettingsSection
+          id="claude-organizations-fold"
+          title="Claude organizations"
+          summary="Shared login and switching preferences"
+          revealForTargets={["claude-organizations"]}
+          openRequest={organizationsOpenRequest}
+        >
+          <ClaudeAccountsPanel
+            key={environmentId}
+            environmentId={environmentId}
+            environmentLabel={environmentLabel}
+            readOnly={readOnly}
+          />
+        </FoldedSettingsSection>
+      ) : null}
+
+      <FoldedSettingsSection
+        id="usage-providers-fold"
+        title="Usage connections"
+        summary="Optional sources and account access"
+        revealForTargets={["usage-providers", "cursor-keychain-usage"]}
+      >
+        <UsageProviderSettings
           key={environmentId}
           environmentId={environmentId}
           environmentLabel={environmentLabel}
+          sources={settings.usageLimitSources}
+          cursorKeychainUsageEnabled={settings.cursorKeychainUsageEnabled}
           readOnly={readOnly}
         />
-      ) : null}
+      </FoldedSettingsSection>
 
-      <UsageProviderSettings
-        key={environmentId}
-        environmentId={environmentId}
-        environmentLabel={environmentLabel}
-        sources={settings.usageLimitSources}
-        cursorKeychainUsageEnabled={settings.cursorKeychainUsageEnabled}
-        readOnly={readOnly}
-      />
-
-      <SettingsSection title="Advanced">
+      <FoldedSettingsSection
+        id="provider-health-settings"
+        title="Background status checks"
+        revealForTargets={["provider-health-check-interval"]}
+      >
         <SettingsRow
           id={searchableSetting("provider-health-check-interval").id}
           title={
@@ -1334,7 +1360,7 @@ export function EnvironmentProviderSettings({
             </div>
           }
         />
-      </SettingsSection>
+      </FoldedSettingsSection>
 
       {isAddInstanceDialogOpen && !readOnly ? (
         <AddProviderInstanceDialog

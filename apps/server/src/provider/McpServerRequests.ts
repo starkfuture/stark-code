@@ -46,12 +46,12 @@ const safeError = (text: string) => {
     .map((line) => catalogText(line, line.length))
     .join("\n");
   const redacted = plain
-    .replace(/\b(?:https?|wss?):\/\/[^\s<>"'`]+/gi, (value) => {
+    .replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s<>"'`]+/gi, (value) => {
       try {
         const url = new URL(value);
         // Paths, query strings and fragments may all contain credentials.
         // The origin preserves the useful connection destination only.
-        return url.origin;
+        return `${url.protocol}//${url.host}`;
       } catch {
         return "[redacted URL]";
       }
@@ -61,10 +61,11 @@ const safeError = (text: string) => {
       "$1[redacted]",
     )
     .replace(
-      /(["']?(?:code|state|token|access[_-]token|refresh[_-]token|id[_-]token|client[_-]secret|api[_-]key|password)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s&,;#}\]]+)/gi,
+      /(["']?(?:code|state|password|[a-z\d_-]*(?:key|token|secret)[a-z\d_-]*)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s&,;#}\]]+)/gi,
       "$1[redacted]",
     )
-    .replace(/\b(?:Bearer|Basic)\s+[^\s,"'}\]]+/gi, "[redacted]");
+    .replace(/\b(?:Bearer|Basic)\s+[^\s,"'}\]]+/gi, "[redacted]")
+    .replace(/\b(?:sk-[a-z\d_-]+|gh[pousr]_[a-z\d_]+|github_pat_[a-z\d_]+)\b/gi, "[redacted]");
   return catalogText(redacted, 1000);
 };
 

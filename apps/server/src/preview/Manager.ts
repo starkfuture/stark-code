@@ -59,7 +59,11 @@ export class PreviewManager extends Context.Service<
       input: PreviewReportStatusInput & { readonly serverControlled?: boolean },
     ) => Effect.Effect<void, PreviewError>;
     readonly requestReveal: (
-      input: PreviewCloseInput & { readonly tabId: string; readonly force: boolean },
+      input: PreviewCloseInput & {
+        readonly tabId: string;
+        readonly force: boolean;
+        readonly agentSiteOrigin?: string;
+      },
     ) => Effect.Effect<void, PreviewError>;
     readonly resize: (
       input: PreviewResizeInput,
@@ -373,18 +377,24 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         input.threadId,
         input.tabId,
         Effect.fn("PreviewManager.adjustSession")(function* (session) {
+          const allowAgentSite =
+            input.allowAgentSite === session.snapshot.agentSiteOrigin
+              ? input.allowAgentSite
+              : undefined;
           const updatedAt = yield* currentIsoTimestamp;
           const snapshot: PreviewSessionSnapshot = {
             ...session.snapshot,
+            ...(allowAgentSite === undefined ? {} : { agentSiteOrigin: null }),
             ...(input.colorScheme === undefined ? {} : { colorScheme: input.colorScheme }),
             ...(input.zoomFactor === undefined ? {} : { zoomFactor: input.zoomFactor }),
             updatedAt,
           };
           // One-off requests ride on the event for the server's browser to act on.
           const request =
-            input.hardReload || input.clear
+            input.hardReload || input.clear || allowAgentSite
               ? {
                   request: {
+                    ...(allowAgentSite === undefined ? {} : { allowAgentSite }),
                     ...(input.hardReload ? { hardReload: true } : {}),
                     ...(input.clear ? { clear: input.clear } : {}),
                   },
@@ -477,6 +487,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       Effect.fn("PreviewManager.revealSession")(function* (session) {
         const snapshot = {
           ...session.snapshot,
+          ...(input.agentSiteOrigin === undefined
+            ? {}
+            : { agentSiteOrigin: input.agentSiteOrigin }),
           reveal: true,
           revealRequest: {
             id: yield* crypto.randomUUIDv4().pipe(Effect.orDie),

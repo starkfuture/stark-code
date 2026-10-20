@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   ArchiveIcon,
+  ArrowLeftIcon,
   BlocksIcon,
   BotIcon,
   createLucideIcon,
@@ -37,19 +38,21 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-  SidebarInput,
 } from "../ui/sidebar";
-import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
+import { SidebarUpdatePill } from "../sidebar/SidebarUpdatePill";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
   isSettingsOverviewVisible,
   SETTINGS_SECTION_LABELS,
+  SETTINGS_NAV_GROUPS,
   type SettingsPath,
   type SettingsSearchItem,
 } from "./settingsSearch";
 import { useAvailableSettingsSearchItems } from "./useAvailableSettingsSearchItems";
 import { validateSettingsScopeSearch } from "./settingsScope";
+import { useNavigateToMainApp } from "../sidebar/mainAppLocation";
+import { isElectron } from "../../env";
 
 const SnapShotIcon = createLucideIcon("snap-shot", [
   [
@@ -94,21 +97,23 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/archived": ArchiveIcon,
 };
 
-const SETTINGS_NAV_ITEMS: ReadonlyArray<{
-  label: string;
-  to: SettingsPath;
-  icon: ComponentType<{ className?: string }>;
-}> = (Object.keys(SETTINGS_SECTION_LABELS) as SettingsPath[])
-  .filter((to) => to !== "/settings/diagnostics")
-  .map((to) => ({
-    to,
-    label: SETTINGS_SECTION_LABELS[to],
-    icon: SETTINGS_SECTION_ICONS[to],
-  }));
-
 function SettingsSectionIcon({ to }: { to: SettingsPath }) {
   const Icon = SETTINGS_SECTION_ICONS[to];
   return <Icon className="mt-0.5 size-3.5 shrink-0 text-sidebar-muted-foreground/60" />;
+}
+
+export function SettingsSidebarHeader() {
+  const navigateToMainApp = useNavigateToMainApp();
+  return (
+    <div
+      className={`stark-review-surface stark-settings-back-header${isElectron ? " drag-region" : ""}`}
+    >
+      <button type="button" onClick={navigateToMainApp}>
+        <ArrowLeftIcon aria-hidden />
+        Back to chat
+      </button>
+    </div>
+  );
 }
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
@@ -116,9 +121,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = useMemo(() => validateSettingsScopeSearch(currentSearch), [currentSearch]);
-  const navItems = SETTINGS_NAV_ITEMS.filter(
-    (item) => item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
-  );
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -249,16 +251,32 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     },
     [activeResultIndex, clearSearch, handleSearchResultClick, isSearching, results],
   );
+  const renderSectionLink = (to: SettingsPath) => {
+    const isGeneralDetailPage =
+      to === "/settings/general" && pathname === "/settings/open-source-licenses";
+    const isActive = isGeneralDetailPage || pathname === to || pathname.startsWith(`${to}/`);
+    return (
+      <SidebarMenuItem key={to}>
+        <button
+          type="button"
+          className="stark-settings-nav-link"
+          aria-current={isActive ? "page" : undefined}
+          onClick={() => handleSectionClick(to)}
+        >
+          {SETTINGS_SECTION_LABELS[to]}
+        </button>
+      </SidebarMenuItem>
+    );
+  };
   return (
-    <>
+    <div className="stark-review-surface stark-settings-navigation flex min-h-0 flex-1 flex-col">
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup>
           <div className="flex flex-col gap-2">
-            <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
+            <div className="stark-settings-search">
               <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
-              <SidebarInput
+              <input
                 ref={searchInputRef}
-                nativeInput
                 type="search"
                 value={query}
                 onChange={(event) => {
@@ -266,7 +284,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   setActiveResultIndex(0);
                 }}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Search"
+                placeholder="Search settings"
                 aria-label="Search settings"
                 role="combobox"
                 aria-autocomplete="list"
@@ -277,7 +295,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     ? `settings-search-result-${results[activeResultIndex].id}`
                     : undefined
                 }
-                className="min-w-0 flex-1"
+                className="stark-settings-search-input"
               />
               {isSearching ? (
                 <Button
@@ -338,29 +356,41 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 ))}
               </SidebarMenu>
             ) : (
-              <SidebarMenu>
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isGeneralDetailPage =
-                    item.to === "/settings/general" &&
-                    pathname === "/settings/open-source-licenses";
-                  const isActive =
-                    isGeneralDetailPage ||
-                    pathname === item.to ||
-                    pathname.startsWith(`${item.to}/`);
+              <div className="stark-settings-nav-groups">
+                {SETTINGS_NAV_GROUPS.map((group) => {
+                  const visiblePaths = group.paths.filter(
+                    (to) => to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
+                  );
+                  const extraPaths = visiblePaths.filter((to) =>
+                    [
+                      "/settings/projects",
+                      "/settings/archived",
+                      "/settings/integrations",
+                      "/settings/snap-shot",
+                    ].includes(to),
+                  );
                   return (
-                    <SidebarMenuItem key={item.to}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => handleSectionClick(item.to)}
-                      >
-                        <Icon />
-                        <span className="truncate">{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <div key={group.label}>
+                      <h2 className="stark-settings-nav-label">{group.label}</h2>
+                      <SidebarMenu>
+                        {visiblePaths
+                          .filter((to) => !extraPaths.includes(to))
+                          .map(renderSectionLink)}
+                      </SidebarMenu>
+                      {extraPaths.length > 0 ? (
+                        <details
+                          className="stark-settings-more"
+                          key={`${group.label}:${pathname}`}
+                          open={extraPaths.some((to) => pathname === to) || undefined}
+                        >
+                          <summary>More {group.label.toLowerCase()} settings</summary>
+                          <SidebarMenu>{extraPaths.map(renderSectionLink)}</SidebarMenu>
+                        </details>
+                      ) : null}
+                    </div>
                   );
                 })}
-              </SidebarMenu>
+              </div>
             )}
           </div>
         </SidebarGroup>
@@ -370,14 +400,26 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
           <StarkConnectSidebarSignIn />
         </Suspense>
         <div className="flex items-center gap-1">
-          <div className="min-w-0 flex-1">
-            <SidebarUtilityMenu />
-          </div>
+          <SidebarMenu className="min-w-0 flex-1 flex-row items-center">
+            <SidebarMenuItem className="min-w-0 flex-1">
+              <button
+                type="button"
+                className="stark-settings-nav-link"
+                onClick={() => {
+                  if (isMobile) setOpenMobile(false);
+                  void navigate({ to: "/settings/open-source-licenses" });
+                }}
+              >
+                About & licenses
+              </button>
+            </SidebarMenuItem>
+            <SidebarUpdatePill />
+          </SidebarMenu>
           <Suspense fallback={null}>
             <StarkConnectSidebarAvatar />
           </Suspense>
         </div>
       </SidebarFooter>
-    </>
+    </div>
   );
 }

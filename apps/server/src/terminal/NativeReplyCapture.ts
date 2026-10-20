@@ -9,7 +9,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as KeyedLock from "@starkfuture/shared/KeyedLock";
-import { NativeAgentReply, type TerminalNativeRepliesInput } from "@starkfuture/contracts";
+import {
+  NativeAgentReply,
+  NativeTurnEvidence,
+  type NativeAgentAttention,
+  type TerminalNativeRepliesInput,
+} from "@starkfuture/contracts";
 import {
   nativeReplyHookCommand,
   nativeReplyHookSource,
@@ -27,13 +32,25 @@ const StopDelivery = Schema.Struct({
   turn_id: Schema.NullOr(id),
   last_assistant_message: Schema.String.check(Schema.isNonEmpty()),
   truncated: Schema.optional(Schema.Boolean),
+  evidence: Schema.optional(NativeTurnEvidence),
   stop_hook_active: Schema.Boolean,
+  occurred_at: Schema.optional(Schema.Int),
   // A subagent completion cannot be attributed to its parent terminal.
   agent_id: Schema.optional(Schema.Null),
 });
-const decodeDelivery = Schema.decodeUnknownEffect(Schema.fromJsonString(StopDelivery), {
-  onExcessProperty: "error",
+const AttentionDelivery = Schema.Struct({
+  deliveryId: Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/)),
+  hook_event_name: Schema.Literals(["Notification", "UserPromptSubmit", "Stop"]),
+  session_id: id,
+  attention: Schema.Literals(["permission", "question", "clear"]),
+  occurred_at: Schema.Int,
 });
+const decodeDelivery = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Union([StopDelivery, AttentionDelivery])),
+  {
+    onExcessProperty: "error",
+  },
+);
 const StoredReplies = Schema.Struct({
   version: Schema.Literal(1),
   sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -62,13 +79,15 @@ interface Binding {
   readonly terminalId: string;
   readonly provider: "claude" | "codex";
   expiresAt: number | null;
+  attention?: NativeAgentAttention | undefined;
+  lastAttentionAt?: number | undefined;
 }
 
 export class NativeReplyCapture extends Context.Service<
   NativeReplyCapture,
   {
     readonly bind: (
-      input: Omit<Binding, "expiresAt">,
+      input: Pick<Binding, "threadId" | "terminalId" | "provider">,
     ) => Effect.Effect<NativeReplyLaunch, NativeReplyCaptureError>;
     readonly list: (
       input: TerminalNativeRepliesInput,
@@ -88,6 +107,10 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
   readonly onReply: (
     reply: NativeAgentReply,
     retained: ReadonlyArray<NativeAgentReply>,
+  ) => Effect.Effect<void>;
+  readonly onAttention?: (
+    target: Pick<Binding, "threadId" | "terminalId">,
+    attention: NativeAgentAttention | null,
   ) => Effect.Effect<void>;
 }) {
   const fs = yield* FileSystem.FileSystem;
@@ -133,6 +156,24 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
   const scriptPath = path.join(input.directory, "capture.cjs");
   let helperReady = false;
   let disposed = false;
+  const updateAttention = (
+    binding: Binding,
+    attention: NativeAgentAttention | null,
+    occurredAt: number,
+  ) =>
+    Effect.gen(function* () {
+      if (
+        binding.provider !== "claude" ||
+        occurredAt < (binding.lastAttentionAt ?? -Infinity) ||
+        (occurredAt === binding.lastAttentionAt &&
+          binding.attention === undefined &&
+          attention !== null)
+      )
+        return;
+      binding.lastAttentionAt = occurredAt;
+      binding.attention = attention ?? undefined;
+      yield* input.onAttention?.(binding, attention) ?? Effect.void;
+    });
   const accept = Effect.fn("NativeReplyCapture.accept")(function* (token: string, body: string) {
     const binding = bindings.get(token);
     if (
@@ -144,6 +185,41 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
     const parsed = yield* decodeDelivery(body).pipe(Effect.result);
     if (parsed._tag === "Failure") return 400;
     const delivery = parsed.success;
+    if ("attention" in delivery) {
+      if (binding.provider !== "claude") return 400;
+      if ((delivery.hook_event_name === "Notification") === (delivery.attention === "clear"))
+        return 400;
+      return yield* locks.withLock(
+        binding.threadId,
+        Effect.gen(function* () {
+          if (disposed || !bindings.has(token)) return 403;
+          // Retired hooks may still finish recording a reply, but cannot change
+          // attention owned by a replacement process for the same terminal.
+          if (binding.expiresAt !== null) return 200;
+          if (
+            delivery.hook_event_name === "Stop" &&
+            binding.attention &&
+            binding.attention.sessionId !== delivery.session_id
+          )
+            return 200;
+          yield* updateAttention(
+            binding,
+            delivery.attention === "clear"
+              ? null
+              : {
+                  threadId: binding.threadId,
+                  terminalId: binding.terminalId,
+                  provider: "claude",
+                  sessionId: delivery.session_id,
+                  kind: delivery.attention,
+                  requestedAt: DateTime.formatIso(yield* DateTime.now),
+                },
+            delivery.occurred_at,
+          );
+          return 200;
+        }),
+      );
+    }
     if (!delivery.last_assistant_message.trim()) return 400;
     const boundedReply = truncateNativeReplyText(delivery.last_assistant_message);
     if (binding.provider === "codex" && delivery.turn_id === null) return 400;
@@ -152,6 +228,8 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
         binding.threadId,
         Effect.gen(function* () {
           if (disposed || !bindings.has(token)) return 403;
+          // Reply capture runs asynchronously; it may arrive after the next
+          // prompt. Only synchronous lifecycle hooks change native attention.
           // Native /clear and /resume can change session_id without restarting the
           // PTY. Only the launch token chooses the Stark thread, never these fields.
           const state = yield* load(binding.threadId);
@@ -180,6 +258,7 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
             turnId: delivery.turn_id,
             text: boundedReply.text,
             ...(delivery.truncated || boundedReply.truncated ? { truncated: true } : {}),
+            ...(delivery.evidence === undefined ? {} : { evidence: delivery.evidence }),
             capturedAt: DateTime.formatIso(yield* DateTime.now),
             sequence: state.sequence + 1,
           };
@@ -273,7 +352,7 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
     ),
   );
   const bind = Effect.fn("NativeReplyCapture.bind")(function* (
-    binding: Omit<Binding, "expiresAt">,
+    binding: Pick<Binding, "threadId" | "terminalId" | "provider">,
   ) {
     yield* locks.withLock(
       "capture-helper",
@@ -296,6 +375,7 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
       env: {
         STARK_NATIVE_REPLY_ENDPOINT: `http://127.0.0.1:${port}/native-replies`,
         STARK_NATIVE_REPLY_TOKEN: token,
+        STARK_NATIVE_REPLY_PROVIDER: binding.provider,
       },
     };
   });
@@ -316,8 +396,10 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
       for (const binding of bindings.values())
-        if (matches(binding, filter) && binding.expiresAt === null)
+        if (matches(binding, filter) && binding.expiresAt === null) {
           binding.expiresAt = now + 60_000;
+          yield* updateAttention(binding, null, Math.max(now, binding.lastAttentionAt ?? now));
+        }
     });
   const remove = (filter: TerminalNativeRepliesInput) =>
     storage(
@@ -325,7 +407,11 @@ export const make = Effect.fn("NativeReplyCapture.make")(function* (input: {
         filter.threadId,
         Effect.gen(function* () {
           for (const [token, binding] of bindings)
-            if (matches(binding, filter)) bindings.delete(token);
+            if (matches(binding, filter)) {
+              bindings.delete(token);
+              const now = yield* Clock.currentTimeMillis;
+              yield* updateAttention(binding, null, Math.max(now, binding.lastAttentionAt ?? now));
+            }
           if (filter.terminalId === undefined)
             yield* fs.remove(yield* documentPath(filter.threadId), { force: true });
           else {

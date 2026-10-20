@@ -3,6 +3,17 @@
 Use a new thread for a separate task. Choose **New worktree** when its code changes
 need a separate branch and working directory.
 
+## Find chats waiting for you
+
+On web and desktop, **Needs you** collects pending approvals, questions and sign-in
+requests across your connected folders. Choose an item to open its chat and review
+the request there. The list disappears when nothing is waiting.
+
+Claude native shells also appear when Claude reports a permission prompt or
+question. Selecting one opens its existing terminal; answer inside Claude. This
+requires a shell launched after the feature was installed. Native Codex appears
+when its terminal reports that it needs input; selecting it opens that same terminal.
+
 ## Start a thread
 
 On web and desktop, a new thread keeps the current project and carries your model
@@ -69,6 +80,25 @@ chat to answer structured questions or use its full controls.
 running agents, pending approvals and active terminals, and lets you open chats
 or stop their structured agent runs. Stopping an agent does not stop its native
 terminal sessions.
+
+## Bounded reviews
+
+Open **Tools → Conversation tools → Review** and describe the exact files, change or
+question to inspect. **Review with Claude + Codex** starts two separate chats;
+**Check with Codex** starts one. Only profiles enabled for this project are offered.
+The chats use Plan with Manual permissions and receive your scope rather than the
+main conversation or terminal history. They share its folder; no worktree is created.
+
+One round starts per click. Another round becomes available after the review chats
+complete and return an answer. It receives a bounded excerpt from the prior review.
+The limit is three rounds per parent chat on this device, persisted across remounts
+and protected against simultaneous starts in other app windows. Unconfirmed starts
+remain counted and are never replayed automatically. If local storage or its lock is
+unavailable, starting is blocked. This caps rounds, not tokens or account spending.
+
+Open a review chat to answer a permission prompt or inspect the full transcript.
+Review findings do not trigger fixes or send a message to the main chat. Decide what
+to do with them yourself.
 
 ## Pin and reorder threads
 
@@ -215,6 +245,40 @@ Use **Settings → Keybindings** to find or customize shortcuts for searching fi
 and copying a thread reference. A copied reference uses the thread's pull request
 link when available, otherwise its thread ID. See [keybindings](./keybindings.md)
 for custom configuration.
+
+## Decisions and recorded results
+
+On web and desktop, **Needs you** appears in the sidebar when a chat is waiting
+for approval, an answer, or sign-in. It includes all connected folders. Select an
+entry to open the actual request; the list does not approve it for you. Native
+Claude shells started by this version can report permission and question prompts.
+Native Codex also appears when its terminal reports that it needs input. Some
+Codex versions distinguish approvals, questions and sign-in; older versions show
+“Input needed.” Open the entry to respond in the existing terminal. The entry
+clears when Codex reports that it has continued or the terminal exits. A version
+that does not report terminal status cannot appear here.
+
+After a structured chat turn ends, **Run evidence** lists recorded commands, exit
+codes and reported edits. A successful check is marked stale when files changed
+after it began. Missing timing or results stay unknown. This card does not inspect
+external edits or prove that every test ran.
+
+Native Claude and Codex replies also show **Run evidence** in Reader and below the
+terminal controls. Capture must be enabled in the CLI, including its hook approval
+when requested. These cards use recorded tool results and reported edits for the
+selected reply. Command arguments and outputs are hidden. Claude can report that a
+tool completed without reporting an exit code; the card keeps that distinction.
+Missing records, background results and incomplete captures stay unknown. Native
+evidence is a snapshot of that reply and does not cover every shell edit, child
+agent or later external change.
+
+**Tools → Conversation tools → Review** starts a separate Claude and Codex review,
+or a single **Check with Codex**, using the scope you enter. Each round requires
+a click, with a maximum of three rounds per saved review on this device. Reviews
+use the selected profiles' quotas. They start in Plan with Manual permissions;
+no automatic fix or message is sent to the main chat. Open each review chat to
+answer its requests or inspect its full output. Failed or uncertain starts count
+toward the cap so a retry cannot silently duplicate work.
 
 ## Inspect agent work
 

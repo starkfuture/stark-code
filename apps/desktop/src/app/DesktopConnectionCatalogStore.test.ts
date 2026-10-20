@@ -28,9 +28,16 @@ const encodeLegacySavedEnvironments = Schema.encodeEffect(
     Schema.Struct({ version: Schema.Literal(1), records: Schema.Array(Schema.Unknown) }),
   ),
 );
-function layerSafeStorageFor(available: boolean, failDecrypt: Ref.Ref<boolean> | null = null) {
+function layerSafeStorageFor(
+  available: boolean,
+  failDecrypt: Ref.Ref<boolean> | null = null,
+  availabilityChecks: Ref.Ref<number> | null = null,
+) {
   return Layer.succeed(ElectronSafeStorage.ElectronSafeStorage, {
-    isEncryptionAvailable: Effect.succeed(available),
+    isEncryptionAvailable: Effect.gen(function* () {
+      if (availabilityChecks) yield* Ref.update(availabilityChecks, (count) => count + 1);
+      return available;
+    }),
     encryptString: (value) => Effect.succeed(textEncoder.encode(`encrypted:${value}`)),
     decryptString: (value) => {
       return Effect.gen(function* () {
@@ -55,6 +62,7 @@ function layerFor(
   encryptionAvailable = true,
   failDecrypt: Ref.Ref<boolean> | null = null,
   fileSystemLayer: Layer.Layer<FileSystem.FileSystem> = NodeServices.layer,
+  availabilityChecks: Ref.Ref<number> | null = null,
 ) {
   const layerEnvironment = DesktopEnvironment.layer({
     dirname: "/repo/apps/desktop/src",
@@ -71,7 +79,11 @@ function layerFor(
       Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({ STARK_CODE_HOME: baseDir })),
     ),
   );
-  const layerSafeStorage = layerSafeStorageFor(encryptionAvailable, failDecrypt);
+  const layerSafeStorage = layerSafeStorageFor(
+    encryptionAvailable,
+    failDecrypt,
+    availabilityChecks,
+  );
   const layerDependencies = Layer.mergeAll(
     layerEnvironment,
     layerSafeStorage,
@@ -101,6 +113,56 @@ const withStore = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
 
 describe("DesktopConnectionCatalogStore", () => {
+  it.effect("avoids Keychain for empty profiles but still requires encryption for migration", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "stark-desktop-connection-catalog-test-",
+      });
+      const availabilityChecks = yield* Ref.make(0);
+      yield* Effect.gen(function* () {
+        const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const path = yield* Path.Path;
+
+        assert.deepStrictEqual(yield* store.get, Option.none());
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          environment.savedEnvironmentRegistryPath,
+          '{"version":1,"records":[]}',
+        );
+        assert.deepStrictEqual(yield* store.get, Option.none());
+        assert.equal(yield* Ref.get(availabilityChecks), 0);
+
+        const legacy = yield* encodeLegacySavedEnvironments({
+          version: 1,
+          records: [
+            {
+              environmentId: EnvironmentId.make("legacy-environment"),
+              label: "Saved connection",
+              httpBaseUrl: "https://example.com/",
+              wsBaseUrl: "wss://example.com/",
+              createdAt: "2026-06-01T00:00:00.000Z",
+              lastConnectedAt: null,
+            },
+          ],
+        });
+        yield* fileSystem.writeFileString(environment.savedEnvironmentRegistryPath, legacy);
+        assert.deepStrictEqual(yield* store.get, Option.none());
+        assert.equal(yield* Ref.get(availabilityChecks), 1);
+        assert.isFalse(
+          yield* fileSystem.exists(path.join(environment.stateDir, "connection-catalog.json")),
+        );
+        assert.equal(
+          yield* fileSystem.readFileString(environment.savedEnvironmentRegistryPath),
+          legacy,
+        );
+      }).pipe(
+        Effect.provide(layerFor(baseDir, false, null, NodeServices.layer, availabilityChecks)),
+      );
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
   it.effect("persists, reads, and clears an encrypted connection catalog", () =>
     withStore(
       Effect.gen(function* () {

@@ -308,6 +308,10 @@ it("opens named pages only from the trusted active frame and pins a tab to its p
   expect(onOpenPage).not.toHaveBeenCalled();
   await ready();
   expect(frameWindow.postMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ type: "host", presentation: "document" }),
+    "http://127.0.0.1:4317",
+  );
+  expect(frameWindow.postMessage).toHaveBeenCalledWith(
     { v: 1, source: "stark-host", type: "pause" },
     "http://127.0.0.1:4317",
   );

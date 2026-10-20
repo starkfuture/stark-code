@@ -6,9 +6,20 @@ import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as NodeEvents from "node:events";
+import { vi } from "vite-plus/test";
 
 import * as DesktopBrowserHost from "./DesktopBrowserHost.ts";
 
+const { agentSessions, authorizeAgentBrowserAccess, revokeAgentBrowserAccess } = vi.hoisted(() => ({
+  agentSessions: new WeakSet<object>(),
+  authorizeAgentBrowserAccess: vi.fn(() => Promise.resolve(true)),
+  revokeAgentBrowserAccess: vi.fn(),
+}));
+vi.mock("./BrowserSession.ts", () => ({
+  isAgentBrowserSession: (session: object) => agentSessions.has(session),
+  authorizeAgentBrowserAccess,
+  revokeAgentBrowserAccess,
+}));
 const decodeEvent = Schema.decodeUnknownSync(Schema.fromJsonString(DesktopBrowserEvent));
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeCdpReply = Schema.decodeUnknownSync(
@@ -17,7 +28,7 @@ const decodeCdpReply = Schema.decodeUnknownSync(
 const key = { threadId: "thread-1", tabId: "tab-1" };
 
 /** A tab's webContents and debugger, with the debugger's commands left pending until released. */
-const makeDebuggee = () => {
+const makeDebuggee = (agent = true) => {
   const emitter = new NodeEvents.EventEmitter();
   const pending: Array<() => void> = [];
   const debuggee = Object.assign(emitter, {
@@ -31,10 +42,13 @@ const makeDebuggee = () => {
       }),
   });
   const webContents = {
+    session: {},
+    isDestroyed: () => false,
     getURL: () => "http://localhost/",
     getTitle: () => "Page",
     getUserAgent: () => "Electron",
   };
+  if (agent) agentSessions.add(webContents.session);
   return {
     tab: {
       webContents: webContents as unknown as Electron.WebContents,
@@ -42,6 +56,7 @@ const makeDebuggee = () => {
     },
     emit: (method: string, params: unknown) => emitter.emit("message", {}, method, params, ""),
     release: () => pending.splice(0).forEach((resolve) => resolve()),
+    pending,
   };
 };
 
@@ -54,6 +69,65 @@ const takeEvents = (host: DesktopBrowserHost.DesktopBrowserHost["Service"], coun
   );
 
 describe("DesktopBrowserHost", () => {
+  it.effect(
+    "never relays a personal or legacy session even when the backend supplies a valid key",
+    () =>
+      Effect.gen(function* () {
+        const host = yield* DesktopBrowserHost.make;
+        const personal = makeDebuggee(false);
+        const agent = makeDebuggee();
+        host.attach(key, personal.tab);
+        const command = encodeJson({
+          type: "cdp",
+          ...key,
+          message: encodeJson({
+            id: 1,
+            method: "Runtime.evaluate",
+            params: { expression: "document.cookie" },
+            sessionId: "stark-preview-page",
+          }),
+        });
+        yield* host.handleCommandLine(command);
+        expect(personal.pending).toEqual([]);
+        host.attach(key, agent.tab);
+        expect(yield* takeEvents(host, 1)).toEqual([{ type: "attached", ...key }]);
+        // A malicious replacement cannot retain the earlier approved relay.
+        host.attach(key, personal.tab);
+        yield* host.handleCommandLine(command);
+        expect(personal.pending).toEqual([]);
+      }),
+  );
+
+  it.effect("refuses a command when the native site approval is denied", () =>
+    Effect.gen(function* () {
+      const host = yield* DesktopBrowserHost.make;
+      const debuggee = makeDebuggee();
+      host.attach(key, debuggee.tab);
+      const reader = yield* takeEvents(host, 2).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      authorizeAgentBrowserAccess.mockResolvedValueOnce(false);
+      yield* host.handleCommandLine(
+        encodeJson({
+          type: "cdp",
+          ...key,
+          message: encodeJson({
+            id: 1,
+            method: "Runtime.evaluate",
+            params: { expression: "void 0" },
+            sessionId: "stark-preview-page",
+          }),
+        }),
+      );
+      const [, reply] = yield* Fiber.join(reader);
+      expect(reply).toMatchObject({ type: "cdp" });
+      expect(JSON.parse((reply as { message: string }).message)).toMatchObject({
+        id: 1,
+        error: { message: "Site access needs your approval in Stark Code." },
+      });
+      expect(debuggee.pending).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("announces tabs already attached to a backend that starts later", () =>
     Effect.gen(function* () {
       const host = yield* DesktopBrowserHost.make;
@@ -83,6 +157,7 @@ describe("DesktopBrowserHost", () => {
       yield* command(1, "Page.captureScreenshot");
       yield* host.handleCommandLine(encodeJson({ type: "release", ...key }));
       yield* command(2, "DOM.enable");
+      yield* Effect.promise(() => new Promise((resolve) => setImmediate(resolve)));
       debuggee.release();
       yield* Effect.promise(() => new Promise((resolve) => setImmediate(resolve)));
       const [, reply] = yield* Fiber.join(reader);

@@ -106,11 +106,11 @@ vi.mock("../ui/dialog", () => ({
   DialogTitle: "div",
   DialogHeader: "div",
 }));
-vi.mock("../ui/wizard", () => ({
-  WizardPanel: "div",
-  WizardSteps: "div",
-  WizardPopup: "div",
-  WizardHeader: "div",
+vi.mock("./OnboardingLayout", () => ({
+  OnboardingPanel: "div",
+  OnboardingSteps: "div",
+  OnboardingPopup: "div",
+  OnboardingHeader: "div",
 }));
 vi.mock("../ui/scroll-area", () => ({ ScrollArea: "div" }));
 vi.mock("../ui/tooltip", () => ({ Tooltip: "div", TooltipTrigger: "span", TooltipPopup: "span" }));

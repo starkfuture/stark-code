@@ -97,6 +97,7 @@ import {
   type ProviderInstanceId,
   ThreadId,
   type NativeAgentReply,
+  type NativeAgentAttention,
   type TerminalAttachStreamEvent,
   type TerminalError,
   type TerminalEvent,
@@ -237,6 +238,7 @@ import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as ClaudeAccounts from "./provider/ClaudeAccounts.ts";
 import * as ResponseVisuals from "./textGeneration/ResponseVisuals.ts";
+import * as ChangesetCheck from "./git/ChangesetCheck.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
@@ -1214,6 +1216,7 @@ const TERMINAL_RPC_METHODS = [
   WS_METHODS.claudeAccountsCommand,
   WS_METHODS.responseVisualsFormat,
   WS_METHODS.terminalNativeReplies,
+  WS_METHODS.terminalNativeAttention,
   WS_METHODS.terminalOpen,
   WS_METHODS.terminalAttach,
   WS_METHODS.terminalWrite,
@@ -1249,6 +1252,15 @@ const layerTerminalWsRpc = TerminalWsRpcGroup.toLayer(
           Effect.acquireRelease(
             terminalManager.observeNativeReplies(input, (replies) =>
               Queue.offer(queue, replies).pipe(Effect.asVoid),
+            ),
+            (unsubscribe) => Effect.sync(unsubscribe),
+          ).pipe(Effect.catchCause((cause) => Queue.failCause(queue, cause))),
+        ),
+      [WS_METHODS.terminalNativeAttention]: () =>
+        Stream.callback<ReadonlyArray<NativeAgentAttention>, TerminalError>((queue) =>
+          Effect.acquireRelease(
+            terminalManager.observeNativeAttention((attention) =>
+              Queue.offer(queue, attention).pipe(Effect.asVoid),
             ),
             (unsubscribe) => Effect.sync(unsubscribe),
           ).pipe(Effect.catchCause((cause) => Queue.failCause(queue, cause))),
@@ -1381,6 +1393,7 @@ const layerWsRpc = (
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const changesetCheck = yield* ChangesetCheck.ChangesetCheck;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -2560,6 +2573,7 @@ const layerWsRpc = (
             traceFilePath: config.serverTracePath,
             maxFiles: config.traceMaxFiles,
           }),
+        [WS_METHODS.gitCheckChangesets]: (input) => changesetCheck.check(input),
         [WS_METHODS.serverGetProcessDiagnostics]: (_input) => processDiagnostics.read,
         [WS_METHODS.serverGetHostResources]: (_input) => hostResources.read,
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
@@ -3328,6 +3342,7 @@ export const layer = Layer.unwrap(
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(OtlpEndpointCheck.layer),
+              Layer.provide(ChangesetCheck.layer),
               Layer.provide(Layer.succeed(ClaudeAccounts.ClaudeAccounts, claudeAccounts)),
               Layer.provide(Layer.succeed(ResponseVisuals.ResponseVisuals, responseVisuals)),
               // Shared like the pull request service, so concurrent generations single-flight.

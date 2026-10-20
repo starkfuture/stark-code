@@ -7,6 +7,7 @@ import {
   squashAtomCommandFailure,
 } from "@starkfuture/client-runtime/state/runtime";
 import {
+  AGENT_BROWSER_PROFILE_ID,
   AuthOrchestrationOperateScope,
   DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
@@ -74,6 +75,7 @@ import { PreviewFileNotShown, PreviewUnreachable } from "./PreviewUnreachable";
 import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
 import { Badge } from "~/components/ui/badge";
+import { Button } from "~/components/ui/button";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { alternatePreviewRuntime, useRendersServerTabNatively } from "~/browser/previewRuntime";
 import { ServerBrowserSurface, type ServerBrowserHandle } from "~/browser/ServerBrowserSurface";
@@ -208,7 +210,9 @@ export function PreviewView({
   const nativeServerTab = useRendersServerTabNatively(threadRef.environmentId, snapshot);
   const isServerTab = snapshot?.runtime === "server" && !nativeServerTab;
   /** The server owns this tab's appearance, zoom, and size, whoever renders it. */
-  const serverOwnsRendering = snapshot?.runtime === "server";
+  const serverOwnsRendering =
+    snapshot?.runtime === "server" &&
+    (!nativeServerTab || snapshot.profileId === AGENT_BROWSER_PROFILE_ID);
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
   const [serverAspectRatioLocked, setServerAspectRatioLocked] = useState(false);
   const serverBodyRef = useRef<HTMLDivElement | null>(null);
@@ -1048,6 +1052,36 @@ export function PreviewView({
         }
       />
 
+      {snapshot?.agentSiteOrigin ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-3 border-b border-border p-3 text-sm"
+        >
+          <p className="min-w-0 flex-1">
+            Allow this agent to access <strong>{snapshot.agentSiteOrigin}</strong>? It can read this
+            site and act as you if you sign in to Agent browser.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void adjustServerTab({ allowAgentSite: snapshot.agentSiteOrigin! })}
+          >
+            Allow this site
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              void closePreview({
+                environmentId: threadRef.environmentId,
+                input: { threadId: threadRef.threadId, tabId: snapshot.tabId },
+              })
+            }
+          >
+            Close tab
+          </Button>
+        </div>
+      ) : null}
       <div ref={serverBodyRef} className="relative min-h-0 flex-1 overflow-hidden">
         {runtimeTabId && snapshot && isServerTab ? (
           <>

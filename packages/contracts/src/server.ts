@@ -431,6 +431,8 @@ export const ServerProvider = Schema.Struct({
   version: Schema.NullOr(TrimmedNonEmptyString),
   status: ServerProviderState,
   auth: ServerProviderAuth,
+  /** Explicit server proof that this Claude instance uses the machine's shared ~/.claude login. */
+  usesSharedClaudeLogin: Schema.optionalKey(Schema.Boolean),
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
   // Optional for back-compat: every legacy producer omits this field and

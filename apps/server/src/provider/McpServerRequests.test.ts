@@ -314,6 +314,9 @@ it.effect("keeps connection summaries while stripping URL secrets and credential
       "Timed out\nAuthorization: " + "long-secret".repeat(300),
       String.raw`{"Authorization":"Bearer prefix\"escaped-auth", "client_secret":"prefix\"escaped-client"}`,
       "Auth\u001b[31morization\u001b[0m: Bearer terminal-secret\nrefresh_\u200btoken=hidden-secret",
+      "postgres://user:database-secret@db.example/private redis://user:redis-secret@cache.example mongodb+srv://user:mongo-secret@cluster.example/private",
+      "apiKey=camel-secret secret=bare-secret AWS_SECRET_ACCESS_KEY=aws-secret oauthToken=camel-token",
+      "Key refused: sk-live-visible-key ghp_visiblegithubkey github_pat_visiblepat",
     ];
     const { service } = setup({
       servers: errors.map((error, index) => ({
@@ -363,6 +366,16 @@ it.effect("keeps connection summaries while stripping URL secrets and credential
       "escaped-client",
       "terminal-secret",
       "hidden-secret",
+      "database-secret",
+      "redis-secret",
+      "mongo-secret",
+      "camel-secret",
+      "bare-secret",
+      "aws-secret",
+      "camel-token",
+      "sk-live-visible-key",
+      "ghp_visiblegithubkey",
+      "github_pat_visiblepat",
     ])
       assert.isFalse(visible.includes(secret), `Leaked ${secret}`);
     assert.isTrue(rows.every((row) => (row.error?.length ?? 0) <= 1000));

@@ -116,7 +116,7 @@ describe("searchSettings", () => {
       "publish-agent-activity",
     );
     expect(searchSettings("battery saver")[0]?.id).toBe("background-activity");
-    expect(searchSettings("binary path")[0]?.id).toBe("providers");
+    expect(searchSettings("binary path")[0]?.id).toBe("provider-runtime");
     expect(searchSettings("Antigravity")[0]?.id).toBe("providers");
     expect(searchSettings("Google sign in")[0]?.id).toBe("providers");
     expect(searchSettings("authorized clients")[0]?.id).toBe("connections-environment");

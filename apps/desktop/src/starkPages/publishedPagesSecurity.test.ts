@@ -37,6 +37,66 @@ const document: PublishedPagesCredentials = {
 };
 
 describe("Published Pages macOS Keychain", () => {
+  it("reuses successful load access for readiness without caching credential values", async () => {
+    let value: string | undefined;
+    const getPassword = vi.fn(async () => value);
+    const store = keychainPagesStore({
+      directory: "/profile/readiness",
+      createEntry: async () => ({
+        getPassword,
+        setPassword: async (next) => {
+          value = next;
+        },
+        deleteCredential: async () => {
+          value = undefined;
+          return true;
+        },
+      }),
+    });
+    expect(await store.load()).toBeUndefined();
+    await store.ready();
+    await store.ready();
+    expect(getPassword).toHaveBeenCalledOnce();
+    value = JSON.stringify(document);
+    expect(await store.load()).toEqual(document);
+    await store.ready();
+    expect(getPassword).toHaveBeenCalledTimes(2);
+    await store.clear();
+    expect(value).toBeUndefined();
+  });
+
+  it("invalidates readiness after native write or delete denial and permits explicit retry", async () => {
+    let writeDenied = false;
+    let deleteDenied = false;
+    const getPassword = vi.fn(async () => JSON.stringify(document));
+    const store = keychainPagesStore({
+      directory: "/profile/readiness-denial",
+      createEntry: async () => ({
+        getPassword,
+        setPassword: async () => {
+          if (writeDenied) throw new Error("private Keychain write error");
+        },
+        deleteCredential: async () => {
+          if (deleteDenied) throw new Error("private Keychain delete error");
+          return true;
+        },
+      }),
+    });
+    await store.ready();
+    writeDenied = true;
+    await expect(store.save(document)).rejects.toThrow("securely save");
+    await store.ready();
+    expect(getPassword).toHaveBeenCalledTimes(2);
+    deleteDenied = true;
+    await expect(store.clear()).rejects.toThrow("securely save");
+    await store.ready();
+    expect(getPassword).toHaveBeenCalledTimes(4);
+    writeDenied = false;
+    deleteDenied = false;
+    await store.save(document);
+    await store.clear();
+  });
+
   it.each([null, undefined])(
     "handles missing value %s and loads, saves and clears only a profile-specific app entry",
     async (missing) => {

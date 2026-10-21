@@ -70,9 +70,11 @@ export function keychainPagesStore(input: {
     .digest("hex");
   let entry: ReturnType<typeof input.createEntry> | undefined;
   const getEntry = () => (entry ??= input.createEntry("Stark Code Published Pages", account));
+  let accessChecked = false;
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = queue.then(operation, operation).catch(() => {
+      accessChecked = false;
       throw new PublishedPagesFailure("storage");
     });
     queue = result.catch(() => undefined);
@@ -81,11 +83,15 @@ export function keychainPagesStore(input: {
   return {
     ready: () =>
       serial(async () => {
+        // A successful load already checked access. Writes still go through Keychain.
+        if (accessChecked) return;
         await (await getEntry()).getPassword();
+        accessChecked = true;
       }),
     load: () =>
       serial(async () => {
         const text = await (await getEntry()).getPassword();
+        accessChecked = true;
         return text == null ? undefined : decodeCredentials(text);
       }),
     save: (value) =>

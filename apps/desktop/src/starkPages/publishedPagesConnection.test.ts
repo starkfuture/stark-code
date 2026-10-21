@@ -10,7 +10,11 @@ import type { PublishedPagesCredentials, PublishedPagesStore } from "./published
 function fixture(
   options: {
     storageFails?: boolean;
+    loadFails?: boolean;
+    clearFails?: boolean;
     saveTokensFails?: boolean;
+    saveTokensAfterWriteFails?: boolean;
+    openBrowserFails?: boolean;
     refreshFails?: boolean;
     registrationStatus?: number;
     autoCallback?: boolean;
@@ -26,6 +30,7 @@ function fixture(
   let failedRequest: { method: string; unavailable: boolean } | undefined;
   let toolGate: { started(): void; wait: Promise<void> } | undefined;
   const calls: string[] = [];
+  const storageCalls: string[] = [];
   const invoked: string[] = [];
   let notifyBrowser: () => void = () => undefined;
   const browserOpened = new Promise<void>((resolve) => {
@@ -33,14 +38,24 @@ function fixture(
   });
   const store: PublishedPagesStore = {
     ready: async () => {
+      storageCalls.push("ready");
       if (options.storageFails) throw new PublishedPagesFailure("storage");
     },
-    load: async () => stored,
+    load: async () => {
+      storageCalls.push("load");
+      if (options.loadFails) throw new PublishedPagesFailure("storage");
+      return stored;
+    },
     save: async (value) => {
+      storageCalls.push("save");
       if (value.tokens && options.saveTokensFails) throw new PublishedPagesFailure("storage");
       stored = structuredClone(value);
+      if (value.tokens && options.saveTokensAfterWriteFails)
+        throw new PublishedPagesFailure("storage");
     },
     clear: async () => {
+      storageCalls.push("clear");
+      if (options.clearFails) throw new PublishedPagesFailure("storage");
       stored = undefined;
     },
   };
@@ -49,6 +64,7 @@ function fixture(
     openExternal: async (raw) => {
       authorization = new URL(raw);
       notifyBrowser();
+      if (options.openBrowserFails) return false;
       if (options.autoCallback !== false) {
         const callback = new URL(authorization.searchParams.get("redirect_uri")!);
         callback.searchParams.set("state", authorization.searchParams.get("state")!);
@@ -223,6 +239,7 @@ function fixture(
   return {
     connection,
     calls,
+    storageCalls,
     invoked,
     browserOpened,
     store,
@@ -403,7 +420,103 @@ describe("Published Pages connection", () => {
     await test.connection.settled();
     expect((await test.connection.status()).message).toContain("securely save");
     expect(test.calls).toEqual([]);
+    expect(test.storageCalls).toEqual(["load", "ready"]);
     await test.connection.dispose();
+  });
+
+  it("does not retry a denied initial read until another explicit Connect action", async () => {
+    const test = fixture({ loadFails: true, storageFails: true });
+    try {
+      await test.connection.connect();
+      await test.connection.settled();
+      expect((await test.connection.status()).message).toContain("securely save");
+      expect(test.storageCalls).toEqual(["load"]);
+      await test.connection.connect();
+      await test.connection.settled();
+      expect(test.storageCalls).toEqual(["load", "ready"]);
+      expect(test.calls).toEqual([]);
+    } finally {
+      await test.connection.dispose();
+    }
+  });
+
+  it("does not repeat a denied initial clear or start OAuth afterward", async () => {
+    const test = fixture({ clearFails: true });
+    try {
+      await test.connection.connect();
+      await test.connection.settled();
+      expect((await test.connection.status()).message).toContain("securely save");
+      expect(test.storageCalls).toEqual(["load", "ready", "clear"]);
+      expect(test.calls).toEqual([]);
+    } finally {
+      await test.connection.dispose();
+    }
+  });
+
+  it.each(["load", "ready"])(
+    "recovers from a denied initial %s only after another explicit Connect action",
+    async (stage) => {
+      const options = { loadFails: stage === "load", storageFails: stage === "ready" };
+      const test = fixture(options);
+      try {
+        await test.connection.connect();
+        await test.connection.settled();
+        expect((await test.connection.status()).state).toBe("error");
+        expect(test.calls).toEqual([]);
+
+        options.loadFails = false;
+        options.storageFails = false;
+        // Observing status after permission becomes available never starts OAuth.
+        expect((await test.connection.status()).state).toBe("error");
+        expect(test.calls).toEqual([]);
+        await test.connection.connect();
+        await test.connection.settled();
+        expect(await test.connection.status()).toEqual({ state: "connected", message: null });
+        expect(test.stored?.tokens?.refresh_token).toBe("test-refresh-token");
+        expect((await test.connection.listTools()).map((tool) => tool.name)).toEqual([
+          "pages_list_projects",
+          "pages_read_file",
+        ]);
+      } finally {
+        await test.connection.dispose();
+      }
+    },
+  );
+
+  it("cleans up saved registration when browser sign-in cannot start", async () => {
+    const test = fixture({ openBrowserFails: true });
+    try {
+      await test.connection.connect();
+      await test.connection.settled();
+      expect((await test.connection.status()).state).toBe("error");
+      expect(test.storageCalls).toEqual(["load", "ready", "clear", "save", "clear"]);
+      expect(test.stored).toBeUndefined();
+      await expect(test.connection.listTools()).rejects.toThrow("Connect to Stark Pages");
+    } finally {
+      await test.connection.dispose();
+    }
+  });
+
+  it("fails closed when explicit disconnect cannot delete stored credentials", async () => {
+    const options = { clearFails: false };
+    const test = fixture(options);
+    try {
+      await test.connection.connect();
+      await test.connection.settled();
+      expect(test.stored?.tokens).toBeDefined();
+      options.clearFails = true;
+      test.storageCalls.length = 0;
+      await test.connection.disconnect();
+      expect((await test.connection.status()).message).toContain("securely save");
+      expect(test.storageCalls).toEqual(["clear"]);
+      await expect(test.connection.listTools()).rejects.toThrow("Connect to Stark Pages");
+      options.clearFails = false;
+      await test.connection.disconnect();
+      expect((await test.connection.status()).state).toBe("signed-out");
+      expect(test.stored).toBeUndefined();
+    } finally {
+      await test.connection.dispose();
+    }
   });
 
   it.each([400, 401, 403, 500])(
@@ -434,8 +547,25 @@ describe("Published Pages connection", () => {
     expect((await test.connection.status()).state).toBe("error");
     expect((await test.connection.status()).message).toContain("securely save");
     expect(test.stored).toBeUndefined();
+    expect(test.storageCalls).toEqual(["load", "ready", "clear", "save", "save", "clear"]);
     await expect(test.connection.listTools()).rejects.toThrow();
     await test.connection.dispose();
+  });
+
+  it("removes partially persisted tokens when their save rejects", async () => {
+    const test = fixture({ saveTokensAfterWriteFails: true });
+    try {
+      await test.connection.connect();
+      await test.connection.settled();
+      expect((await test.connection.status()).state).toBe("error");
+      expect((await test.connection.status()).message).toContain("securely save");
+      expect(test.stored).toBeUndefined();
+      expect(test.storageCalls).toEqual(["load", "ready", "clear", "save", "save", "clear"]);
+      await expect(test.connection.listTools()).rejects.toThrow("Connect to Stark Pages");
+      expect(test.invoked).toEqual([]);
+    } finally {
+      await test.connection.dispose();
+    }
   });
 
   it("fails closed on a rejected refresh without reopening the browser or leaking server error text", async () => {

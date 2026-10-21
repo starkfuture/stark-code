@@ -150,6 +150,20 @@ DMGs default to the host architecture. Use `--arch` to choose another target and
 to retain packaging files for inspection. Run `vp run dist:desktop:artifact --help` for other
 options.
 
+For the unsigned macOS output of a local build, sign the final `.app` with the same installed
+certificate after each build so Keychain can recognize updates. Do not use this command on
+a distribution app; it refuses apps with hardened runtime enabled. Keep the bundle ID
+unchanged and choose the certificate's full SHA-1 from `security find-identity -v -p codesigning`:
+
+```sh
+node scripts/sign-local-macos.ts --app "/path/to/Stark Code (Alpha).app" --identity <40-character-SHA-1>
+```
+
+This local command preserves the unsigned build's runtime policy, uses Electron's
+per-file entitlements, and does not notarize or change Keychain permissions. It is
+separate from distribution signing; macOS may require an initial approval for the
+signing key and the newly signed app. Make no bundle changes after signing.
+
 ### Linux AppImage prerequisites
 
 Build on Linux because the browser-secret helper links against the host's libsecret. Install

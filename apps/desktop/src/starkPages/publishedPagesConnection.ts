@@ -82,13 +82,14 @@ export function createPublishedPagesConnection(input: {
 
   const provider = (
     expected: number,
-    options?: { redirectUrl: string; state: string },
+    options?: { redirectUrl: string; state: string; beforeSave(): void },
   ): OAuthClientProvider => {
     let verifier: string | undefined;
     let discovery: Awaited<ReturnType<NonNullable<OAuthClientProvider["discoveryState"]>>>;
     const persist = async () => {
       current(expected);
       if (!credentials) throw new PublishedPagesFailure("auth");
+      options?.beforeSave();
       await input.store.save(credentials);
       current(expected);
     };
@@ -317,7 +318,10 @@ export function createPublishedPagesConnection(input: {
       return status;
     },
     connect: async () => {
+      const needsInitialLoad = !loaded;
       await load();
+      // A denied initial read is this attempt; only another explicit click may retry it.
+      if (needsInitialLoad && status.state === "error") return status;
       if (status.state === "connecting" || status.state === "connected") return status;
       cancel();
       const expected = generation;
@@ -326,6 +330,7 @@ export function createPublishedPagesConnection(input: {
       status = { state: "connecting", message: "Opening Stark Pages sign-in…" };
       pending = (async () => {
         let callback: Awaited<ReturnType<typeof pagesOAuthCallback>> | undefined;
+        let cleanupNeeded = false;
         try {
           await input.store.ready();
           current(expected);
@@ -335,7 +340,14 @@ export function createPublishedPagesConnection(input: {
           const state = NodeCrypto.randomBytes(32).toString("hex");
           callback = await pagesOAuthCallback(state, controller.signal);
           current(expected);
-          const oauth = provider(expected, { redirectUrl: callback.url, state });
+          const oauth = provider(expected, {
+            redirectUrl: callback.url,
+            state,
+            // A failed write may have persisted data, so clean up even when save rejects.
+            beforeSave: () => {
+              cleanupNeeded = true;
+            },
+          });
           const options = {
             serverUrl: PAGES_MCP_URL,
             scope: PAGES_SCOPE,
@@ -357,9 +369,10 @@ export function createPublishedPagesConnection(input: {
           if (expected === generation) {
             credentials = undefined;
             status = { state: "error", message: failure(error).message };
-            await input.store.clear().catch(() => {
-              status = { state: "error", message: new PublishedPagesFailure("storage").message };
-            });
+            if (cleanupNeeded)
+              await input.store.clear().catch(() => {
+                status = { state: "error", message: new PublishedPagesFailure("storage").message };
+              });
           }
         } finally {
           callback?.close();

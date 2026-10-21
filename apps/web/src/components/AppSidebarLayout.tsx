@@ -81,7 +81,6 @@ function readInitialThreadSidebarWidth(): number {
 }
 
 function SidebarControl() {
-  const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const settingsPageOpen = useLocation({
     select: (location) => /^\/settings(\/|$)/.test(location.pathname),
@@ -142,12 +141,14 @@ function SidebarControl() {
     // The right-side layout controls carry mr-px (border compensation inside
     // the panel), so the trigger mirrors it: both clusters sit one extra pixel
     // off their edge and the titlebar reads symmetric.
-    // The sheet owns its trigger until its closing transition unmounts it.
+    // An open chat sidebar owns its trigger at the header's trailing edge.
+    // The fixed control reopens it beside the native window controls. A sheet
+    // keeps ownership until its closing transition unmounts it.
     <div
       className={cn(
         "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center",
         isMobile && mobileSheetMounted && "hidden",
-        isSidebarVisible && !settingsPageOpen && !isMacosDesktop && "hidden",
+        isSidebarVisible && !settingsPageOpen && "hidden",
       )}
       data-sidebar-control=""
     >

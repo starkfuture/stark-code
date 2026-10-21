@@ -12,8 +12,13 @@ type Episode = {
   nextAt: number;
   healthySince?: number;
   state: Recovery["state"];
+  vpnState?: Recovery["vpnState"];
 };
-export type NetworkState = "vpn-off" | "network-unavailable" | "unknown";
+export type NetworkState =
+  | "vpn-off"
+  | "network-unavailable"
+  | "unknown"
+  | { readonly state: "network-unavailable"; readonly vpnState: "forticlient-disconnected" };
 
 /** Session-owned maintenance. The same permit reserves turn starts and direct MCP calls.
  * Status reads never invoke a tool. Only an explicitly targeted reconnect may run here. */
@@ -32,6 +37,7 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
   let maintenancePending = false;
   let maintenanceSettled: Deferred.Deferred<void> | undefined;
   let activeRequests = 0;
+  let nextIdleObservationAt = 0;
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
       closed = true;
@@ -49,10 +55,17 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
         ? server
         : {
             ...server,
-            recovery: { state: episode.state, attempts: episode.attempts },
+            recovery: {
+              state: episode.state,
+              attempts: episode.attempts,
+              ...(episode.vpnState ? { vpnState: episode.vpnState } : {}),
+            },
           };
     });
   const read = Effect.gen(function* () {
+    // Visible clients already read status frequently. Background sessions still
+    // need an occasional observation after a native transport changes state.
+    nextIdleObservationAt = (yield* Clock.currentTimeMillis) + 60_000;
     const rows = yield* input.api.list().pipe(Effect.timeout("3 seconds"));
     const now = yield* Clock.currentTimeMillis;
     snapshot = rows;
@@ -100,7 +113,10 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
         continue;
       }
       if (episode.nextAt > now) continue;
-      const network = yield* input.inspectNetwork(server);
+      const observation = yield* input.inspectNetwork(server);
+      const network = typeof observation === "string" ? observation : observation.state;
+      if (typeof observation === "string") delete episode.vpnState;
+      else episode.vpnState = observation.vpnState;
       if (network === "vpn-off") {
         episode.state = network;
         episode.nextAt = now + 30_000;
@@ -166,12 +182,18 @@ export const make = Effect.fn("McpRecovery.make")(function* (input: {
       Effect.asVoid,
     );
   });
-  // Retry failures only. Healthy sessions incur no periodic status RPCs here.
+  // This reads native connection metadata, never a model/tool or reload. Normal
+  // UI reads postpone the idle check; failed connections keep the faster retry
+  // observation cadence while actual reconnects retain their own backoff.
   yield* Effect.gen(function* () {
     while (true) {
       yield* Effect.sleep("15 seconds");
       if (closed) return;
-      if (snapshot.some((row) => row.status === "failed" && !row.locked)) yield* trigger;
+      const hasFailure = snapshot.some((row) => row.status === "failed" && !row.locked);
+      const observeIdle =
+        (yield* Clock.currentTimeMillis) >= nextIdleObservationAt &&
+        snapshot.some((row) => row.status === "connected" || row.status === "connecting");
+      if (hasFailure || observeIdle) yield* trigger;
     }
   }).pipe(Effect.forkScoped);
   const idle = <A, E>(operation: Effect.Effect<A, E>) =>

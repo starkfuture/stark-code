@@ -47,6 +47,13 @@ const makeRuntime = Effect.gen(function* () {
   let hangStart = false;
   let mutation = { code: 0, stdout: JSON.stringify({ schemaVersion: 1, switched: true }) };
   let payload: unknown = { schemaVersion: 1, activeAccountNumber: 1, accounts: savedAccounts };
+  let activeAccount:
+    | Parameters<ClaudeAccounts.ClaudeAccountsRuntime["Service"]["activeAccount"]>[0][number]
+    | null = {
+    number: 1,
+    email: "owner@example.test",
+    organizationUuid: "org-one",
+  };
   const runtime = ClaudeAccounts.ClaudeAccountsRuntime.of({
     run: (args) =>
       Effect.gen(function* () {
@@ -67,6 +74,7 @@ const makeRuntime = Effect.gen(function* () {
         return { exited: Deferred.await(exit) };
       }),
     credentialsChanged: Ref.update(changes, (value) => value + 1),
+    activeAccount: () => Effect.sync(() => activeAccount),
   });
   return {
     calls,
@@ -77,6 +85,9 @@ const makeRuntime = Effect.gen(function* () {
     emit: (event: unknown) => onLine?.(JSON.stringify(event)) ?? Effect.die("Auto was not started"),
     setPayload: (next: unknown) => {
       payload = next;
+    },
+    setActiveAccount: (next: typeof activeAccount) => {
+      activeAccount = next;
     },
     unavailable: () => {
       unavailable = true;
@@ -149,6 +160,57 @@ it.effect("switches the validated organization without forcing or replaying a se
         ["list", "--json"],
       ]);
       expect(yield* Ref.get(harness.changes)).toBe(1);
+    }),
+  ),
+);
+
+it.effect(
+  "uses the current credential identity when same-email organization metadata stays stale",
+  () =>
+    withHarness((harness) =>
+      Effect.gen(function* () {
+        const service = yield* ClaudeAccounts.ClaudeAccounts;
+        expect((yield* service.snapshot).activeAccountNumber).toBe(1);
+        // cswap keeps reporting slot 1 from .claude.json, while the login is slot 2.
+        harness.setActiveAccount({
+          number: 2,
+          email: identity.expectedEmail,
+          organizationUuid: "org-two",
+        });
+        const switched = yield* service.command({ action: "switch", ...identity });
+        expect(switched.activeAccountNumber).toBe(2);
+        expect(switched.accounts.map((account) => account.active)).toEqual([false, true]);
+        expect(switched.accounts[0]?.windows).toEqual([]);
+        expect(switched.accounts[0]?.usageStatus).toBe("unavailable");
+        expect(switched.accounts[1]?.windows[0]?.percent).toBe(10);
+        const refreshed = yield* service.snapshot;
+        expect(refreshed.activeAccountNumber).toBe(2);
+        expect(refreshed.accounts.map((account) => account.active)).toEqual([false, true]);
+        harness.setActiveAccount({
+          number: 1,
+          email: identity.expectedEmail,
+          organizationUuid: "org-one",
+        });
+        expect((yield* service.snapshot).activeAccountNumber).toBe(1);
+      }),
+    ),
+);
+
+it.effect("does not guess an active organization from email, old flags, or a reused slot", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      const service = yield* ClaudeAccounts.ClaudeAccounts;
+      for (const identity of [
+        null,
+        { number: 2, email: "owner@example.test", organizationUuid: "different-org" },
+        { number: 2, email: "different@example.test", organizationUuid: "org-two" },
+      ]) {
+        harness.setActiveAccount(identity);
+        const snapshot = yield* service.snapshot;
+        expect(snapshot.activeAccountNumber).toBeNull();
+        expect(snapshot.accounts.every((account) => !account.active)).toBe(true);
+        expect(snapshot.notice).toContain("could not be confirmed");
+      }
     }),
   ),
 );

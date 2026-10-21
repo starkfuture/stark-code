@@ -25,15 +25,17 @@ const setup = Effect.fn(function* (
     scope?: "server" | "all";
     reconnect?: (name: string) => Effect.Effect<void, ProviderAdapter.ProviderAdapterV2Error>;
     network?: McpRecovery.NetworkState;
+    inspectNetwork?: () => Effect.Effect<McpRecovery.NetworkState>;
     reload?: ProviderAdapter.ProviderAdapterV2McpServers["reload"];
   } = {},
 ) {
   const rows = yield* Ref.make(initial);
   const busy = yield* Ref.make(false);
+  const observations = yield* Ref.make(0);
   const calls: string[] = [];
   const api: ProviderAdapter.ProviderAdapterV2McpServers = {
     reconnectScope: options.scope ?? "server",
-    list: () => Ref.get(rows),
+    list: () => Ref.update(observations, (count) => count + 1).pipe(Effect.andThen(Ref.get(rows))),
     reconnect: (name) =>
       Effect.sync(() => {
         calls.push(name);
@@ -48,10 +50,55 @@ const setup = Effect.fn(function* (
     api,
     driver: ProviderDriverKind.make("claudeAgent"),
     isBusy: Ref.get(busy),
-    inspectNetwork: () => Effect.succeed(options.network ?? "unknown"),
+    inspectNetwork: options.inspectNetwork ?? (() => Effect.succeed(options.network ?? "unknown")),
   });
-  return { recovery, rows, busy, calls };
+  return { recovery, rows, busy, calls, observations };
 });
+
+it.effect("discovers a later native disconnect without a visible client or another turn", () =>
+  Effect.gen(function* () {
+    const reconnected = yield* Deferred.make<void>();
+    const s = yield* setup([row("healthy", "connected"), row("later-drop", "connected")], {
+      reconnect: () => Deferred.succeed(reconnected, undefined).pipe(Effect.asVoid),
+    });
+    yield* s.recovery.check;
+    yield* Ref.set(s.rows, [row("healthy", "connected"), row("later-drop", "failed")]);
+    yield* TestClock.adjust("59 seconds");
+    assert.deepEqual(s.calls, []);
+    yield* TestClock.adjust("1 second");
+    yield* Deferred.await(reconnected);
+    assert.deepEqual(s.calls, ["later-drop"]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "normal status reads postpone background checks and healthy servers never reconnect",
+  () =>
+    Effect.gen(function* () {
+      const s = yield* setup([row("healthy", "connected")]);
+      yield* s.recovery.check;
+      yield* TestClock.adjust("45 seconds");
+      yield* s.recovery.check;
+      yield* TestClock.adjust("45 seconds");
+      assert.equal(yield* Ref.get(s.observations), 2);
+      yield* TestClock.adjust("15 seconds");
+      assert.equal(yield* Ref.get(s.observations), 3);
+      assert.deepEqual(s.calls, []);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("idle observation finds expired authentication without reconnecting it", () =>
+  Effect.gen(function* () {
+    const s = yield* setup([row("login", "connected")]);
+    yield* s.recovery.check;
+    yield* Ref.set(s.rows, [row("login", "needs-auth")]);
+    yield* TestClock.adjust("60 seconds");
+    assert.equal(yield* Ref.get(s.observations), 2);
+    assert.deepEqual(s.calls, []);
+    yield* TestClock.adjust("120 seconds");
+    assert.equal(yield* Ref.get(s.observations), 2);
+  }).pipe(Effect.scoped),
+);
 
 it.effect("checks all statuses but only reconnects failed, enabled, unlocked servers", () =>
   Effect.gen(function* () {
@@ -121,6 +168,34 @@ it.effect.each(["vpn-off", "network-unavailable"] as const)(
       const result = yield* s.recovery.check;
       assert.equal(result[0]?.recovery?.state, state);
       assert.deepEqual(s.calls, state === "vpn-off" ? [] : ["broken"]);
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a disconnected FortiClient is advisory and does not suppress unverified-route recovery",
+  () =>
+    Effect.gen(function* () {
+      const network = yield* Ref.make<McpRecovery.NetworkState>({
+        state: "network-unavailable",
+        vpnState: "forticlient-disconnected",
+      });
+      const s = yield* setup([row("public-service", "failed")], {
+        inspectNetwork: () => Ref.get(network),
+      });
+      const first = yield* s.recovery.check;
+      assert.deepEqual(s.calls, ["public-service"]);
+      assert.deepEqual(first[0]?.recovery, {
+        state: "network-unavailable",
+        attempts: 1,
+        vpnState: "forticlient-disconnected",
+      });
+      yield* Ref.set(network, "unknown");
+      yield* TestClock.adjust("30 seconds");
+      const next = yield* s.recovery.check;
+      assert.deepEqual(s.calls, ["public-service", "public-service"]);
+      assert.isUndefined(next[0]?.recovery?.vpnState);
+      yield* Ref.set(s.rows, [row("public-service", "connected")]);
+      assert.isUndefined((yield* s.recovery.check)[0]?.recovery);
     }).pipe(Effect.scoped),
 );
 

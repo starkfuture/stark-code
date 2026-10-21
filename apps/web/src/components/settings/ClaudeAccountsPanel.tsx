@@ -74,6 +74,11 @@ function ClaudeAccountsPanelContent({
   const [error, setError] = useState<string | null>(null);
   const [thresholdDraft, setThresholdDraft] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<ClaudeAccountsCommand | null>(null);
+  const [confirmationClosing, setConfirmationClosing] = useState(false);
+  function requestConfirmation(command: ClaudeAccountsCommand) {
+    setConfirmation(command);
+    setConfirmationClosing(false);
+  }
   const inFlight = useRef(false);
   const mounted = useRef(false);
 
@@ -119,7 +124,7 @@ function ClaudeAccountsPanelContent({
     inFlight.current = true;
     setBusy(true);
     setError(null);
-    setConfirmation(null);
+    setConfirmationClosing(true);
     try {
       const result = await sendCommand({ environmentId, input: command });
       if (!mounted.current) return;
@@ -267,7 +272,7 @@ function ClaudeAccountsPanelContent({
                             variant="outline"
                             disabled={controlsDisabled || account.active}
                             onClick={() =>
-                              setConfirmation({
+                              requestConfirmation({
                                 action: "switch",
                                 accountNumber: account.number,
                                 expectedEmail: account.email,
@@ -358,7 +363,7 @@ function ClaudeAccountsPanelContent({
                       }
                       onCheckedChange={(enabled) => {
                         if (enabled)
-                          setConfirmation({ action: "automatic", enabled: true, threshold });
+                          requestConfirmation({ action: "automatic", enabled: true, threshold });
                         else
                           void mutate({
                             action: "automatic",
@@ -389,7 +394,7 @@ function ClaudeAccountsPanelContent({
                         variant="outline"
                         disabled={controlsDisabled || !validThreshold}
                         onClick={() =>
-                          setConfirmation({ action: "automatic", enabled: true, threshold })
+                          requestConfirmation({ action: "automatic", enabled: true, threshold })
                         }
                       >
                         Save threshold
@@ -426,8 +431,12 @@ function ClaudeAccountsPanelContent({
         ) : null}
       </div>
       <AlertDialog
-        open={confirmation !== null && canManage}
+        open={confirmation !== null && !confirmationClosing && canManage}
         onOpenChange={(open) => {
+          if (!open) setConfirmationClosing(true);
+        }}
+        onOpenChangeComplete={(open) => {
+          // Keep the confirmed action's copy throughout the exit animation.
           if (!open) setConfirmation(null);
         }}
       >
@@ -454,7 +463,7 @@ function ClaudeAccountsPanelContent({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <Button variant="outline" onClick={() => setConfirmation(null)}>
+            <Button variant="outline" onClick={() => setConfirmationClosing(true)}>
               Cancel
             </Button>
             <Button

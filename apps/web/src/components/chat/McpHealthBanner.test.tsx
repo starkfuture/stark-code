@@ -151,3 +151,31 @@ it("shares status polling between banner and open panel and drops stale sign-in 
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(state.query.refresh).toHaveBeenCalledTimes(2);
 });
+
+it("shows FortiClient disconnection as advisory while failed-server retries continue", async () => {
+  state.query.data = {
+    live: true,
+    reconnectScope: "server",
+    servers: [
+      server("Public docs", "failed", {
+        state: "network-unavailable",
+        attempts: 2,
+        vpnState: "forticlient-disconnected",
+      }),
+    ],
+  };
+  await render();
+  expect(container.textContent).toContain("FortiClient is disconnected.");
+  expect(container.textContent).toContain(
+    "This server is unreachable; automatic retries continue.",
+  );
+  expect(container.textContent).not.toContain("Connect it, then check again");
+  state.query.data = {
+    live: true,
+    reconnectScope: "server",
+    servers: [server("Public docs", "failed", { state: "waiting", attempts: 2 })],
+  };
+  await render();
+  expect(container.textContent).not.toContain("FortiClient");
+  expect(container.textContent).toContain("Waiting for a safe moment to retry.");
+});

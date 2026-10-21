@@ -2226,9 +2226,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("stages the resource monitor as an external executable resource", () => {
     assert.deepStrictEqual(DESKTOP_EXTRA_RESOURCES, [
       {
-        from: "apps/desktop/prod-resources/stark-workbench",
-        to: "stark-workbench",
-        filter: ["**/*", "**/.*", "**/.*/**/*"],
+        from: "apps/desktop/prod-resources",
+        to: ".",
+        filter: ["stark-workbench/**/*", "stark-workbench/**/.*", "stark-workbench/**/.*/**/*"],
       },
       {
         from: "apps/desktop/prod-resources/cursor-sdk",

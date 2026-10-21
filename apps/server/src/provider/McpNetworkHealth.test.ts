@@ -168,122 +168,131 @@ it.effect("degrades missing, failing and stalled host diagnostics without blocki
   }).pipe(Effect.scoped),
 );
 
-const fortiService = (state: string, enabled = true) =>
-  `${enabled ? "*" : " "} (${state})   057334A4-B134-4AB8-A6DF-080B36241AE7 VPN (com.fortinet.forticlient.macos.vpn) "VPN" [VPN:com.fortinet.forticlient.macos.vpn]`;
-
-it.effect(
-  "identifies enabled disconnected FortiClient on the provider host after a network failure",
-  () =>
-    Effect.gen(function* () {
-      const commands: unknown[] = [];
-      const inspect = makeNetworkInspector(
-        (command) =>
-          Effect.sync(() => {
-            commands.push(command);
-            return fortiService("Disconnected");
-          }),
-        "darwin",
-      );
-      assert.equal(
-        yield* inspect(
-          server({ endpointHost: "internal.starkfuture.com", error: "getaddrinfo ENOTFOUND" }),
-        ),
-        "vpn-off",
-      );
-      assert.deepEqual(commands, [
-        {
-          executable: "/usr/sbin/scutil",
-          args: ["--nc", "list"],
-          timeout: 1500,
-          maxBuffer: 65_536,
-          killSignal: "SIGKILL",
-          shell: false,
-          windowsHide: true,
-        },
-      ]);
-      for (const error of ["invalid_grant", "HTTP 401", "certificate expired", "unknown failure"])
-        assert.equal(yield* inspect(server({ error })), "unknown");
-      assert.equal(commands.length, 1);
-    }),
+it.effect("uses the FortiClient GUI status, never a conflicting scutil service state", () =>
+  Effect.gen(function* () {
+    const commands: unknown[] = [];
+    const inspect = makeNetworkInspector(
+      (command) =>
+        Effect.sync(() => {
+          commands.push(command);
+          return "* (Disconnected) VPN (com.fortinet.forticlient.macos.vpn)";
+        }),
+      "darwin",
+      Effect.succeed("running"),
+    );
+    assert.equal(
+      yield* inspect(server({ endpointHost: "internal.example", error: "ENOTFOUND" })),
+      "unknown",
+    );
+    assert.deepEqual(commands, []);
+  }),
 );
 
 it.effect(
-  "does not infer FortiClient disconnected from other, disabled or transitional VPN services",
+  "reports confirmed FortiClient disconnection as advisory without blocking public or private hosts",
   () =>
     Effect.gen(function* () {
-      for (const output of [
-        fortiService("Disconnected", false),
-        fortiService("Disconnected").replaceAll(
-          "com.fortinet.forticlient.macos.vpn",
-          "com.other.vpn",
-        ),
-        fortiService("Connecting"),
-        `${fortiService("Disconnected")}\n${fortiService("Connecting")}`,
-        fortiService("Reasserting"),
-        "No configured VPN services",
-        null,
-      ]) {
-        const inspect = makeNetworkInspector(() => Effect.succeed(output), "darwin");
-        assert.equal(
-          yield* inspect(server({ endpointHost: "internal.example", error: "ETIMEDOUT" })),
-          "network-unavailable",
+      for (const state of ["disconnected", "running", "unknown"] as const) {
+        const inspect = makeNetworkInspector(
+          () => Effect.succeed(null),
+          "darwin",
+          Effect.succeed(state),
         );
+        for (const endpointHost of [
+          "public.example",
+          "internal.example",
+          "10.0.0.1",
+          "192.168.1.2",
+        ]) {
+          assert.deepEqual(
+            yield* inspect(server({ endpointHost, error: "ETIMEDOUT" })),
+            state === "disconnected"
+              ? { state: "network-unavailable", vpnState: "forticlient-disconnected" }
+              : state === "running"
+                ? "unknown"
+                : "network-unavailable",
+          );
+        }
       }
+      for (const status of [Effect.die("unavailable"), Effect.never]) {
+        const inspect = makeNetworkInspector(() => Effect.succeed(null), "darwin", status);
+        const fiber = yield* inspect(
+          server({ endpointHost: "internal.example", error: "ETIMEDOUT" }),
+        ).pipe(Effect.forkScoped);
+        yield* TestClock.adjust("2 seconds");
+        assert.equal(yield* Fiber.join(fiber), "network-unavailable");
+      }
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "shares and refreshes FortiClient state so recovery can proceed after the VPN returns",
+  () =>
+    Effect.gen(function* () {
+      let calls = 0;
       const inspect = makeNetworkInspector(
-        () => Effect.succeed(`${fortiService("Disconnected")}\n${fortiService("Connected")}`),
+        () => Effect.succeed(null),
         "darwin",
+        Effect.sync(() => (++calls === 1 ? "disconnected" : "running")),
       );
-      assert.equal(
-        yield* inspect(server({ endpointHost: "internal.example", error: "ETIMEDOUT" })),
-        "unknown",
+      const failed = server({ endpointHost: "internal.example", error: "ECONNRESET" });
+      assert.deepEqual(
+        yield* Effect.all([inspect(failed), inspect(failed)], { concurrency: "unbounded" }),
+        [
+          { state: "network-unavailable", vpnState: "forticlient-disconnected" },
+          { state: "network-unavailable", vpnState: "forticlient-disconnected" },
+        ],
       );
+      assert.equal(calls, 1);
+      yield* TestClock.adjust("15 seconds");
+      assert.equal(yield* inspect(failed), "unknown");
+      assert.equal(calls, 2);
     }),
 );
 
-it.effect("refreshes FortiClient state so reconnect can proceed after the VPN returns", () =>
-  Effect.gen(function* () {
-    let calls = 0;
-    const inspect = makeNetworkInspector(
-      () =>
-        Effect.sync(() => {
-          calls++;
-          return fortiService(calls === 1 ? "Disconnected" : "Connected");
-        }),
-      "darwin",
-    );
-    const failed = server({ endpointHost: "internal.example", error: "ECONNRESET" });
-    assert.equal(yield* inspect(failed), "vpn-off");
-    assert.equal(yield* inspect(failed), "vpn-off");
-    assert.equal(calls, 1);
-    yield* TestClock.adjust("15 seconds");
-    assert.equal(yield* inspect(failed), "unknown");
-    assert.equal(calls, 2);
-  }),
-);
-
-it.effect("does not classify local or stdio subprocess errors as VPN failures", () =>
-  Effect.gen(function* () {
-    let calls = 0;
-    const inspect = makeNetworkInspector(
-      () =>
-        Effect.sync(() => {
-          calls++;
-          return fortiService("Disconnected");
-        }),
-      "darwin",
-    );
-    for (const endpointHost of [
-      undefined,
-      "localhost",
-      "127.0.0.1",
-      "[::1]",
-      "host/path",
-      "user@host",
-    ]) {
-      assert.equal(yield* inspect(server({ endpointHost, error: "ECONNREFUSED" })), "unknown");
-    }
-    assert.equal(calls, 0);
-  }),
+it.effect(
+  "does not probe FortiClient for local, authentication, healthy, or non-macOS failures",
+  () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      for (const platform of ["darwin", "linux", "win32"] as const) {
+        const inspect = makeNetworkInspector(
+          () => Effect.succeed(null),
+          platform,
+          Effect.sync(() => {
+            calls++;
+            return "disconnected";
+          }),
+        );
+        for (const endpointHost of [
+          undefined,
+          "localhost",
+          "127.0.0.1",
+          "[::1]",
+          "host/path",
+          "user@host",
+        ])
+          assert.equal(yield* inspect(server({ endpointHost, error: "ECONNREFUSED" })), "unknown");
+        for (const error of ["HTTP 401", "invalid_grant", "certificate expired", "unknown failure"])
+          assert.equal(
+            yield* inspect(server({ endpointHost: "internal.example", error })),
+            "unknown",
+          );
+        for (const status of ["connected", "needs-auth", "connecting", "disabled"] as const)
+          assert.equal(
+            yield* inspect(
+              server({ endpointHost: "internal.example", status, error: "ENOTFOUND" }),
+            ),
+            "unknown",
+          );
+        if (platform !== "darwin")
+          assert.equal(
+            yield* inspect(server({ endpointHost: "internal.example", error: "ENOTFOUND" })),
+            "network-unavailable",
+          );
+      }
+      assert.equal(calls, 0);
+    }),
 );
 
 it.effect("checks the actual Tailscale route before an unrelated disconnected FortiClient", () =>
@@ -293,11 +302,13 @@ it.effect("checks the actual Tailscale route before an unrelated disconnected Fo
       (command) =>
         Effect.sync(() => {
           calls.push(command.executable);
-          return command.executable === "tailscale"
-            ? '{"BackendState":"Running"}'
-            : fortiService("Disconnected");
+          return '{"BackendState":"Running"}';
         }),
       "darwin",
+      Effect.sync(() => {
+        calls.push("forticlient");
+        return "disconnected";
+      }),
     );
     assert.equal(
       yield* inspect(server({ endpointHost: "docs.tail.ts.net", error: "ENETUNREACH" })),

@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { catalogText, makeClaudeSessionCatalog } from "./ClaudeSessionCatalog.ts";
+import { planClaudeSkillDispatch } from "./ClaudeSkillDispatch.ts";
 const decodeRecordedJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 
 it.layer(NodeServices.layer)("ClaudeSessionCatalog", (it) => {
@@ -20,6 +21,78 @@ it.layer(NodeServices.layer)("ClaudeSessionCatalog", (it) => {
     });
     return { fs, path, root, home, cwd, write };
   });
+
+  it.effect(
+    "resolves bundled skill chips on the first send without running a query or injecting instructions",
+    () =>
+      Effect.gen(function* () {
+        const { path, root, home, cwd, write } = yield* setup;
+        const bundle = path.join(root, "bundle");
+        for (const [file, contents] of [
+          [".claude-plugin/plugin.json", '{"name":"stark-workbench"}'],
+          ["packages/spage/bin/spage.js", "throw new Error('Do not execute')"],
+          ["hooks/hooks.json", "{}"],
+          ["node_modules/markdown-it/package.json", "{}"],
+          [".stark-bundle.json", "{}"],
+          [
+            "skills/stark-pages/SKILL.md",
+            "---\ndescription: Write pages\n---\nPRIVATE INSTRUCTIONS",
+          ],
+          ["skills/private/SKILL.md", "---\nuser-invocable: false\n---\n"],
+          ["skills/disabled/SKILL.md", "---\ndescription: Disabled\n---\n"],
+        ])
+          yield* write(path.join(bundle, file!), contents!);
+        yield* write(
+          path.join(home, "settings.json"),
+          '{"skillOverrides":{"stark-workbench:disabled":"off"}}',
+        );
+        let supportedCalls = 0;
+        const catalog = yield* makeClaudeSessionCatalog({
+          config: { homePath: home },
+          cwd,
+          environment: { STARK_WORKBENCH_ROOT: bundle },
+          supportedCommands: () =>
+            Effect.sync(() => {
+              supportedCalls++;
+              return [];
+            }),
+        });
+        const names = yield* catalog.userInvocableSkillNames;
+        assert.deepEqual([...names], ["stark-workbench:stark-pages"]);
+        assert.deepEqual(
+          planClaudeSkillDispatch("Please $stark-workbench:stark-pages explain this", names),
+          {
+            skillName: "stark-workbench:stark-pages",
+            leadingText: "Please",
+            commandText: "/stark-workbench:stark-pages explain this",
+          },
+        );
+        assert.equal(supportedCalls, 0);
+        assert.isFalse((yield* catalog.read).live);
+        // Once the CLI has initialized, it alone decides which names are active.
+        yield* catalog.onMessage({
+          type: "system",
+          subtype: "init",
+          slash_commands: [],
+          skills: [],
+          plugins: [],
+        });
+        assert.deepEqual([...(yield* catalog.userInvocableSkillNames)], []);
+        assert.isUndefined(
+          planClaudeSkillDispatch(
+            "$stark-workbench:stark-pages",
+            yield* catalog.userInvocableSkillNames,
+          ),
+        );
+
+        const invalid = yield* makeClaudeSessionCatalog({
+          config: { homePath: home },
+          environment: { STARK_WORKBENCH_ROOT: home },
+          supportedCommands: () => Effect.die("No query should start"),
+        });
+        assert.deepEqual([...(yield* invalid.userInvocableSkillNames)], []);
+      }).pipe(Effect.scoped),
+  );
 
   it.effect(
     "classifies live built-ins, bundled/personal/project skills, plugins, and both MCP forms",

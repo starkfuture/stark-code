@@ -2,6 +2,7 @@ import {
   type ClaudeSettings,
   type ModelCapabilities,
   type ServerProvider,
+  type ServerProviderSkill,
   type ServerProviderSlashCommand,
 } from "@starkfuture/contracts";
 import * as DateTime from "effect/DateTime";
@@ -15,6 +16,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { isClaudeHaikuModel } from "@starkfuture/shared/claudeModelPolicy";
 import { createModelCapabilities } from "@starkfuture/shared/model";
 import { resolveSpawnCommand } from "@starkfuture/shared/shell";
+import { resolveStarkWorkbenchRoot } from "@starkfuture/shared/starkWorkbench";
 import {
   query as claudeQuery,
   type Options as ClaudeQueryOptions,
@@ -37,6 +39,10 @@ import {
 import { resolveClaudeSdkExecutablePath } from "./Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "./Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills } from "./Drivers/ClaudeSkills.ts";
+import {
+  CLAUDE_PLUGIN_PERMISSION_WARNING,
+  discoverClaudeBundledSkills,
+} from "./Drivers/ClaudeSessionCatalog.ts";
 import type { ProviderWorkspaceSnapshot } from "@starkfuture/provider-core/server/driver";
 import { makeUnavailableUsageLimits } from "@starkfuture/provider-core/server/usageLimits";
 import {
@@ -234,6 +240,7 @@ export function buildClaudeCapabilitiesProbeQueryOptions(input: {
   readonly abortController: AbortController;
   readonly environment: NodeJS.ProcessEnv;
   readonly cwd: string | undefined;
+  readonly workbenchRoot?: string;
 }): ClaudeQueryOptions {
   return {
     persistSession: false,
@@ -244,7 +251,11 @@ export function buildClaudeCapabilitiesProbeQueryOptions(input: {
     // but must not run the user's hooks: it fires every few minutes, so
     // SessionStart hooks would run on every health check.
     settings: { disableAllHooks: true },
+    tools: [],
     allowedTools: [],
+    ...(input.workbenchRoot
+      ? { plugins: [{ type: "local" as const, path: input.workbenchRoot }] }
+      : {}),
     // Ignore MCP definitions from every filesystem setting source above. The
     // SDK combines this empty explicit map with --strict-mcp-config.
     mcpServers: {},
@@ -289,6 +300,7 @@ type ClaudeCapabilitiesProbe = {
    */
   readonly apiProvider: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly bundledSkills?: ReadonlyArray<ServerProviderSkill>;
   /**
    * Subscription windows from the SDK's `get_usage` control request, or
    * `undefined` when the request itself failed. Absent windows on an
@@ -395,6 +407,9 @@ const probeClaudeCapabilities = (
       claudeSettings.binaryPath,
       claudeEnvironment,
     );
+    const workbenchRoot = yield* resolveStarkWorkbenchRoot(claudeEnvironment).pipe(
+      Effect.orElseSucceed(() => undefined),
+    );
     return yield* Effect.tryPromise(async () => {
       const q = claudeQuery({
         // Never yield — we only need initialization data, not a conversation.
@@ -408,15 +423,25 @@ const probeClaudeCapabilities = (
           abortController: abort,
           environment: claudeEnvironment,
           cwd,
+          ...(workbenchRoot ? { workbenchRoot } : {}),
         }),
       });
       const init = await q.initializationResult();
-      return { q, init };
+      return { q, init, workbenchRoot, claudeEnvironment };
     });
   }).pipe(
     Effect.timeout(CAPABILITIES_PROBE_TIMEOUT_MS),
-    Effect.flatMap(({ q, init }) =>
+    Effect.flatMap(({ q, init, workbenchRoot, claudeEnvironment }) =>
       Effect.gen(function* () {
+        const slashCommands = parseClaudeInitializationCommands(init.commands);
+        const commandNames = new Set(slashCommands.map((command) => command.name));
+        // Disk metadata enriches only names actually accepted by the CLI's
+        // initialization. Trust/disable decisions never come from the scan.
+        const bundledSkills = workbenchRoot
+          ? (yield* discoverClaudeBundledSkills(claudeSettings, cwd, claudeEnvironment)).filter(
+              (skill) => commandNames.has(skill.name),
+            )
+          : undefined;
         // Usage has its own deadline so a slow optional request cannot discard initialization.
         // Only the rate limits are read, so skip the local transcript scan that fills
         // `behaviors`: with a few GB of transcripts it outlasts the deadline.
@@ -447,7 +472,17 @@ const probeClaudeCapabilities = (
           tokenSource: account?.tokenSource,
           apiKeySource: account?.apiKeySource,
           apiProvider: account?.apiProvider,
-          slashCommands: parseClaudeInitializationCommands(init.commands),
+          slashCommands: slashCommands.map((command): ServerProviderSlashCommand =>
+            workbenchRoot && command.name.startsWith("stark-workbench:")
+              ? {
+                  ...command,
+                  source: "plugin",
+                  sourceName: "stark-workbench",
+                  permissionWarning: CLAUDE_PLUGIN_PERMISSION_WARNING,
+                }
+              : command,
+          ),
+          ...(bundledSkills ? { bundledSkills } : {}),
           ...(usage ? { usage } : {}),
         } satisfies ClaudeCapabilitiesProbe;
       }),
@@ -490,7 +525,7 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
   const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false);
   return {
     ...machineSnapshot,
-    skills,
+    skills: [...skills, ...(capabilities?.bundledSkills ?? [])],
     slashCommands: dedupeSlashCommands([
       COMPACT_SLASH_COMMAND,
       ...(capabilities?.slashCommands ?? []),
@@ -618,7 +653,10 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const capabilities = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
     : undefined;
-  const skills = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment);
+  const skills = [
+    ...(yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment)),
+    ...(capabilities?.bundledSkills ?? []),
+  ];
   const slashCommands = [COMPACT_SLASH_COMMAND, ...(capabilities?.slashCommands ?? [])];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 

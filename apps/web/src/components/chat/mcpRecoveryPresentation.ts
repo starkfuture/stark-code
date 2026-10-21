@@ -1,6 +1,6 @@
 import type { McpServerStatusEntry } from "@starkfuture/contracts";
 
-export function mcpRecoveryMessage(server: McpServerStatusEntry): string | null {
+function recoveryStateMessage(server: McpServerStatusEntry): string | null {
   if (server.status === "needs-auth") return "Sign in required.";
   if (server.status !== "failed" && server.status !== "connecting") return null;
   switch (server.recovery?.state) {
@@ -19,4 +19,21 @@ export function mcpRecoveryMessage(server: McpServerStatusEntry): string | null 
     default:
       return server.status === "failed" ? "Connection unavailable." : null;
   }
+}
+
+export function mcpRecoveryMessage(server: McpServerStatusEntry): string | null {
+  const message = recoveryStateMessage(server);
+  if (
+    message &&
+    server.status === "failed" &&
+    server.recovery?.vpnState === "forticlient-disconnected"
+  ) {
+    // Report the observed VPN state without claiming this server depends on it.
+    return `FortiClient is disconnected. ${
+      server.recovery.state === "network-unavailable"
+        ? "This server is unreachable; automatic retries continue."
+        : message
+    }`;
+  }
+  return message;
 }

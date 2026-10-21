@@ -312,6 +312,25 @@ const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(funct
   return path.join(home, ".claude");
 });
 
+/** Apply the same user/project/managed overrides to app-bundled plugin metadata. */
+export const applyClaudeSkillOverrides = Effect.fn("applyClaudeSkillOverrides")(function* (
+  skills: ReadonlyArray<ServerProviderSkill>,
+  config: Pick<ClaudeSettings, "homePath">,
+  cwd?: string,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  const configDirPath = yield* resolveClaudeConfigDirPath(config, environment, cwd);
+  const overrides = yield* readSkillOverrides(configDirPath, cwd, environment);
+  return skills.map((skill) => {
+    const override = overrides.get(skill.name);
+    return {
+      ...skill,
+      enabled: skill.enabled && (override?.enabled ?? true),
+      ...(override?.userInvocationOnly ? { userInvocationOnly: true } : {}),
+    };
+  });
+});
+
 /**
  * Enumerate Claude Code skills from the user config dir and the workspace
  * `.claude/skills`. Discovery is best-effort: unreadable roots and malformed

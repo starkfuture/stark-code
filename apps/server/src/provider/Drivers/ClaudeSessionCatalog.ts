@@ -11,7 +11,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as NodeUtil from "node:util";
-import { discoverClaudeSkills, parseSkillFrontmatter } from "./ClaudeSkills.ts";
+import { resolveStarkWorkbenchRoot } from "@starkfuture/shared/starkWorkbench";
+import {
+  applyClaudeSkillOverrides,
+  discoverClaudeSkills,
+  parseSkillFrontmatter,
+} from "./ClaudeSkills.ts";
 
 type Command = {
   readonly name: string;
@@ -21,7 +26,7 @@ type Command = {
 };
 type Plugin = { name: string; path: string };
 const MAX_FILE_BYTES = 256 * 1024;
-const PERMISSION_WARNING =
+export const CLAUDE_PLUGIN_PERMISSION_WARNING =
   "This skill or plugin can pre-approve tools. Some tool calls may run without a Stark approval prompt.";
 const decodeManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const DENIED = new Set(["clear", "resume", "rewind", "exit", "login", "logout"]);
@@ -95,7 +100,7 @@ const parseMcpServers = (value: unknown): ServerProviderSessionCatalog["mcpServe
       : [];
   });
 
-/** Reads descriptions only under roots the live CLI reported as loaded. */
+/** Reads bounded descriptions under live CLI roots or the validated app-owned bundle. */
 const scanPluginSkills = Effect.fn("ClaudeSessionCatalog.scanPluginSkills")(function* (
   plugins: readonly Plugin[],
 ) {
@@ -169,6 +174,22 @@ const scanPluginSkills = Effect.fn("ClaudeSessionCatalog.scanPluginSkills")(func
     }
   }
   return result;
+});
+
+/** Metadata only; discovering a name does not authorize loading or executing its skill. */
+export const discoverClaudeBundledSkills = Effect.fn("discoverClaudeBundledSkills")(function* (
+  config: Pick<ClaudeSettings, "homePath">,
+  cwd?: string,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  const root = yield* resolveStarkWorkbenchRoot(environment).pipe(
+    Effect.orElseSucceed(() => undefined),
+  );
+  if (!root) return [];
+  const skills = yield* scanPluginSkills([{ name: "stark-workbench", path: root }]);
+  return (yield* applyClaudeSkillOverrides(skills, config, cwd, environment))
+    .filter((skill) => skill.enabled && skill.userInvocable !== false)
+    .map((skill) => ({ ...skill, permissionWarning: CLAUDE_PLUGIN_PERMISSION_WARNING }));
 });
 
 /** A per-query memory cache. Reading it never starts a query or calls the SDK. */
@@ -279,10 +300,13 @@ export const makeClaudeSessionCatalog = Effect.fn("makeClaudeSessionCatalog")(fu
         command.source === "plugin" ||
         skillNames.has(command.name.toLowerCase()) ||
         byName.has(command.name.toLowerCase())
-          ? { ...command, permissionWarning: PERMISSION_WARNING }
+          ? { ...command, permissionWarning: CLAUDE_PLUGIN_PERMISSION_WARNING }
           : command,
       ),
-      skills: skills.map((skill) => ({ ...skill, permissionWarning: PERMISSION_WARNING })),
+      skills: skills.map((skill) => ({
+        ...skill,
+        permissionWarning: CLAUDE_PLUGIN_PERMISSION_WARNING,
+      })),
       mcpServers,
       live,
     };
@@ -347,8 +371,15 @@ export const makeClaudeSessionCatalog = Effect.fn("makeClaudeSessionCatalog")(fu
         yield* refreshDescriptions;
       }),
     read: Effect.sync(catalog),
-    userInvocableSkillNames: Effect.sync(
-      (): ReadonlySet<string> => new Set(catalog().skills.map((skill) => skill.name)),
-    ),
+    userInvocableSkillNames: Effect.gen(function* () {
+      // The first message is assembled before SDK init. Recognize shipped skill
+      // chips so they become native slash commands, never injected skill text.
+      // Claude still decides whether that command is trusted/enabled; after init,
+      // only names reported by the live CLI can be dispatched.
+      const skills = live
+        ? catalog().skills
+        : yield* discoverClaudeBundledSkills(input.config, input.cwd, input.environment);
+      return new Set(skills.map((skill) => skill.name));
+    }).pipe(Effect.provideContext(services)),
   };
 });

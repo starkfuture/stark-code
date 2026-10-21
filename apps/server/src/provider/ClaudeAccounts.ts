@@ -7,8 +7,9 @@ import {
 import { isCommandMissingCause } from "@starkfuture/provider-core/server/snapshotProbe";
 import { collectUint8StreamText } from "@starkfuture/provider-core/server/collectStreamText";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
-import { resolveSpawnCommand } from "@starkfuture/shared/shell";
+import { resolveCommandPath, resolveSpawnCommand } from "@starkfuture/shared/shell";
 import * as Context from "effect/Context";
+import * as Cache from "effect/Cache";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -24,6 +25,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as ServerConfig from "../config.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
+import {
+  CLAUDE_ACCOUNT_IDENTITY_SCRIPT,
+  claudeSwapPythonInterpreter,
+} from "./ClaudeAccountIdentity.ts";
 
 const NOTICE =
   "Switches this machine's shared Claude login. Other Claude terminals and editors may follow. Isolated Claude profiles are unchanged. Running sessions may need restarting; no messages are replayed. Use only one automatic switcher on this machine.";
@@ -54,6 +59,18 @@ const eventRecord = (line: string) => {
     return undefined;
   }
 };
+type AccountIdentity = Pick<ClaudeAccount, "number" | "email" | "organizationUuid">;
+const Identities = Schema.fromJsonString(
+  Schema.Array(
+    Schema.Struct({
+      number: Schema.Number,
+      email: Schema.String,
+      organizationUuid: Schema.NullOr(Schema.String),
+    }),
+  ),
+);
+const encodeIdentities = Schema.encodeSync(Identities);
+const decodeIdentities = Schema.decodeUnknownSync(Identities);
 
 function parseAccounts(
   output: string,
@@ -128,6 +145,9 @@ export class ClaudeAccountsRuntime extends Context.Service<
       Scope.Scope
     >;
     readonly credentialsChanged: Effect.Effect<void>;
+    readonly activeAccount: (
+      accounts: readonly AccountIdentity[],
+    ) => Effect.Effect<AccountIdentity | null>;
   }
 >()("stark-code/provider/ClaudeAccounts/ClaudeAccountsRuntime") {}
 
@@ -195,6 +215,33 @@ const make = Effect.gen(function* () {
             catch: () => new ClaudeAccountsError({ reason: "failed" }),
           }),
     ),
+    Effect.flatMap((data) =>
+      runtime.activeAccount(data.accounts).pipe(
+        Effect.map((identity) => {
+          const matches = identity
+            ? data.accounts.filter(
+                (account) =>
+                  account.number === identity.number &&
+                  account.email === identity.email &&
+                  account.organizationUuid === identity.organizationUuid,
+              )
+            : [];
+          const activeNumber = matches.length === 1 ? matches[0]!.number : null;
+          return {
+            activeAccountNumber: activeNumber,
+            accounts: data.accounts.map((account) => ({
+              ...account,
+              active: account.number === activeNumber,
+              // cswap may have measured the live credential under a stale config's
+              // organization. Never display that quota as another organization's.
+              ...(account.active && account.number !== activeNumber
+                ? { windows: [], usageStatus: "unavailable" as const, usageAgeSeconds: null }
+                : {}),
+            })),
+          };
+        }),
+      ),
+    ),
   );
   const snapshot: ClaudeAccounts["Service"]["snapshot"] = readAccounts.pipe(
     Effect.flatMap((data) =>
@@ -205,7 +252,15 @@ const make = Effect.gen(function* () {
           available: true,
           ...data,
           automatic: current,
-          notice: warning ? `${warning} ${NOTICE}` : NOTICE,
+          notice: [
+            warning,
+            data.accounts.length > 0 && data.activeAccountNumber === null
+              ? "The active organization could not be confirmed from Claude's current login."
+              : null,
+            NOTICE,
+          ]
+            .filter(Boolean)
+            .join(" "),
         };
       }),
     ),
@@ -425,9 +480,10 @@ export const runtimeLayer = Layer.effect(
     const instances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     const registry = yield* ProviderRegistry.ProviderRegistry;
     const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
     const home = yield* HostProcess.HomeDirectory;
     const sharedContinuationKey = `claude:home:${path.resolve(home, ".claude")}`;
-    const credentialsChanged = instances.listInstances.pipe(
+    const refreshCredentials = instances.listInstances.pipe(
       Effect.flatMap((all) =>
         Effect.forEach(
           all.filter(
@@ -501,6 +557,85 @@ export const runtimeLayer = Layer.effect(
           ),
         };
       });
-    return ClaudeAccountsRuntime.of({ run, startAuto, credentialsChanged });
+    const lookupActiveAccount: ClaudeAccountsRuntime["Service"]["activeAccount"] = (accounts) =>
+      Effect.gen(function* () {
+        if (accounts.length === 0) return null;
+        const launcher = yield* resolveCommandPath("cswap", { env: environment });
+        if (!launcher) return null;
+        if ((yield* fs.stat(launcher)).size > 65_536) return null;
+        const source = yield* fs.readFileString(launcher);
+        const interpreter = claudeSwapPythonInterpreter(source);
+        if (!interpreter) return null;
+        const child = yield* spawner.spawn(
+          ChildProcess.make(
+            interpreter,
+            [
+              "-I",
+              "-c",
+              CLAUDE_ACCOUNT_IDENTITY_SCRIPT,
+              encodeIdentities(
+                accounts.map(({ number, email, organizationUuid }) => ({
+                  number,
+                  email,
+                  organizationUuid,
+                })),
+              ),
+            ],
+            { env: environment, stdin: "ignore", forceKillAfter: "2 seconds" },
+          ),
+        );
+        const [stdout, , code] = yield* Effect.all(
+          [
+            collectUint8StreamText({ stream: child.stdout, maxBytes: 4096 }),
+            Stream.runDrain(child.stderr),
+            child.exitCode,
+          ],
+          { concurrency: "unbounded" },
+        );
+        if (Number(code) !== 0 || stdout.truncated || stdout.invalidUtf8) return null;
+        const result = eventRecord(stdout.text);
+        const identity = record(result?.identity);
+        const accountNumber = number(identity?.number);
+        const email = label(identity?.email);
+        const organizationUuid = label(identity?.organizationUuid);
+        if (
+          result?.schemaVersion !== 1 ||
+          accountNumber === null ||
+          email === null ||
+          (identity?.organizationUuid !== null && organizationUuid === null)
+        )
+          return null;
+        return { number: accountNumber, email, organizationUuid };
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+        Effect.scoped,
+        Effect.timeout("15 seconds"),
+        Effect.orElseSucceed(() => null),
+      );
+    // Menu refreshes and concurrent consumers share one bounded read. An explicit
+    // switch invalidates this before refreshing provider state; an external CLI
+    // change is reflected within 60 seconds. Cache failures too to avoid polling
+    // the profile endpoint during an outage.
+    const identityCache = yield* Cache.make({
+      capacity: 1,
+      timeToLive: "60 seconds",
+      lookup: (key: string) => lookupActiveAccount(decodeIdentities(key)),
+    });
+    const activeAccount: ClaudeAccountsRuntime["Service"]["activeAccount"] = (accounts) =>
+      Cache.get(
+        identityCache,
+        encodeIdentities(
+          accounts.map(({ number, email, organizationUuid }) => ({
+            number,
+            email,
+            organizationUuid,
+          })),
+        ),
+      );
+    const credentialsChanged = Cache.invalidateAll(identityCache).pipe(
+      Effect.andThen(refreshCredentials),
+    );
+    return ClaudeAccountsRuntime.of({ run, startAuto, credentialsChanged, activeAccount });
   }),
 );

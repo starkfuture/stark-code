@@ -22,6 +22,8 @@ export const McpServerStatusEntry = Schema.Struct({
         "network-unavailable",
       ]),
       attempts: NonNegativeInt,
+      // A disconnected VPN is advisory until the endpoint's route dependency is known.
+      vpnState: Schema.optional(Schema.Literal("forticlient-disconnected")),
     }),
   ),
   tools: Schema.Array(

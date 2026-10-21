@@ -9,7 +9,7 @@ import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
-import { cn, isMacPlatform } from "../../lib/utils";
+import { cn } from "../../lib/utils";
 import {
   useEnvironment,
   usePrimaryEnvironmentId,
@@ -52,8 +52,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 }: {
   isElectron: boolean;
 }) {
-  const { isMobile } = useSidebar();
-  const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const stageLabel = useEnvironmentStageLabel();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const backdropVariant = resolveSidebarStageBackdropVariant(
@@ -79,13 +77,9 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           </Badge>
         </div>
       ) : null}
-      {/* macOS keeps one fixed toggle across open/closed states. A portaled
-          sheet owns a replacement at that same position while it is open. */}
-      {!isMacosDesktop || isMobile ? (
-        <div className={cn("relative z-10 shrink-0", !isMacosDesktop && "ml-auto")}>
-          <SidebarTrigger aria-label="Toggle main sidebar" />
-        </div>
-      ) : null}
+      <div className="relative z-10 ml-auto shrink-0">
+        <SidebarTrigger aria-label="Toggle main sidebar" />
+      </div>
     </div>
   );
 });

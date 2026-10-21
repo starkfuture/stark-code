@@ -20,6 +20,7 @@ import { fromYaml } from "@starkfuture/shared/schemaYaml";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@starkfuture/shared/relayAuth";
 import { resolveSpawnCommand } from "@starkfuture/shared/shell";
+import { validateStarkWorkbenchRoot } from "@starkfuture/shared/starkWorkbench";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" with { type: "json" };
@@ -1132,9 +1133,11 @@ export const WSL_RUNTIME_EXTRA_RESOURCES = [
 ] as const;
 export const DESKTOP_EXTRA_RESOURCES = [
   {
-    from: "apps/desktop/prod-resources/stark-workbench",
-    to: "stark-workbench",
-    filter: ["**/*", "**/.*", "**/.*/**/*"],
+    // electron-builder drops node_modules directly under a resource's `from`.
+    // Copy from the parent so the kit's materialized runtime dependencies stay nested.
+    from: "apps/desktop/prod-resources",
+    to: ".",
+    filter: ["stark-workbench/**/*", "stark-workbench/**/.*", "stark-workbench/**/.*/**/*"],
   },
   {
     from: "apps/desktop/prod-resources/cursor-sdk",
@@ -1145,6 +1148,42 @@ export const DESKTOP_EXTRA_RESOURCES = [
     to: "resource-monitor",
   },
 ] as const;
+
+export class PackagedStarkWorkbenchMissingError extends Schema.TaggedError<PackagedStarkWorkbenchMissingError>()(
+  "PackagedStarkWorkbenchMissingError",
+  { stageDistDir: Schema.String },
+) {
+  override get message(): string {
+    return `No packaged Stark Workbench resource was found under ${this.stageDistDir}.`;
+  }
+}
+
+/** Check the actual payload, not the staging tree that electron-builder filters. */
+export const validatePackagedStarkWorkbench = Effect.fn("validatePackagedStarkWorkbench")(
+  function* (input: {
+    readonly stageDistDir: string;
+    readonly platform: typeof BuildPlatform.Type;
+    readonly productName: string;
+  }) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const roots: string[] = [];
+    for (const entry of yield* fs.readDirectory(input.stageDistDir)) {
+      if (input.platform === "mac" ? !entry.startsWith("mac") : !entry.endsWith("-unpacked"))
+        continue;
+      const output = path.join(input.stageDistDir, entry);
+      if ((yield* fs.stat(output)).type !== "Directory") continue;
+      const resources =
+        input.platform === "mac"
+          ? path.join(output, `${input.productName}.app`, "Contents", "Resources")
+          : path.join(output, "resources");
+      roots.push(yield* validateStarkWorkbenchRoot(path.join(resources, "stark-workbench")));
+    }
+    if (roots.length === 0)
+      return yield* new PackagedStarkWorkbenchMissingError({ stageDistDir: input.stageDistDir });
+    return roots;
+  },
+);
 export const LINUX_CAPTURE_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/hyprland-capture",
@@ -4142,6 +4181,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       arch: options.arch,
     });
   }
+
+  yield* validatePackagedStarkWorkbench({
+    stageDistDir,
+    platform: options.platform,
+    productName: resolveDesktopProductName(appVersion),
+  });
 
   // Prove the packaged bundle is self-contained by loading it the way the WSL
   // backend does, rather than by reasoning about the emitted source.

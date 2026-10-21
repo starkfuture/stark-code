@@ -7,8 +7,10 @@ import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
+import * as FortiClientStatus from "./FortiClientStatus.ts";
 
-type NetworkState = "vpn-off" | "network-unavailable" | "unknown";
+import type { NetworkState } from "./McpRecovery.ts";
+
 type StatusCommand = {
   readonly executable: string;
   readonly args: readonly string[];
@@ -74,28 +76,15 @@ function tailscaleState(raw: string | null): DaemonState {
   }
 }
 
-function fortiClientState(raw: string | null): DaemonState {
-  if (raw === null || raw.length > 65_536) return "unknown";
-  const states = raw.split(/\r?\n/u).flatMap((line) => {
-    // Only enabled services with the actual Fortinet provider count. Service
-    // names and UUIDs are neither retained nor sent to the client.
-    const match =
-      /^\s*\*\s+\(([^)]+)\)\s+[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}\s+VPN\s+\(com\.fortinet\.forticlient\.macos\.vpn\)(?:\s|$)/iu.exec(
-        line,
-      );
-    return match ? [match[1]] : [];
-  });
-  if (states.some((state) => state === "Connected")) return "running";
-  return states.length > 0 && states.every((state) => state === "Disconnected")
-    ? "disconnected"
-    : "unknown";
-}
-
 const NETWORK_FAILURE =
   /\b(?:ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN|ECONNREFUSED|ECONNRESET|ECONNABORTED|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET)\b|\b(?:connection|connect|DNS|TLS handshake) (?:timed out|timeout)\b/i;
 
 /** Runs on the provider's server host. It never probes an endpoint or changes VPN state. */
-export function makeNetworkInspector(runner: HostRunner, platform: NodeJS.Platform) {
+export function makeNetworkInspector(
+  runner: HostRunner,
+  platform: NodeJS.Platform,
+  fortiStatus: Effect.Effect<FortiClientStatus.FortiClientState> = Effect.succeed("unknown"),
+) {
   const gate = Semaphore.makeUnsafe(1);
   const cached = new Map<"forticlient" | "tailscale", { state: DaemonState; expiresAt: number }>();
   const readState = (kind: "forticlient" | "tailscale") =>
@@ -103,26 +92,23 @@ export function makeNetworkInspector(runner: HostRunner, platform: NodeJS.Platfo
       const now = yield* Clock.currentTimeMillis;
       const previous = cached.get(kind);
       if (previous && previous.expiresAt > now) return previous.state;
-      const result = yield* runner({
-        executable:
-          kind === "forticlient"
-            ? "/usr/sbin/scutil"
-            : platform === "win32"
-              ? "tailscale.exe"
-              : "tailscale",
-        args: kind === "forticlient" ? ["--nc", "list"] : ["status", "--json", "--peers=false"],
-        timeout: 1500,
-        maxBuffer: 65_536,
-        killSignal: "SIGKILL",
-        shell: false,
-        windowsHide: true,
-      }).pipe(
-        Effect.catchDefect(() => Effect.succeed(null)),
+      const observation =
+        kind === "forticlient"
+          ? fortiStatus
+          : runner({
+              executable: platform === "win32" ? "tailscale.exe" : "tailscale",
+              args: ["status", "--json", "--peers=false"],
+              timeout: 1500,
+              maxBuffer: 65_536,
+              killSignal: "SIGKILL",
+              shell: false,
+              windowsHide: true,
+            }).pipe(Effect.map(tailscaleState));
+      const result = yield* observation.pipe(
+        Effect.catchDefect(() => Effect.succeed("unknown" as const)),
         Effect.timeoutOption("2 seconds"),
       );
-      const state = (kind === "forticlient" ? fortiClientState : tailscaleState)(
-        Option.getOrNull(result),
-      );
+      const state = Option.getOrElse(result, () => "unknown" as const);
       cached.set(kind, { state, expiresAt: (yield* Clock.currentTimeMillis) + 15_000 });
       return state;
     }).pipe(gate.withPermits(1));
@@ -144,7 +130,10 @@ export function makeNetworkInspector(runner: HostRunner, platform: NodeJS.Platfo
       }
       if (networkFailure && platform === "darwin") {
         const state = yield* readState("forticlient");
-        if (state === "disconnected") return "vpn-off";
+        // A disconnected VPN does not establish that this host needs it. Keep
+        // capped retries and expose the observation only as an advisory.
+        if (state === "disconnected")
+          return { state: "network-unavailable", vpnState: "forticlient-disconnected" };
         if (state === "running") return "unknown";
       }
       return networkFailure ? "network-unavailable" : "unknown";
@@ -153,5 +142,6 @@ export function makeNetworkInspector(runner: HostRunner, platform: NodeJS.Platfo
 
 export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
-  return makeNetworkInspector(runHostStatus, platform);
+  const fortiStatus = yield* FortiClientStatus.make;
+  return makeNetworkInspector(runHostStatus, platform, fortiStatus());
 });

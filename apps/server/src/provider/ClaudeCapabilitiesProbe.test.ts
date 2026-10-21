@@ -49,6 +49,7 @@ it("isolates Claude capability probes without dropping workspace setting sources
   assert.deepEqual(options.settingSources, [...CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES]);
   assert.deepEqual(options.settings, { disableAllHooks: true });
   assert.deepEqual(options.allowedTools, []);
+  assert.deepEqual(options.tools, []);
   assert.equal(options.persistSession, false);
   assert.equal(options.pathToClaudeCodeExecutable, "/usr/bin/claude");
   assert.equal(options.abortController, abortController);
@@ -60,6 +61,126 @@ it("isolates Claude capability probes without dropping workspace setting sources
 });
 
 it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
+  it.effect("discovers the bundled plugin before a turn using only CLI-approved metadata", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "stark-bundled-probe-" });
+      const bundle = path.join(root, "bundle");
+      const cwd = path.join(root, "workspace");
+      const configDir = path.join(root, "config");
+      for (const [relative, contents] of [
+        [".claude-plugin/plugin.json", '{"name":"stark-workbench"}'],
+        ["packages/spage/bin/spage.js", "throw new Error('Must not run')"],
+        ["hooks/hooks.json", '{"hooks":{}}'],
+        ["node_modules/markdown-it/package.json", "{}"],
+        [".stark-bundle.json", "{}"],
+        [
+          "skills/stark-pages/SKILL.md",
+          "---\ndescription: Write a Stark page\n---\nPRIVATE SKILL BODY",
+        ],
+        ["skills/not-loaded/SKILL.md", "---\ndescription: Not accepted by Claude\n---\n"],
+      ]) {
+        const file = path.join(bundle, relative!);
+        yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+        yield* fs.writeFileString(file, contents!);
+      }
+      const machineSnapshot = {
+        instanceId: ProviderInstanceId.make("claude"),
+        driver: ProviderDriverKind.make("claudeAgent"),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: "2026-10-21T00:00:00.000Z",
+        version: "2.1.306",
+        models: [],
+        slashCommands: [],
+        skills: [],
+      } satisfies ServerProvider;
+      let userMessages = 0;
+      let promptFinished = Promise.resolve();
+      let acceptBundle = true;
+      const query = vi.spyOn(ClaudeSdk, "query").mockImplementation(({ options, prompt }) => {
+        assert.deepEqual(options?.plugins, [{ type: "local", path: bundle }]);
+        assert.deepEqual(options?.settings, { disableAllHooks: true });
+        assert.deepEqual(options?.tools, []);
+        assert.deepEqual(options?.mcpServers, {});
+        assert.isTrue(options?.strictMcpConfig);
+        assert.isFalse(options?.persistSession);
+        promptFinished = (async () => {
+          assert.notEqual(typeof prompt, "string");
+          for await (const _message of prompt) userMessages++;
+        })();
+        return {
+          initializationResult: async () => ({
+            commands: acceptBundle
+              ? [
+                  {
+                    name: "stark-workbench:stark-pages",
+                    description: "Write a Stark page",
+                    argumentHint: "[topic]",
+                  },
+                ]
+              : [],
+          }),
+        } as ReturnType<typeof ClaudeSdk.query>;
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(() => query.mockRestore()));
+      const settings = decodeClaudeSettings({ homePath: configDir });
+      const environment = { ...process.env, STARK_WORKBENCH_ROOT: bundle };
+      const discovered = yield* probeClaudeWorkspaceSnapshot(
+        settings,
+        machineSnapshot,
+        cwd,
+        environment,
+      );
+      yield* Effect.promise(() => promptFinished);
+      assert.equal(userMessages, 0);
+      assert.deepEqual(
+        discovered.skills.map((skill) => ({
+          name: skill.name,
+          path: skill.path,
+          scope: skill.scope,
+          pluginName: skill.pluginName,
+        })),
+        [
+          {
+            name: "stark-workbench:stark-pages",
+            path: yield* fs.realPath(path.join(bundle, "skills/stark-pages/SKILL.md")),
+            scope: "plugin",
+            pluginName: "stark-workbench",
+          },
+        ],
+      );
+      assert.equal(discovered.slashCommands[1]?.source, "plugin");
+      assert.equal(discovered.slashCommands[1]?.sourceName, "stark-workbench");
+      assert.equal(discovered.skills[0]?.description, "Write a Stark page");
+      assert.isTrue(Boolean(discovered.skills[0]?.permissionWarning));
+      assert.notInclude(JSON.stringify(discovered), "PRIVATE SKILL BODY");
+
+      // The CLI can withhold a command for disabled plugins or config trust.
+      // Readable files must not put it back into the picker.
+      acceptBundle = false;
+      const withheld = yield* probeClaudeWorkspaceSnapshot(
+        settings,
+        machineSnapshot,
+        cwd,
+        environment,
+      );
+      assert.deepEqual(withheld.skills, []);
+      assert.deepEqual(withheld.slashCommands, [COMPACT_SLASH_COMMAND]);
+      const disabled = yield* probeClaudeWorkspaceSnapshot(
+        { ...settings, enabled: false },
+        machineSnapshot,
+        cwd,
+        environment,
+      );
+      assert.equal(disabled, machineSnapshot);
+      assert.equal(query.mock.calls.length, 2);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect(
     "discovers commands and skills separately for each cwd without replacing machine metadata",
     () =>

@@ -6,6 +6,7 @@ import {
   type ElementContextDetails,
   type KnownComposerContextRecord,
 } from "@starkfuture/contracts";
+import { expandAssistantCitationsForProvider } from "./assistantCitations.ts";
 
 /**
  * Canonical inline reference: `[label](stark-context://v1/<kind>/<contextId>)`, or the image
@@ -125,6 +126,39 @@ export function replaceComposerContextReferences(
 
 const CONTEXT_ENVELOPE_TAG = "stark_context";
 const CONTEXT_ENTRY_TAG = "context";
+
+/** Provider mention parsers must leave generated reference payloads and labels untouched. */
+export function collectGeneratedReferenceDataRanges(
+  prompt: string,
+): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const [open, close] of [
+    ['<stark_context version="1">', "</stark_context>"],
+    ["<assistant_citations>", "</assistant_citations>"],
+    ["<selected_text_quotes>", "</selected_text_quotes>"],
+  ] as const) {
+    let cursor = 0;
+    while (cursor < prompt.length) {
+      const start = prompt.indexOf(open, cursor);
+      if (start < 0) break;
+      const enclosing = ranges.find((range) => start >= range.start && start < range.end);
+      if (enclosing) {
+        cursor = enclosing.end;
+        continue;
+      }
+      const closing = prompt.indexOf(close, start + open.length);
+      if (closing < 0) break;
+      cursor = closing + close.length;
+      ranges.push({ start, end: cursor });
+    }
+  }
+  for (const match of prompt.matchAll(
+    /\[[A-Za-z][A-Za-z ]{0,39}: [^\]\r\n]{0,240}; ref=[A-Za-z0-9_-]{1,128}\]/g,
+  )) {
+    ranges.push({ start: match.index, end: match.index + match[0].length });
+  }
+  return ranges;
+}
 
 function kindDisplayName(kind: ComposerContextKind): string {
   const spaced = kind.replace(/-/g, " ");
@@ -281,17 +315,21 @@ export function projectComposerContextForProvider(input: {
   records: ReadonlyArray<ComposerContextRecord>;
 }): string {
   const occurrences = collectComposerContextReferences(input.text);
-  if (occurrences.length === 0) return input.text;
+  if (occurrences.length === 0) return expandAssistantCitationsForProvider(input.text);
   const recordsById = new Map<ComposerContextId, ComposerContextRecord | undefined>();
   for (const record of input.records) {
     // Even callers that bypass the wire schema must not silently select an ambiguous payload.
     recordsById.set(record.contextId, recordsById.has(record.contextId) ? undefined : record);
   }
-  const body = replaceComposerContextReferences(input.text, (occurrence) =>
-    formatComposerContextProviderMarker(
-      recordsById.get(occurrence.contextId)?.kind ?? occurrence.kind,
-      occurrence.label,
-      occurrence.contextId,
+  // Expand only the user's inline citations, before appending context payloads. Links
+  // inside quoted text or terminal output remain data, not additional references.
+  const body = expandAssistantCitationsForProvider(
+    replaceComposerContextReferences(input.text, (occurrence) =>
+      formatComposerContextProviderMarker(
+        recordsById.get(occurrence.contextId)?.kind ?? occurrence.kind,
+        occurrence.label,
+        occurrence.contextId,
+      ),
     ),
   );
   const seen = new Set<ComposerContextId>();

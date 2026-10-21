@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeVM from "node:vm";
+import { ASSISTANT_CITATION_MAX_TEXT_LENGTH } from "../packages/contracts/src/assistantCitations";
 import { expect, it, vi } from "vite-plus/test";
 import { prepareStarkWorkbench } from "./prepare-stark-workbench.mjs";
 
@@ -39,6 +40,7 @@ it("switches only a trusted host to document layout and preserves guarded publis
       string,
       {
         src: string;
+        contentDocument?: unknown;
         textContent: string;
         hidden: boolean;
         addEventListener: ReturnType<typeof vi.fn>;
@@ -118,6 +120,58 @@ it("switches only a trusted host to document layout and preserves guarded publis
     expect(element("view").src).toBe("/p/test-page/?rev=3");
     dispatch("starkcode://app", parent, { ...host, presentation: "panel" });
     expect(element("view").src).toContain("view=panel");
+
+    // Run the actual extracted and adapted kit, not a fixture copy of its bridge.
+    let selectedText = "A sentence from the page";
+    const selectionEvents = new Map<string, () => void>();
+    const pageDocument = {
+      querySelector: () => null,
+      getSelection: () => ({ isCollapsed: !selectedText, toString: () => selectedText }),
+      addEventListener: (name: string, listener: () => void) => selectionEvents.set(name, listener),
+    };
+    element("view").contentDocument = pageDocument;
+    element("view").addEventListener.mock.calls.find(([name]) => name === "load")![1]();
+    const selections = () =>
+      parent.postMessage.mock.calls.filter(([packet]) => packet.type === "selection");
+    selectionEvents.get("pointerup")!();
+    expect(selections()).toHaveLength(0);
+    const selectionHost = { ...host, presentation: "panel", selectionToken: "a".repeat(32) };
+    listeners.get("message")!({
+      origin: "https://evil.invalid",
+      source: parent,
+      data: selectionHost,
+    });
+    listeners.get("message")!({ origin: "starkcode://app", source: {}, data: selectionHost });
+    selectionEvents.get("keyup")!();
+    expect(selections()).toHaveLength(0);
+    listeners.get("message")!({ origin: "starkcode://app", source: parent, data: selectionHost });
+    selectionEvents.get("pointerup")!();
+    expect(selections()[0]).toEqual([
+      {
+        v: 1,
+        source: "stark-pages",
+        type: "selection",
+        selectionToken: selectionHost.selectionToken,
+        slug: "test-page",
+        text: selectedText,
+        tooLong: false,
+      },
+      "starkcode://app",
+    ]);
+    selectedText = "x".repeat(ASSISTANT_CITATION_MAX_TEXT_LENGTH);
+    selectionEvents.get("keyup")!();
+    expect(selections().at(-1)![0]).toMatchObject({ text: selectedText, tooLong: false });
+    selectedText += "x";
+    selectionEvents.get("keyup")!();
+    expect(selections().at(-1)![0]).toMatchObject({ text: "", tooLong: true });
+    const count = selections().length;
+    element("view").contentDocument = {};
+    selectionEvents.get("pointerup")!();
+    expect(selections()).toHaveLength(count);
+    element("view").contentDocument = pageDocument;
+    dispatch("starkcode://app", parent, { ...host, presentation: "panel" });
+    selectionEvents.get("pointerup")!();
+    expect(selections()).toHaveLength(count);
   } finally {
     NodeFS.rmSync(scratch, { recursive: true, force: true });
   }

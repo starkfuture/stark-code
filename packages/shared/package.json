@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./selectedTextQuotes": {
+      "types": "./src/selectedTextQuotes.ts",
+      "import": "./src/selectedTextQuotes.ts"
+    },
     "./starkWorkbench": {
       "types": "./src/starkWorkbench.ts",
       "import": "./src/starkWorkbench.ts"

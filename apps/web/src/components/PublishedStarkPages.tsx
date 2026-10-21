@@ -18,6 +18,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { PublishedPageContent } from "./PublishedPageContent";
 import { cn } from "~/lib/utils";
 import type { StarkPageTarget } from "../starkPageTabs";
+import type { StarkPageQuote } from "../starkPageQuote";
 import {
   publishedPageTitle,
   publishedProjectCatalog,
@@ -43,10 +44,12 @@ export function PublishedStarkPages({
   expanded = false,
   onExitExpanded,
   onOpenPage,
+  onQuote,
 }: {
   expanded?: boolean;
   onExitExpanded?: (() => void) | undefined;
   onOpenPage?: ((page: StarkPageTarget) => void) | undefined;
+  onQuote?: ((quote: StarkPageQuote) => boolean) | undefined;
 } = {}) {
   const bridge = window.desktopBridge?.publishedPages;
   const [status, setStatus] = useState<StarkPublishedPagesStatus | null>(null);
@@ -438,6 +441,13 @@ export function PublishedStarkPages({
                   {reader.document ? (
                     <PublishedPageContent
                       document={reader.document}
+                      quotePage={{
+                        kind: "published",
+                        root: reader.document.root,
+                        path: reader.document.path,
+                        title: reader.page.title,
+                      }}
+                      onQuote={onQuote}
                       expanded
                       onExitExpanded={expanded ? onExitExpanded : undefined}
                       onNavigate={(path) =>

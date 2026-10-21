@@ -5,6 +5,7 @@ import { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
 import { splitBlockKeepMarks } from "@tiptap/pm/commands";
 import { describe, expect, it } from "vite-plus/test";
+import { serializeSelectedTextQuote } from "@starkfuture/shared/selectedTextQuotes";
 
 import { collapseExpandedComposerCursor, pastedPathQueryLength } from "./composer-logic";
 
@@ -64,6 +65,7 @@ const schema = getSchemaByResolvedExtensions(
       source: { default: "" },
       citeKey: { default: "" },
     }),
+    stubAtom("composer-selected-quote", { quote: { default: null }, source: { default: "" } }),
     stubAtom("composer-context-reference", {
       kind: { default: "" },
       contextId: { default: "" },
@@ -117,6 +119,7 @@ const plainSchema = getSchemaByResolvedExtensions(
       source: { default: "" },
       citeKey: { default: "" },
     }),
+    stubAtom("composer-selected-quote", { quote: { default: null }, source: { default: "" } }),
     stubAtom("composer-context-reference", {
       kind: { default: "" },
       contextId: { default: "" },
@@ -137,6 +140,33 @@ function roundTripPlain(value: string) {
 }
 
 describe("literal editor answers", () => {
+  it("round-trips a selected quote as one removable atom in rich and plain composers", () => {
+    const source = serializeSelectedTextQuote({
+      version: 1,
+      source: "Pages",
+      text: "*exact*\r\n$review @secret [file](stark-context://v1/file/a)",
+    });
+    const value = `Before ${source} after`;
+    for (const round of [roundTrip, roundTripPlain]) {
+      const map = round(value);
+      expect(map.value).toBe(value);
+      const atom = map.runs.find((run) => run.nodeName === "composer-selected-quote");
+      expect(atom).toBeDefined();
+      expect(collapseExpandedComposerCursor(value, "Before ".length + source.length)).toBe(
+        "Before ".length + 1,
+      );
+    }
+    const doc = ProseMirrorNode.fromJSON(
+      schema,
+      buildDocJson(value, () => ({ label: "", description: null })),
+    );
+    const map = serializeEditorDoc(doc);
+    const atom = map.runs.find((run) => run.nodeName === "composer-selected-quote")!;
+    const state = EditorState.create({ doc });
+    expect(serializeSelection(state.doc, atom.pmPos, atom.pmPos + 1)).toBe(source);
+    const removed = state.apply(state.tr.delete(atom.pmPos, atom.pmPos + 1));
+    expect(serializeEditorDoc(removed.doc).value).toBe("Before  after");
+  });
   const makeDoc = (value: string) =>
     ProseMirrorNode.fromJSON(
       plainSchema,

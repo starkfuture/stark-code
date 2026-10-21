@@ -9,6 +9,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  ComposerContextId,
   CheckpointId,
   CodexSettings,
   EnvironmentId,
@@ -31,6 +32,7 @@ import {
 } from "@starkfuture/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
+import { projectComposerContextForProvider } from "@starkfuture/shared/composerContextReferences";
 import { SpawnExecutableResolution } from "@starkfuture/shared/shell";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexError from "effect-codex-app-server/errors";
@@ -1462,7 +1464,42 @@ describe("CodexAdapterV2 fork boundary", () => {
   );
 });
 
+const nativeTerminalSkillQuote = projectComposerContextForProvider({
+  text: "[Compare €review and $ship carefully](stark-context://v1/terminal/native_quote)",
+  records: [
+    {
+      version: 1,
+      contextId: ComposerContextId.make("native_quote"),
+      kind: "terminal",
+      label: "Compare €review and $ship carefully",
+      terminalId: "native-codex",
+      terminalLabel: "Native Codex",
+      lineStart: 4,
+      lineEnd: 5,
+      text: "€review then $ship with @example.txt\n𑿝review and £ship are quoted output.",
+    },
+  ],
+});
+
 describe("CodexAdapterV2 skill mentions", () => {
+  it("preserves quoted terminal payloads and labels while normalizing outside mentions", () => {
+    assert.equal(
+      CodexAdapterV2.codexSkillMentionText(nativeTerminalSkillQuote),
+      nativeTerminalSkillQuote,
+    );
+    assert.equal(
+      CodexAdapterV2.codexSkillMentionText(
+        `€review first\n${nativeTerminalSkillQuote}\nThen £ship`,
+      ),
+      `$review first\n${nativeTerminalSkillQuote}\nThen $ship`,
+    );
+    // An adjacent token still needs its original whitespace boundary.
+    assert.equal(
+      CodexAdapterV2.codexSkillMentionText(`${nativeTerminalSkillQuote}€review`),
+      `${nativeTerminalSkillQuote}€review`,
+    );
+  });
+
   it("sends currency-sigil skill mentions as the $ mention Codex parses", () => {
     const cases: ReadonlyArray<readonly [string, string]> = [
       ["€review do it", "$review do it"],
@@ -2728,68 +2765,70 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
-  it.effect("sends currency-sigil skill mentions to Codex as $ mentions", () =>
-    Effect.gen(function* () {
-      const nativeThreadId = "skill-sigil-thread";
-      const nativeTurnId = "skill-sigil-turn";
-      const transcript = makeCodexReplayTranscript({
-        scenario: "skill-sigil-canonicalized",
-        entries: [
-          ...codexReplayPreamble({
-            nativeThreadId,
-            nativeTurnId,
-            prompt: "€review do it",
-            sentPrompt: "$review do it",
-          }),
-          {
-            type: "expect_outbound",
-            label: "turn/steer",
-            frame: {
-              id: 4,
-              method: "turn/steer",
-              params: {
-                expectedTurnId: nativeTurnId,
-                input: [{ type: "text", text: "then $ship it" }],
-                threadId: nativeThreadId,
+  it.effect(
+    "sends outside currency-sigil skill mentions to Codex while preserving quoted terminal data",
+    () =>
+      Effect.gen(function* () {
+        const nativeThreadId = "skill-sigil-thread";
+        const nativeTurnId = "skill-sigil-turn";
+        const transcript = makeCodexReplayTranscript({
+          scenario: "skill-sigil-canonicalized",
+          entries: [
+            ...codexReplayPreamble({
+              nativeThreadId,
+              nativeTurnId,
+              prompt: `€review do it\n${nativeTerminalSkillQuote}`,
+              sentPrompt: `$review do it\n${nativeTerminalSkillQuote}`,
+            }),
+            {
+              type: "expect_outbound",
+              label: "turn/steer",
+              frame: {
+                id: 4,
+                method: "turn/steer",
+                params: {
+                  expectedTurnId: nativeTurnId,
+                  input: [{ type: "text", text: `${nativeTerminalSkillQuote}\nthen $ship it` }],
+                  threadId: nativeThreadId,
+                },
               },
             },
+            {
+              type: "emit_inbound",
+              label: "turn/steer",
+              frame: { id: 4, result: { turnId: nativeTurnId } },
+            },
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(transcript);
+        const turnInput = makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("skill-sigil-attempt"),
+          text: `€review do it\n${nativeTerminalSkillQuote}`,
+        });
+        yield* harness.runtime.startTurn(turnInput);
+        yield* harness.runtime.steerTurn({
+          threadId: harness.threadId,
+          runId: turnInput.runId,
+          providerThread: harness.providerThread,
+          providerTurnId: (yield* IdAllocator.IdAllocatorV2).derive.providerTurn({
+            driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+            nativeTurnId,
+          }),
+          message: {
+            ...turnInput.message,
+            messageId: MessageId.make("message-skill-sigil-steer"),
+            text: `${nativeTerminalSkillQuote}\nthen £ship it`,
           },
-          {
-            type: "emit_inbound",
-            label: "turn/steer",
-            frame: { id: 4, result: { turnId: nativeTurnId } },
-          },
-        ],
-      });
-      const harness = yield* makeCodexReplayHarness(transcript);
-      const turnInput = makeCodexTestTurnInput({
-        threadId: harness.threadId,
-        providerThread: harness.providerThread,
-        now: yield* DateTime.now,
-        attemptId: RunAttemptId.make("skill-sigil-attempt"),
-        text: "€review do it",
-      });
-      yield* harness.runtime.startTurn(turnInput);
-      yield* harness.runtime.steerTurn({
-        threadId: harness.threadId,
-        runId: turnInput.runId,
-        providerThread: harness.providerThread,
-        providerTurnId: (yield* IdAllocator.IdAllocatorV2).derive.providerTurn({
-          driver: CodexAdapterV2.CODEX_DRIVER_KIND,
-          nativeTurnId,
-        }),
-        message: {
-          ...turnInput.message,
-          messageId: MessageId.make("message-skill-sigil-steer"),
-          text: "then £ship it",
-        },
-      });
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        });
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
       ),
-    ),
   );
 
   const assistantMessages = (events: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Event>) =>

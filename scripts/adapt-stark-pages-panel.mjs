@@ -2,21 +2,23 @@
  * The panel verifies the host origin/source before accepting it. Older hosts keep
  * the original side-panel view; document tabs keep the renderer's normal layout.
  */
-export const STARK_PAGES_PRESENTATION_VERSION = 2;
+export const STARK_PAGES_PRESENTATION_VERSION = 3;
 
 export function adaptStarkPagesPanel(source) {
   const replace = (before, after) => {
     if (source.split(before).length !== 2)
-      throw new Error("Stark Pages panel changed; review the document presentation adaptation.");
+      throw new Error(
+        "Stark Pages panel changed; review the document presentation/selection adaptation.",
+      );
     source = source.replace(before, after);
   };
   replace(
     "agent: d.agent === 'codex' ? 'codex' : 'claude' };",
-    "agent: d.agent === 'codex' ? 'codex' : 'claude', presentation: d.presentation === 'document' ? 'document' : 'panel' };",
+    "agent: d.agent === 'codex' ? 'codex' : 'claude', presentation: d.presentation === 'document' ? 'document' : 'panel', ...(typeof d.selectionToken === 'string' && /^[a-zA-Z0-9-]{16,128}$/.test(d.selectionToken) ? { selectionToken: d.selectionToken } : {}) };",
   );
   replace(
     "agent: 'claude' | 'codex' } | null}",
-    "agent: 'claude' | 'codex', presentation: 'panel' | 'document' } | null}",
+    "agent: 'claude' | 'codex', presentation: 'panel' | 'document', selectionToken?: string } | null}",
   );
   replace(
     ".bar{display:flex;",
@@ -36,11 +38,14 @@ body[data-presentation="document"] #publish{background:#c4b483;color:#20241a}
     '<span class="chip" id="status" hidden></span>',
     '<span class="chip" id="status" hidden></span><span id="folder-context"></span>',
   );
-  replace("  var frame = $('view');", "  var frame = $('view');\n  var presentation = 'panel';");
+  replace(
+    "  var frame = $('view');",
+    "  var frame = $('view');\n  var presentation = 'panel';\n  var selectionToken = null;",
+  );
   replace("'/?view=panel&rev='", "'/?' + (presentation === 'panel' ? 'view=panel&' : '') + 'rev='");
   replace(
     "      agent = m.agent;",
-    "      agent = m.agent;\n      if (presentation !== m.presentation) {\n        presentation = m.presentation;\n        document.body.setAttribute('data-presentation', presentation);\n        $('pick').textContent = presentation === 'document' ? 'Page library' : 'Pages';\n        $('open').textContent = presentation === 'document' ? 'Open in browser' : 'Open';\n        $('folder-context').textContent = 'Folder pages · ' + String(cfg.root || '').split(String.fromCharCode(92)).join('/').split('/').filter(Boolean).pop();\n        if (presentation === 'document') { setPaused(true); closeMenu(false); }\n        if (current) show(current);\n      }",
+    "      agent = m.agent;\n      selectionToken = m.selectionToken || null;\n      if (presentation !== m.presentation) {\n        presentation = m.presentation;\n        document.body.setAttribute('data-presentation', presentation);\n        $('pick').textContent = presentation === 'document' ? 'Page library' : 'Pages';\n        $('open').textContent = presentation === 'document' ? 'Open in browser' : 'Open';\n        $('folder-context').textContent = 'Folder pages · ' + String(cfg.root || '').split(String.fromCharCode(92)).join('/').split('/').filter(Boolean).pop();\n        if (presentation === 'document') { setPaused(true); closeMenu(false); }\n        if (current) show(current);\n      }",
   );
   replace(
     "    if (paused) {\n      waiting = p;",
@@ -49,6 +54,38 @@ body[data-presentation="document"] #publish{background:#c4b483;color:#20241a}
   replace(
     "$('next').textContent = 'New: ' +",
     "$('next').textContent = presentation === 'document' ? 'Update available' : 'New: ' +",
+  );
+  // Keep this optional bridge aligned with Workbench's panel protocol until the
+  // next reviewed vendor refresh. The pinned payload otherwise has no selection API.
+  replace(
+    "    m.url = capText(b.url, 2048);\n  } else {",
+    `    m.url = capText(b.url, 2048);
+  } else if (type === 'selection') {
+    if (typeof b.selectionToken !== 'string' || !/^[a-zA-Z0-9-]{16,128}$/.test(b.selectionToken)
+      || typeof b.slug !== 'string' || !/^[a-z0-9-]{3,64}$/.test(b.slug)
+      || typeof b.text !== 'string' || b.text.length > 8000) return null;
+    if (b.tooLong === true && b.text !== '') return null;
+    m.selectionToken = b.selectionToken;
+    m.slug = b.slug;
+    m.text = b.text;
+    m.tooLong = b.tooLong === true;
+  } else {`,
+  );
+  replace(
+    "      if (d && d.addEventListener) {\n        d.addEventListener('click', function (e) {",
+    `      if (d && d.addEventListener) {
+        var selectedPage = current;
+        function sendSelection() {
+          if (!selectionToken || !selectedPage || current !== selectedPage || frame.contentDocument !== d) return;
+          try {
+            var selected = d.getSelection();
+            var text = selected && !selected.isCollapsed ? selected.toString() : '';
+            post('selection', { selectionToken: selectionToken, slug: selectedPage.slug, text: text.length <= 8000 ? text : '', tooLong: text.length > 8000 });
+          } catch (e) { /* inaccessible page: no selection capability */ }
+        }
+        d.addEventListener('pointerup', sendSelection);
+        d.addEventListener('keyup', sendSelection);
+        d.addEventListener('click', function (e) {`,
   );
   return source;
 }

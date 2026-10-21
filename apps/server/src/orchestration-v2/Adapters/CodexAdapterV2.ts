@@ -44,6 +44,7 @@ import {
   type ProviderSetupError,
 } from "@starkfuture/contracts";
 import { SKILL_MENTION_PATTERN } from "@starkfuture/shared/composerInlineTokens";
+import { collectGeneratedReferenceDataRanges } from "@starkfuture/shared/composerContextReferences";
 import { AgentScope } from "@starkfuture/shared/AgentScope";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
 import { codexHookRunDisplay } from "../../provider/Drivers/CodexHookEvents.ts";
@@ -445,7 +446,16 @@ function codexItemStatus(status: "inProgress" | "completed" | "failed" | "declin
  * runs; currency amounts like `€20` do not match and stay prose.
  */
 export function codexSkillMentionText(text: string): string {
-  return text.replace(SKILL_MENTION_PATTERN, "$1$$$2");
+  const references = collectGeneratedReferenceDataRanges(text);
+  return text.replace(
+    SKILL_MENTION_PATTERN,
+    (source: string, prefix: string, name: string, offset: number) => {
+      const start = offset + prefix.length;
+      return references.some((range) => start >= range.start && start < range.end)
+        ? source
+        : `${prefix}$${name}`;
+    },
+  );
 }
 
 const BACKGROUND_COMMAND_DETAIL_COMMAND_MAX_LENGTH = 200;

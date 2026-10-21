@@ -23,6 +23,7 @@ import { terminalEnvironment } from "../state/terminal";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../appearanceFonts";
 import type { NativeMcpWarning } from "../nativeMcpWarning";
+import type { TerminalContextSelection } from "../lib/terminalContext";
 
 export function nativeAgentTerminalId(instanceId: ProviderInstanceId): string {
   return `native-agent-${instanceId}`;
@@ -41,6 +42,10 @@ export function NativeAgentShell(props: {
   readonly voiceRequestId?: number;
   readonly onVoiceRequestConsumed?: ((requestId: number) => void) | undefined;
   readonly onBackToChat: () => void;
+  readonly onAddTerminalContext?:
+    | ((selection: TerminalContextSelection) => boolean | void)
+    | undefined;
+  readonly onQuoteText?: ((text: string, label: string) => boolean) | undefined;
 }) {
   const [ended, setEnded] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
@@ -269,6 +274,9 @@ export function NativeAgentShell(props: {
                   onSessionExited={() => setEnded(true)}
                   onSessionLaunchError={setLaunchError}
                   onMcpWarning={setMcpWarning}
+                  {...(props.onAddTerminalContext
+                    ? { onAddTerminalContext: props.onAddTerminalContext }
+                    : {})}
                   focusRequestId={(props.focusRequestId ?? 1) + terminalFocusRequest}
                   autoFocus
                   visible={view !== "reader"}
@@ -296,6 +304,7 @@ export function NativeAgentShell(props: {
                     environmentId={props.threadRef.environmentId}
                     threadRef={props.threadRef}
                     cwd={props.worktreePath ?? props.cwd}
+                    onQuoteText={props.onQuoteText}
                     answers={(replies.data ?? []).map((reply) => ({
                       id: reply.id,
                       text: reply.text,

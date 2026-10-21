@@ -136,6 +136,17 @@ delete it like other inline context. Copying, reloading, and restoring a
 with its quote, and sending tells the agent which words were quoted and which comment you wrote.
 The quoted text and comment count toward the message limit.
 
+You can also quote selected text from **Reader** and **Pages**, including a page
+opened in a full tab. Choose **Quote in chat** to return to your existing draft.
+For native Claude or Codex terminal output, hold **Shift** while dragging to select
+text, then choose **Quote in chat** from the selection menu. The terminal keeps
+running. Quoting never sends your message or types into the terminal.
+
+Page and pasted Reader quotes keep the selected text and its source in a compact
+chip. Open it to read the full excerpt or remove it, then write your question
+alongside it. Selections are limited to 8,000 characters; shorten a longer
+selection rather than losing part of it.
+
 Mobile displays saved quotes and comments, but does not create citations or
 navigate to their sources.
 

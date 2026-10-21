@@ -330,7 +330,9 @@ export function terminalSelectionMenuItems(options?: {
   return [
     ...(options?.canAddToChat === false
       ? []
-      : ([{ id: "add-to-chat", label: "Add to chat" }] satisfies ContextMenuItem<"add-to-chat">[])),
+      : ([
+          { id: "add-to-chat", label: "Quote in chat" },
+        ] satisfies ContextMenuItem<"add-to-chat">[])),
     { id: "copy", label: "Copy" },
   ];
 }
@@ -402,7 +404,7 @@ interface TerminalViewportProps {
   onMcpWarning?: (warning: NativeMcpWarning) => void;
   onSessionLaunchError?: (message: string | null) => void;
   onSessionExited: () => void;
-  onAddTerminalContext?: (selection: TerminalContextSelection) => void;
+  onAddTerminalContext?: (selection: TerminalContextSelection) => boolean | void;
   focusRequestId: number;
   autoFocus: boolean;
   visible: boolean;
@@ -480,7 +482,7 @@ export function TerminalViewport({
     if (hasTerminalWriteAccess()) onSessionExited();
   });
   const handleAddTerminalContext = useEffectEvent((selection: TerminalContextSelection) => {
-    onAddTerminalContext?.(selection);
+    return onAddTerminalContext ? onAddTerminalContext(selection) : false;
   });
   const canAddSelectionToChat = useEffectEvent(() => onAddTerminalContext !== undefined);
   const readTerminalLabel = useEffectEvent(() => terminalLabel);
@@ -744,7 +746,9 @@ export function TerminalViewport({
       };
 
       const addSelectionToChat = (selection: TerminalContextSelection) => {
-        handleAddTerminalContext(selection);
+        // The composer can reject an insert during connection recovery or a
+        // pending question. Retain the selection so the person can retry it.
+        if (handleAddTerminalContext(selection) === false) return;
         terminalRef.current?.clearSelection();
         terminalRef.current?.focus();
       };
@@ -1192,7 +1196,7 @@ interface ThreadTerminalDrawerProps {
   onActiveTerminalChange: (terminalId: string) => void;
   onCloseTerminal: (terminalId: string) => void;
   onHeightChange: (height: number) => void;
-  onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  onAddTerminalContext: (selection: TerminalContextSelection) => boolean | void;
   keybindings: ResolvedKeybindingsConfig;
   /** Prefer server-provided tab titles when present (e.g. active subprocess name). */
   terminalLabelsById?: ReadonlyMap<string, string>;

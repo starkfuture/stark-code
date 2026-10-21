@@ -95,6 +95,8 @@ import { WorkspaceEntryTooltip } from "./chat/WorkspaceEntryIcon";
 import { FileTagChipContent } from "./chat/FileTagChip";
 import { SkillChipIcon } from "./chat/SkillInlineText";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
+import { SelectedTextQuoteChip } from "./chat/SelectedTextQuoteChip";
+import { collectSelectedTextQuotes } from "@starkfuture/shared/selectedTextQuotes";
 import { getTimelinePageScrollKey } from "./chat/pageScrollController";
 import { ContextChipPopover } from "./contextChipParts";
 import { Button } from "./ui/button";
@@ -480,6 +482,77 @@ function ComposerCitationNodeView({ node, editor, getPos }: NodeViewProps) {
           onRestoreFocus,
         }}
       />
+    </NodeViewWrapper>
+  );
+}
+
+const ComposerSelectedQuoteExtension = Node.create({
+  name: "composer-selected-quote",
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    // Tiptap merges automatic attribute reads after getAttrs. Only the validated
+    // data-quote-source below may populate this atom, never raw source/quote attrs.
+    return {
+      quote: { default: null, parseHTML: () => null },
+      source: { default: "", parseHTML: () => null },
+    };
+  },
+  parseHTML() {
+    return [
+      {
+        tag: "span[data-composer-selected-quote]",
+        getAttrs: (element) => {
+          const source = element.getAttribute("data-quote-source");
+          const quote = selectedQuoteFromSource(source);
+          return quote ? { source, quote } : false;
+        },
+      },
+    ];
+  },
+  renderHTML({ node }) {
+    return ["span", { "data-composer-selected-quote": "", "data-quote-source": node.attrs.source }];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(ComposerSelectedQuoteNodeView);
+  },
+});
+
+function selectedQuoteFromSource(source: unknown) {
+  if (typeof source !== "string") return null;
+  const [match] = collectSelectedTextQuotes(source);
+  return match?.start === 0 && match.end === source.length ? match.quote : null;
+}
+
+function ComposerSelectedQuoteNodeView({ node, editor, getPos }: NodeViewProps) {
+  const quote = selectedQuoteFromSource(node.attrs.source);
+  const remove = () => {
+    if (!editor.isEditable) return;
+    const pos = typeof getPos === "function" ? getPos() : undefined;
+    if (typeof pos !== "number") return;
+    const current = editor.state.doc.nodeAt(pos);
+    if (current?.type.name !== "composer-selected-quote") return;
+    editor
+      .chain()
+      .focus()
+      .deleteRange({ from: pos, to: pos + current.nodeSize })
+      .run();
+  };
+  return (
+    <NodeViewWrapper
+      as="span"
+      className="inline-flex min-w-0 max-w-full select-none"
+      contentEditable={false}
+      spellCheck={false}
+      data-composer-selected-quote-chip="true"
+    >
+      {quote ? (
+        <SelectedTextQuoteChip quote={quote} onRemove={editor.isEditable ? remove : undefined} />
+      ) : (
+        "Unavailable quote"
+      )}
     </NodeViewWrapper>
   );
 }
@@ -1082,6 +1155,7 @@ function ComposerPromptEditorTiptapInner(
         ComposerMentionExtension,
         ComposerSkillExtension,
         ComposerCitationExtension,
+        ComposerSelectedQuoteExtension,
         ComposerContextReferenceExtension,
         ComposerMarkersExtension,
         ...(richText

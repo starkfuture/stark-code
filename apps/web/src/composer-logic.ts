@@ -108,6 +108,7 @@ export function expandCollapsedComposerCursor(
     if (
       segment.type === "mention" ||
       segment.type === "citation" ||
+      segment.type === "selected-quote" ||
       segment.type === "context-reference"
     ) {
       const expandedLength = segment.source.length;
@@ -191,6 +192,7 @@ export function collapseExpandedComposerCursor(
     if (
       segment.type === "mention" ||
       segment.type === "citation" ||
+      segment.type === "selected-quote" ||
       segment.type === "context-reference"
     ) {
       const expandedLength = segment.source.length;

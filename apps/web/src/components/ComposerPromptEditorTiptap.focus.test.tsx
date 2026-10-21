@@ -2,6 +2,7 @@
 import { act, createRef, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { serializeSelectedTextQuote } from "@starkfuture/shared/selectedTextQuotes";
 import {
   ComposerPromptEditorTiptap,
   type ComposerPromptEditorHandle,
@@ -44,6 +45,92 @@ afterEach(async () => {
   if (rangeBounds) Object.defineProperty(Range.prototype, "getBoundingClientRect", rangeBounds);
   else Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
   vi.unstubAllGlobals();
+});
+
+it("shows readable quote details without interpreting markup and removes only the quote", async () => {
+  const ref = createRef<ComposerPromptEditorHandle>();
+  const quote = {
+    version: 1 as const,
+    source: "Pages · Report",
+    text: "*exact*. $review @private\n<img src='https://example.com/a'>",
+  };
+  const source = serializeSelectedTextQuote(quote);
+  await act(() =>
+    root.render(
+      <ComposerPromptEditorTiptap
+        {...base}
+        value={`My draft ${source} after`}
+        cursor={0}
+        editorRef={ref}
+      />,
+    ),
+  );
+  const chip = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Quote from Pages · Report. Show details"]',
+  )!;
+  expect(chip).not.toBeNull();
+  expect(chip.textContent).toContain("*exact*. $review @private");
+  expect(container.textContent).not.toContain("stark-quote:");
+  await act(() => chip.click());
+  expect(document.body.textContent).toContain(quote.text);
+  expect(document.body.querySelector('img[src="https://example.com/a"]')).toBeNull();
+  const remove = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "Remove quote",
+  )!;
+  await act(() => remove.click());
+  expect(ref.current?.readSnapshot().value).toBe("My draft  after");
+});
+
+it("rejects malformed quote atoms from HTML-only paste without breaking the draft", async () => {
+  const ref = createRef<ComposerPromptEditorHandle>();
+  await act(() =>
+    root.render(
+      <ComposerPromptEditorTiptap {...base} value="Keep my draft" cursor={0} editorRef={ref} />,
+    ),
+  );
+  await act(() => ref.current?.focusAtEnd());
+  const paste = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, "clipboardData", {
+    value: {
+      getData: (kind: string) =>
+        kind === "text/html"
+          ? '<span data-composer-selected-quote="" quote="null">bad quote</span>'
+          : "",
+      types: ["text/html"],
+      files: [],
+    },
+  });
+  await act(() => editorElement().dispatchEvent(paste));
+  expect(ref.current?.readSnapshot().value).toContain("Keep my draft");
+  expect(ref.current?.readSnapshot().value).toContain("bad quote");
+  expect(container.querySelector("[data-composer-selected-quote-chip]")).toBeNull();
+});
+
+it("ignores conflicting raw attributes on an otherwise valid HTML quote", async () => {
+  const ref = createRef<ComposerPromptEditorHandle>();
+  const quote = { version: 1 as const, source: "Pages", text: "Keep this *exact* quote" };
+  const source = serializeSelectedTextQuote(quote);
+  const span = document.createElement("span");
+  span.setAttribute("data-composer-selected-quote", "");
+  span.setAttribute("data-quote-source", source);
+  span.setAttribute("source", "$review @private/file");
+  span.setAttribute("quote", "null");
+  await act(() =>
+    root.render(<ComposerPromptEditorTiptap {...base} value="Draft " cursor={0} editorRef={ref} />),
+  );
+  await act(() => ref.current?.focusAtEnd());
+  const paste = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, "clipboardData", {
+    value: {
+      getData: (kind: string) => (kind === "text/html" ? span.outerHTML : ""),
+      types: ["text/html"],
+      files: [],
+    },
+  });
+  await act(() => editorElement().dispatchEvent(paste));
+  expect(ref.current?.readSnapshot().value).toBe(`Draft ${source}`);
+  expect(container.textContent).toContain(quote.text);
+  expect(container.textContent).not.toContain("$review");
 });
 
 it("keeps keyboard focus entering ! mode and leaving it with empty Backspace", async () => {

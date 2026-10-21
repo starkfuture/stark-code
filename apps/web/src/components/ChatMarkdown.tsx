@@ -1,4 +1,6 @@
 import { MarkdownFindContext, useFindRevealRef } from "./chat/markdownFindContext";
+import { parseSelectedTextQuoteHref } from "@starkfuture/shared/selectedTextQuotes";
+import { SelectedTextQuoteChip } from "./chat/SelectedTextQuoteChip";
 import { AssistantReader } from "./reader/AssistantReader";
 import { remarkReaderScreenshots } from "./reader/readerScreenshots";
 import {
@@ -2521,6 +2523,7 @@ function useChatMarkdownState({
   }, [inlineCodeFileLinkMetaByText, markdownFileLinkMetaByHref]);
   const markdownUrlTransform = useCallback((href: string) => {
     if (parseAssistantCitationHref(href)) return href;
+    if (parseSelectedTextQuoteHref(href)) return href;
     if (parseComposerContextHref(href)) return href;
     if (parseThreadLinkHref(href)) return href;
     if (isWindowsDrivePathHref(href)) return href;
@@ -2988,6 +2991,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
     } = use(ChatMarkdownRendererContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
     if (citation) return <AssistantCitationChip citation={citation} />;
+    const quote = href ? parseSelectedTextQuoteHref(href) : null;
+    if (quote) return <SelectedTextQuoteChip quote={quote} />;
     // A thread link names a thread in this message's environment and opens it in the app.
     const linkedThreadId = href ? parseThreadLinkHref(href) : null;
     if (linkedThreadId) {

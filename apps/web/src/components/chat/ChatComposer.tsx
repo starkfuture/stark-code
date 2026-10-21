@@ -239,6 +239,7 @@ import {
   inlineContextReferenceReplacement,
   toKindScopedComposerContextId,
 } from "~/lib/composerContextReferences";
+import { appendChatQuote, chatQuoteText } from "~/lib/chatQuote";
 import {
   asKnownContextRecord,
   composerContextImportLookupIds,
@@ -1506,6 +1507,7 @@ export interface ChatComposerHandle {
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
   ) => boolean;
+  quoteText: (text: string, source: string) => boolean;
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   openControl: (command: KeybindingCommand) => void;
@@ -1526,7 +1528,7 @@ export interface ChatComposerHandle {
     detectTrigger?: boolean;
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
-  addTerminalContext: (selection: TerminalContextSelection) => void;
+  addTerminalContext: (selection: TerminalContextSelection) => boolean;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     answeringPendingUserInput: boolean;
@@ -6794,12 +6796,35 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         focusComposer();
         return true;
       },
-      citeAssistantText: (citation, sourceAnchor) =>
-        insertComposerText(
+      citeAssistantText: (citation, sourceAnchor) => {
+        if (shellModeRef.current) {
+          if (
+            isConnecting ||
+            isComposerApprovalState ||
+            pendingUserInputs.length > 0 ||
+            projectSelectionRequired
+          )
+            return false;
+          // The comment editor belongs to the rich-text composer, not the ! command input.
+          flushSync(() => setShellCommandState(composerDraftTarget, { shellMode: false }));
+        }
+        const inserted = insertComposerText(
           formatAssistantCitationForComposer(citation, citation.comment),
           "cursor",
           { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
-        ),
+        );
+        if (inserted) setShellCommandState(composerDraftTarget, { shellMode: false });
+        return inserted;
+      },
+      quoteText: (text, source) => {
+        const quote = chatQuoteText(text, source);
+        if (!quote) return false;
+        const prompt = promptRef.current;
+        const insertion = appendChatQuote(prompt, quote).slice(prompt.length);
+        const inserted = insertComposerTextAtEnd(insertion);
+        if (inserted) setShellCommandState(composerDraftTarget, { shellMode: false });
+        return inserted;
+      },
       openModelPicker,
       toggleModelPicker: () => {
         if (isComposerModelPickerOpen) {
@@ -6867,7 +6892,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         );
       },
       addTerminalContext: (selection: TerminalContextSelection) => {
-        if (!activeThread || isChoiceOnlyPendingQuestion || isLiteralPendingAnswer) return;
+        if (
+          !activeThread ||
+          isConnecting ||
+          isComposerApprovalState ||
+          pendingUserInputs.length > 0 ||
+          projectSelectionRequired ||
+          isChoiceOnlyPendingQuestion ||
+          isLiteralPendingAnswer
+        )
+          return false;
         const snapshot = readComposerSnapshot();
         const context = {
           id: randomUUID(),
@@ -6890,7 +6924,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           context,
           composerTerminalContexts.length,
         );
-        if (!inserted) return;
+        if (!inserted) return false;
+        setShellCommandState(composerDraftTarget, { shellMode: false });
         promptRef.current = insertion.prompt;
         setComposerCursor(nextCollapsedCursor);
         setComposerTrigger(
@@ -6899,6 +6934,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         window.requestAnimationFrame(() => {
           composerEditorRef.current?.focusAt(nextCollapsedCursor);
         });
+        return true;
       },
       getSendContext: () => ({
         answeringPendingUserInput: activePendingProgress !== null,
@@ -6993,6 +7029,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       getTimelineScrollableNode,
       isTimelineAtLogicalEnd,
       setIsComposerScrollCollapsed,
+      setShellCommandState,
     ],
   );
 

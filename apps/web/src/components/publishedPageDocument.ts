@@ -1,6 +1,7 @@
 import createDOMPurify from "dompurify";
 import { generate, ident, parse, walk } from "css-tree";
 import type { StarkPublishedPageDocument } from "@starkfuture/contracts";
+import { MAX_PAGE_QUOTE_LENGTH } from "../starkPageQuote";
 
 type PageLocation = Pick<StarkPublishedPageDocument, "root" | "path">;
 const pagesOrigin = "https://pages.starkfuture.com";
@@ -243,6 +244,7 @@ export function preparePublishedHtml(html: string, bundle?: StarkPublishedPageDo
   const bridge = output.createElement("script");
   bridge.setAttribute("nonce", nonce);
   bridge.textContent = `function send(message){parent.postMessage({source:'stark-published-page',...message},${JSON.stringify(window.location.origin)});}function open(e){const a=e.target.closest?.('a[data-stark-link]');if(!a)return;e.preventDefault();const u=a.getAttribute('data-stark-link');if(u?.startsWith('#')){try{document.getElementById(decodeURIComponent(u.slice(1)))?.scrollIntoView();}catch{}return;}send({type:'open-link',url:u});}document.addEventListener('click',open);document.addEventListener('keydown',e=>{if(e.key==='Enter')open(e);if(e.key==='Escape'&&!e.defaultPrevented&&!e.isComposing&&!e.repeat&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey)send({type:'exit-expanded'});});`;
+  bridge.textContent += `function selection(){const s=window.getSelection();const text=s&&!s.isCollapsed?s.toString():'';send({type:'selection',selectionToken:${JSON.stringify(nonce)},text:text.length<=${MAX_PAGE_QUOTE_LENGTH}?text:'',tooLong:text.length>${MAX_PAGE_QUOTE_LENGTH}});}document.addEventListener('pointerup',selection);document.addEventListener('keyup',selection);`;
   const csp = output.createElement("meta");
   csp.httpEquiv = "Content-Security-Policy";
   csp.content = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'`;
@@ -254,5 +256,9 @@ export function preparePublishedHtml(html: string, bundle?: StarkPublishedPageDo
   fallback.textContent = `${unstyled ? "body{font:15px/1.6 system-ui,sans-serif;margin:0;padding:20px;color:#202124;overflow-wrap:anywhere}" : ""}img{max-width:100%;height:auto}pre{overflow:auto}table{max-width:100%}a[data-stark-link]{cursor:pointer}`;
   output.head.prepend(csp, fallback);
   output.body.append(bridge);
-  return { html: `<!doctype html>${output.documentElement.outerHTML}`, warnings: [...warnings] };
+  return {
+    html: `<!doctype html>${output.documentElement.outerHTML}`,
+    warnings: [...warnings],
+    selectionToken: nonce,
+  };
 }

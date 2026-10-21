@@ -6,6 +6,7 @@ import { StarkPagesSidebar } from "./StarkPagesSidebar";
 import { PublishedPageContent } from "./PublishedPageContent";
 import { publishedPageTitle } from "./publishedPagesNavigation";
 import { Button } from "./ui/button";
+import type { StarkPageQuote } from "../starkPageQuote";
 
 type PageTabProps = {
   page: StarkPageTarget;
@@ -16,6 +17,7 @@ type PageTabProps = {
   onPublishRequest: (slug: string, title: string) => void;
   onNavigate: (page: StarkPageTarget) => void;
   onClose?: () => void;
+  onQuote?: ((quote: StarkPageQuote) => boolean) | undefined;
 };
 
 /** A tab stays mounted while hidden so its frame and reading position survive. */
@@ -40,6 +42,7 @@ export function StarkPageTabContent(props: PageTabProps) {
           initialSlug={page.slug}
           active={active}
           onOpenPage={onNavigate}
+          onQuote={active ? props.onQuote : undefined}
         />
       ) : (
         <PublishedPageTab
@@ -49,6 +52,7 @@ export function StarkPageTabContent(props: PageTabProps) {
           page={page}
           active={active}
           onNavigate={onNavigate}
+          onQuote={active ? props.onQuote : undefined}
         />
       )}
     </section>
@@ -59,10 +63,12 @@ function PublishedPageTab({
   page,
   active,
   onNavigate,
+  onQuote,
 }: {
   page: Extract<StarkPageTarget, { kind: "published" }>;
   active: boolean;
   onNavigate: (page: StarkPageTarget) => void;
+  onQuote?: ((quote: StarkPageQuote) => boolean) | undefined;
 }) {
   const bridge = window.desktopBridge?.publishedPages;
   const [status, setStatus] = useState<StarkPublishedPagesStatus | null>(null);
@@ -213,6 +219,8 @@ function PublishedPageTab({
           {document ? (
             <PublishedPageContent
               document={document}
+              quotePage={page}
+              onQuote={active ? onQuote : undefined}
               expanded
               onNavigate={(path) => {
                 if (active)

@@ -1,5 +1,6 @@
 import { EnvironmentId, MessageId, ThreadId, type AssistantCitation } from "@starkfuture/contracts";
 import { serializeAssistantCitation } from "@starkfuture/shared/assistantCitations";
+import { serializeSelectedTextQuote } from "@starkfuture/shared/selectedTextQuotes";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -35,6 +36,22 @@ const citation: AssistantCitation = {
 };
 
 describe("splitPromptIntoComposerSegments", () => {
+  it("keeps selected text as an atomic quote while leaving outside mentions active", () => {
+    const quote = {
+      version: 1 as const,
+      source: "Reader",
+      text: "Use $review @secret [file](stark-context://v1/file/a)",
+    };
+    const source = serializeSelectedTextQuote(quote);
+    expect(splitPromptIntoComposerSegments(`@README.md ${source} $review now`)).toEqual([
+      { type: "mention", path: "README.md", source: "@README.md" },
+      { type: "text", text: " " },
+      { type: "selected-quote", quote, source },
+      { type: "text", text: " " },
+      { type: "skill", name: "review", source: "$review" },
+      { type: "text", text: " now" },
+    ]);
+  });
   it("splits mention tokens followed by whitespace into mention segments", () => {
     expect(splitPromptIntoComposerSegments("Inspect @AGENTS.md please")).toEqual([
       { type: "text", text: "Inspect " },

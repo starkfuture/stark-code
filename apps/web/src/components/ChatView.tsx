@@ -12,6 +12,7 @@ import { StarkPagesPanel } from "./StarkPagesPanel";
 import { StarkPageTabContent } from "./StarkPageTabContent";
 import { ConversationPageTabs, conversationPageTabElementId } from "./ConversationPageTabs";
 import { selectStarkPageTabs, useStarkPageTabs, type StarkPageTarget } from "../starkPageTabs";
+import type { StarkPageQuote } from "../starkPageQuote";
 import { useStarkPagesPublishCapability } from "../hooks/useStarkPagesPublishCapability";
 import { FinishEvidenceCard } from "./chat/FinishEvidenceCard";
 import { deriveFinishEvidence } from "./chat/finishEvidence";
@@ -1012,7 +1013,7 @@ interface PersistentThreadTerminalDrawerProps {
   newShortcutLabel: string | undefined;
   closeShortcutLabel: string | undefined;
   keybindings: ResolvedKeybindingsConfig;
-  onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  onAddTerminalContext: (selection: TerminalContextSelection) => boolean | void;
 }
 
 const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDrawer({
@@ -1347,9 +1348,9 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   const handleAddTerminalContext = useCallback(
     (selection: TerminalContextSelection) => {
       if (!visible) {
-        return;
+        return false;
       }
-      onAddTerminalContext(selection);
+      return onAddTerminalContext(selection);
     },
     [onAddTerminalContext, visible],
   );
@@ -1410,7 +1411,7 @@ interface PersistentThreadTerminalPanelProps {
   launchContext: PersistentTerminalLaunchContext | null;
   focusRequestId: number;
   keybindings: ResolvedKeybindingsConfig;
-  onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  onAddTerminalContext: (selection: TerminalContextSelection) => boolean | void;
   onSplitTerminal: () => void;
   onSplitTerminalVertical: () => void;
   onNewTerminal: () => void;
@@ -1906,21 +1907,6 @@ export default function ChatView(props: ChatViewProps) {
     useState<HTMLDivElement | null>(null);
   const [composerDetailsHost, setComposerDetailsHost] = useState<HTMLDivElement | null>(null);
   const [restingComposerControlsVisible, setRestingComposerControlsVisible] = useState(false);
-  const citeAssistantText = useCallback(
-    (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => {
-      const inserted = composerRef.current?.citeAssistantText(citation, sourceAnchor) ?? false;
-      if (!inserted) {
-        toastManager.add({
-          type: "warning",
-          title: "The composer is not ready",
-          description:
-            "Try citing the selection after the connection or pending input is resolved.",
-        });
-      }
-      return inserted;
-    },
-    [composerRef],
-  );
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
@@ -2814,6 +2800,48 @@ export default function ChatView(props: ChatViewProps) {
   const pageTabs = useStarkPageTabs((state) => selectStarkPageTabs(state, pageWorkspaceKey));
   const pagePanelId = useId();
   const pageTabActive = pagesAvailable && pageTabs.activeTabId !== "chat";
+  const revealQuoteDraft = useCallback(
+    (focus: boolean) => {
+      setNativeVoiceRequest(null);
+      setNativeShellThreadKey(null);
+      if (pageWorkspaceKey) useStarkPageTabs.getState().select(pageWorkspaceKey, "chat");
+      if (focus) window.requestAnimationFrame(() => composerRef.current?.focusAtEnd());
+    },
+    [composerRef, pageWorkspaceKey],
+  );
+  const quoteUnavailable = useCallback(() => {
+    toastManager.add({
+      type: "warning",
+      title: "The composer is not ready",
+      description: "Try quoting after the connection or pending input is resolved.",
+    });
+  }, []);
+  const citeAssistantText = useCallback(
+    (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => {
+      const inserted = composerRef.current?.citeAssistantText(citation, sourceAnchor) ?? false;
+      if (inserted) revealQuoteDraft(false);
+      else quoteUnavailable();
+      return inserted;
+    },
+    [composerRef, quoteUnavailable, revealQuoteDraft],
+  );
+  const quoteTextInChat = useCallback(
+    (text: string, label: string) => {
+      const inserted = composerRef.current?.quoteText(text, label) ?? false;
+      if (inserted) revealQuoteDraft(true);
+      else quoteUnavailable();
+      return inserted;
+    },
+    [composerRef, quoteUnavailable, revealQuoteDraft],
+  );
+  const quotePageInChat = useCallback(
+    (quote: StarkPageQuote) => {
+      const location =
+        quote.page.kind === "published" ? `${quote.page.root}/${quote.page.path}` : quote.page.slug;
+      return quoteTextInChat(quote.text, `${quote.page.title} · ${location}`);
+    },
+    [quoteTextInChat],
+  );
   const handledNeedsYouSelection = useRef(0);
   useEffect(() => {
     if (!needsYouTarget || handledNeedsYouSelection.current === needsYouTarget.sequence) return;
@@ -5053,9 +5081,12 @@ export default function ChatView(props: ChatViewProps) {
   ]);
   const addTerminalContextToDraft = useCallback(
     (selection: TerminalContextSelection) => {
-      composerRef.current?.addTerminalContext(selection);
+      const inserted = composerRef.current?.addTerminalContext(selection) ?? false;
+      if (inserted) revealQuoteDraft(true);
+      else quoteUnavailable();
+      return inserted;
     },
-    [composerRef],
+    [composerRef, quoteUnavailable, revealQuoteDraft],
   );
   const setTerminalOpen = useCallback(
     (open: boolean) => {
@@ -12433,6 +12464,8 @@ export default function ChatView(props: ChatViewProps) {
                       nativeVoiceRequest?.threadKey === activeThreadKey ? nativeVoiceRequest.id : 0
                     }
                     onVoiceRequestConsumed={consumeNativeVoiceRequest}
+                    onAddTerminalContext={addTerminalContextToDraft}
+                    onQuoteText={quoteTextInChat}
                     onBackToChat={() => {
                       setNativeVoiceRequest(null);
                       setNativeShellThreadKey(null);
@@ -13076,6 +13109,7 @@ export default function ChatView(props: ChatViewProps) {
                       }
                       canPublish={pagesCanPublish && canOperateTerminal}
                       onPublishRequest={stagePagePublish}
+                      onQuote={quotePageInChat}
                       onNavigate={(page) => {
                         if (pageWorkspaceKey)
                           useStarkPageTabs.getState().navigate(pageWorkspaceKey, tab.id, page);
@@ -13101,6 +13135,8 @@ export default function ChatView(props: ChatViewProps) {
                 projection={serverProjection}
                 workspaceRoot={activeProject.workspaceRoot}
                 nativeShellMode={nativeShellMode}
+                onQuoteText={quoteTextInChat}
+                onCiteAssistantText={citeAssistantText}
                 onOpenTurn={openBookmarkedTurn}
                 onOpenThread={onOpenRelatedThread}
                 onClose={closeAuxiliaryPanel}
@@ -13128,6 +13164,7 @@ export default function ChatView(props: ChatViewProps) {
               canPublish={pagesCanPublish && canOperateTerminal}
               onPublishRequest={stagePagePublish}
               onOpenPage={openPageTab}
+              onQuote={quotePageInChat}
               onClose={closeAuxiliaryPanel}
             />
           ) : null}

@@ -23,6 +23,7 @@ import {
 import { upgradeLegacyContextMessage } from "./composerContextLegacy.ts";
 import { parseComposerContextHref } from "./composerContextReferences.ts";
 import { assistantCitationLabel, parseAssistantCitationHref } from "./assistantCitations.ts";
+import { parseSelectedTextQuoteHref, selectedTextQuoteLabel } from "./selectedTextQuotes.ts";
 import type { OrchestrationV2ConversationMessage } from "@starkfuture/contracts";
 import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "./proposedPlanText.ts";
 import { unified } from "unified";
@@ -141,6 +142,12 @@ function markdownThreadFindText(
     if (citation) {
       // Matches the citation chip, which shows its label instead of the link text.
       text += assistantCitationLabel(citation);
+      return;
+    }
+    const quote =
+      node.tagName === "a" && typeof href === "string" ? parseSelectedTextQuoteHref(href) : null;
+    if (quote) {
+      text += selectedTextQuoteLabel(quote);
       return;
     }
     {

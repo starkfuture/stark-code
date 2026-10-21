@@ -22,9 +22,29 @@ const state = vi.hoisted(() => ({
   canRestart: true,
   generate: vi.fn(),
   back: vi.fn(),
+  quote: vi.fn<(text: string, label: string) => boolean>(),
+  selectionActions: new Map<HTMLElement, () => void>(),
   warning: undefined as ((warning: NativeMcpWarning) => void) | undefined,
   exit: undefined as (() => void) | undefined,
   launchError: undefined as ((message: string | null) => void) | undefined,
+}));
+vi.mock("../lib/selectionActions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/selectionActions")>()),
+  observeSelectionActions: ({
+    element,
+    onSelection,
+  }: {
+    element: HTMLElement;
+    onSelection: (pointer: null) => void;
+  }) => {
+    const update = () => onSelection(null);
+    state.selectionActions.set(element, update);
+    return {
+      cancel: () => undefined,
+      dispose: () => state.selectionActions.delete(element),
+      selectionChanged: update,
+    };
+  },
 }));
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: (atom: unknown) => (atom === "restart-permission" ? state.canRestart : true),
@@ -99,6 +119,7 @@ const render = (driver = "claudeAgent") =>
         worktreePath={null}
         keybindings={[]}
         onBackToChat={state.back}
+        onQuoteText={state.quote}
       />,
     ),
   );
@@ -145,6 +166,8 @@ beforeEach(() => {
   state.launchError = undefined;
   state.canRestart = true;
   state.back.mockReset();
+  state.quote.mockReset().mockReturnValue(true);
+  state.selectionActions.clear();
   state.restart.mockReset().mockResolvedValue({ _tag: "Success", value: { status: "running" } });
   state.generate.mockReset().mockResolvedValue({
     _tag: "Success",
@@ -228,6 +251,60 @@ it("surfaces passive connection warnings without changing terminal input or rest
   expect(container.textContent).not.toContain("A connection warning appeared in the terminal.");
   expect(state.restart).toHaveBeenCalledTimes(1);
 });
+
+it.each(["claudeAgent", "codex"])(
+  "quotes the selected captured %s reply while preserving its unsent CLI input",
+  async (driver) => {
+    state.replies = state.replies.map((reply) => ({
+      ...reply,
+      provider: driver === "codex" ? "codex" : "claude",
+    }));
+    const rect = new DOMRect(20, 20, 300, 300);
+    const originalRect = Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect");
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => rect,
+    });
+    const elementRect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(rect);
+    try {
+      await render(driver);
+      const input = container.querySelector<HTMLInputElement>('[aria-label="CLI input"]')!;
+      input.value = "unfinished native command";
+      await click("Reader");
+      await click("Fill window");
+      await selectReply("reply-0");
+      const range = document.createRange();
+      range.selectNodeContents(
+        container.querySelector('[aria-label="Original reply"] [data-markdown]')!,
+      );
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      await act(() => document.dispatchEvent(new Event("selectionchange")));
+      const quote = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Quote selection in chat"]',
+      )!;
+      expect(container.querySelector('[role="dialog"]')?.contains(quote)).toBe(true);
+      await act(() => quote.click());
+      expect(state.quote).toHaveBeenCalledExactlyOnceWith(
+        "First completed reply.",
+        `${driver === "codex" ? "Codex" : "Claude"} · First completed reply.`,
+      );
+      expect(container.querySelector("[data-assistant-citation-source]")).toBeNull();
+      expect(input.value).toBe("unfinished native command");
+      expect(state.mounts).toBe(1);
+      expect(state.generate).not.toHaveBeenCalled();
+      expect(state.restart).not.toHaveBeenCalled();
+    } finally {
+      window.getSelection()?.removeAllRanges();
+      elementRect.mockRestore();
+      if (originalRect)
+        Object.defineProperty(Range.prototype, "getBoundingClientRect", originalRect);
+      else Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
+    }
+  },
+);
 
 it.each(["claudeAgent", "codex"])(
   "retries a failed %s session in place after its workspace becomes available",

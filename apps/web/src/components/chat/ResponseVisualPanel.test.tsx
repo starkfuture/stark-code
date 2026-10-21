@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { scopeThreadRef } from "@starkfuture/client-runtime/environment";
@@ -8,10 +8,33 @@ import {
   RESPONSE_VISUALS_MODEL,
   RESPONSE_VISUALS_VERSION,
   type ResponseVisualsResult,
+  MessageId,
 } from "@starkfuture/contracts";
 import { makeThreadFixture } from "../../test-fixtures";
 
-const state = vi.hoisted(() => ({ allowed: true, generate: vi.fn() }));
+const state = vi.hoisted(() => ({
+  allowed: true,
+  generate: vi.fn(),
+  selectionActions: new Map<HTMLElement, () => void>(),
+}));
+vi.mock("../../lib/selectionActions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/selectionActions")>()),
+  observeSelectionActions: ({
+    element,
+    onSelection,
+  }: {
+    element: HTMLElement;
+    onSelection: (pointer: null) => void;
+  }) => {
+    const update = () => onSelection(null);
+    state.selectionActions.set(element, update);
+    return {
+      cancel: () => undefined,
+      dispose: () => state.selectionActions.delete(element),
+      selectionChanged: update,
+    };
+  },
+}));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => state.allowed }));
 vi.mock("../../state/responseVisuals", () => ({
   responseVisualsEnvironment: { format: { permissionAtom: () => "visual-permission" } },
@@ -40,7 +63,13 @@ const success = { _tag: "Success" as const, value: result };
 async function render(text = "The original answer.") {
   await renderAnswers([{ id: "answer", text, label: "Answer" }]);
 }
-async function renderAnswers(answers: readonly ReaderAnswer[]) {
+async function renderAnswers(
+  answers: readonly ReaderAnswer[],
+  callbacks: Pick<
+    ComponentProps<typeof ResponseVisualPanel>,
+    "onQuoteText" | "onCiteAssistantText"
+  > = {},
+) {
   await act(() =>
     root.render(
       <ResponseVisualPanel
@@ -48,6 +77,7 @@ async function renderAnswers(answers: readonly ReaderAnswer[]) {
         threadRef={threadRef}
         cwd="/work"
         answers={answers}
+        {...callbacks}
       />,
     ),
   );
@@ -73,9 +103,95 @@ beforeEach(() => {
   localStorage.clear();
   state.allowed = true;
   state.generate.mockReset().mockResolvedValue(success);
+  state.selectionActions.clear();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
+});
+
+it("cites a selected real answer with its own message identity and quotes pasted text without inventing one", async () => {
+  const onCiteAssistantText = vi.fn<
+    NonNullable<ComponentProps<typeof ResponseVisualPanel>["onCiteAssistantText"]>
+  >(() => true);
+  const onQuoteText = vi.fn<NonNullable<ComponentProps<typeof ResponseVisualPanel>["onQuoteText"]>>(
+    () => true,
+  );
+  const rect = new DOMRect(20, 20, 300, 300);
+  const originalRect = Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect");
+  const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, "getClientRects");
+  Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: () => rect,
+  });
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value: () => Object.assign([rect], { item: () => rect }),
+  });
+  const elementRect = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockReturnValue(rect);
+  async function selectSource() {
+    const source = container.querySelector('[aria-label="Original reply"]')!.lastElementChild!;
+    const range = document.createRange();
+    range.selectNodeContents(source);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    await act(() => document.dispatchEvent(new Event("selectionchange")));
+  }
+  try {
+    await renderAnswers(
+      [
+        {
+          id: "reader-choice",
+          messageId: MessageId.make("real-assistant-message"),
+          text: "A real answer to cite.",
+          label: "Assistant reply",
+        },
+        { id: "native-reply", text: "A captured reply.", label: "Claude native reply" },
+      ],
+      { onCiteAssistantText, onQuoteText },
+    );
+    expect(container.querySelector("[data-assistant-citation-source]")).toBeNull();
+    await chooseReply("reader-choice");
+    await selectSource();
+    const cite = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Cite selection in composer"]',
+    )!;
+    expect(cite).not.toBeNull();
+    await act(() => cite.click());
+    expect(onCiteAssistantText.mock.calls[0]?.[0]).toMatchObject({
+      messageId: "real-assistant-message",
+      ...threadRef,
+      text: "A real answer to cite.",
+    });
+    expect(onQuoteText).not.toHaveBeenCalled();
+
+    await chooseReply("paste");
+    const textarea = container.querySelector<HTMLTextAreaElement>('[aria-label="Reply text"]')!;
+    await act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        textarea,
+        "Pasted source text.",
+      );
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(container.querySelector("[data-assistant-citation-source]")).toBeNull();
+    await selectSource();
+    const quote = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Quote selection in chat"]',
+    )!;
+    await act(() => quote.click());
+    expect(onQuoteText).toHaveBeenCalledExactlyOnceWith("Pasted source text.", "Pasted reply");
+    expect(onCiteAssistantText).toHaveBeenCalledTimes(1);
+    expect(state.generate).not.toHaveBeenCalled();
+  } finally {
+    window.getSelection()?.removeAllRanges();
+    elementRect.mockRestore();
+    if (originalRect) Object.defineProperty(Range.prototype, "getBoundingClientRect", originalRect);
+    else Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
+    if (originalRects) Object.defineProperty(Range.prototype, "getClientRects", originalRects);
+    else Reflect.deleteProperty(Range.prototype, "getClientRects");
+  }
 });
 afterEach(async () => {
   await act(() => root.unmount());

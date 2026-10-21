@@ -1,5 +1,9 @@
 import type { AssistantCitation } from "@starkfuture/contracts";
 import { collectAssistantCitations } from "@starkfuture/shared/assistantCitations";
+import {
+  collectSelectedTextQuotes,
+  type SelectedTextQuote,
+} from "@starkfuture/shared/selectedTextQuotes";
 import { collectComposerContextReferences } from "@starkfuture/shared/composerContextReferences";
 import {
   collectComposerInlineTokens,
@@ -24,6 +28,11 @@ export type ComposerPromptSegment =
   | {
       type: "citation";
       citation: AssistantCitation;
+      source: string;
+    }
+  | {
+      type: "selected-quote";
+      quote: SelectedTextQuote;
       source: string;
     }
   | {
@@ -78,12 +87,14 @@ function forEachMentionMatch(
 export function collectComposerPromptInlineTokens(text: string) {
   const tokens = collectComposerInlineTokens(text);
   const citations = collectAssistantCitations(text);
+  const quotes = collectSelectedTextQuotes(text);
   const references = collectComposerContextReferences(text);
-  if (citations.length === 0 && references.length === 0) return tokens;
+  if (citations.length === 0 && quotes.length === 0 && references.length === 0) return tokens;
 
   // An unfinished @ mention can otherwise consume the start of a link label.
   const links = [
     ...citations.map((match) => ({ ...match, type: "citation" as const })),
+    ...quotes.map((match) => ({ ...match, type: "selected-quote" as const })),
     ...references.map((match) => ({ ...match, type: "context-reference" as const })),
   ];
   return [
@@ -113,6 +124,8 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
 
     if (match.type === "citation") {
       segments.push({ type: "citation", citation: match.citation, source: match.source });
+    } else if (match.type === "selected-quote") {
+      segments.push({ type: "selected-quote", quote: match.quote, source: match.source });
     } else if (match.type === "context-reference") {
       segments.push({
         type: "context-reference",

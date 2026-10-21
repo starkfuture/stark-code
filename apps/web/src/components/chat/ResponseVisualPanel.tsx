@@ -6,6 +6,8 @@ import type {
   ResponseVisualsResult,
   ScopedThreadRef,
   NativeTurnEvidence,
+  AssistantCitation,
+  MessageId,
 } from "@starkfuture/contracts";
 import { useRef, useState, type CSSProperties } from "react";
 import * as Schema from "effect/Schema";
@@ -17,6 +19,9 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { FinishEvidenceCard } from "./FinishEvidenceCard";
 import { deriveNativeFinishEvidence } from "./nativeFinishEvidence";
+import type { AssistantCitationSourceAnchor } from "../../lib/assistantTextSelection";
+import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
+import { ReaderSelectionToolbar } from "../reader/ReaderSelectionToolbar";
 
 const ReaderFontSize = Schema.Literals([14, 16, 18, 20]);
 
@@ -26,6 +31,7 @@ export interface ReaderAnswer {
   readonly label: string;
   readonly truncated?: boolean;
   readonly evidence?: NativeTurnEvidence | undefined;
+  readonly messageId?: MessageId | undefined;
 }
 
 /** Source stays verbatim; additions never replace the provider's answer. */
@@ -35,6 +41,10 @@ export function ResponseVisualPanel(props: {
   cwd: string;
   threadRef: ScopedThreadRef;
   emptyMessage?: string | undefined;
+  onQuoteText?: ((text: string, label: string) => boolean) | undefined;
+  onCiteAssistantText?:
+    | ((citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => boolean)
+    | undefined;
 }) {
   const [chosen, setChosen] = useState("latest");
   const [pasted, setPasted] = useState("");
@@ -94,6 +104,8 @@ export function ResponseVisualPanel(props: {
           key={`${chosen === "paste" ? "paste" : selected?.id}:${answer}`}
           {...props}
           answer={answer}
+          messageId={chosen === "paste" ? undefined : selected?.messageId}
+          sourceLabel={chosen === "paste" ? "Pasted reply" : (selected?.label ?? "Reader reply")}
           truncated={chosen !== "paste" && selected?.truncated === true}
         />
       ) : (
@@ -111,7 +123,15 @@ function VisualReader(props: {
   cwd: string;
   threadRef: ScopedThreadRef;
   truncated: boolean;
+  messageId?: MessageId | undefined;
+  sourceLabel: string;
+  onQuoteText?: ((text: string, label: string) => boolean) | undefined;
+  onCiteAssistantText?:
+    | ((citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => boolean)
+    | undefined;
 }) {
+  const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
+  const [source, setSource] = useState<HTMLDivElement | null>(null);
   const [fontSize, setFontSize] = useLocalStorage("starkcode:reader-font-size", 16, ReaderFontSize);
   const canGenerate = useAtomValue(
     responseVisualsEnvironment.format.permissionAtom(props.environmentId),
@@ -160,10 +180,26 @@ function VisualReader(props: {
   }
   return (
     <div
+      ref={setViewport}
       className="min-h-0 min-w-0 flex-1 overflow-auto p-4"
       data-reply-reader
+      data-assistant-citation-viewport="true"
       style={{ "--reply-reader-size": `${fontSize}px` } as CSSProperties}
     >
+      {props.messageId && props.onCiteAssistantText ? (
+        <AssistantSelectionToolbar
+          viewport={viewport}
+          threadRef={props.threadRef}
+          onCite={props.onCiteAssistantText}
+        />
+      ) : props.onQuoteText ? (
+        <ReaderSelectionToolbar
+          viewport={viewport}
+          source={source}
+          label={props.sourceLabel}
+          onQuote={props.onQuoteText}
+        />
+      ) : null}
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <Button
           size="sm"
@@ -250,13 +286,22 @@ function VisualReader(props: {
         {result ? (
           <h3 className="mb-3 text-xs font-medium text-muted-foreground">Original reply</h3>
         ) : null}
-        <ChatMarkdown
-          reader
-          remoteImagePolicy="click-to-load"
-          text={props.answer}
-          cwd={props.cwd}
-          threadRef={props.threadRef}
-        />
+        <div
+          ref={setSource}
+          data-assistant-citation-source={props.messageId}
+          data-assistant-citation-environment={
+            props.messageId ? props.threadRef.environmentId : undefined
+          }
+          data-assistant-citation-thread={props.messageId ? props.threadRef.threadId : undefined}
+        >
+          <ChatMarkdown
+            reader
+            remoteImagePolicy="click-to-load"
+            text={props.answer}
+            cwd={props.cwd}
+            threadRef={props.threadRef}
+          />
+        </div>
       </div>
     </div>
   );

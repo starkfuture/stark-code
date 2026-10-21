@@ -5,6 +5,7 @@ import { derivePendingThreadRequests } from "@starkfuture/client-runtime/state/t
 import { squashAtomCommandFailure } from "@starkfuture/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
+  type AssistantCitation,
   type OrchestrationV2ThreadProjection,
   type ThreadId,
 } from "@starkfuture/contracts";
@@ -25,6 +26,8 @@ import { ChangesetCheckPanel } from "./ChangesetCheckPanel";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { ResponseVisualPanel } from "./ResponseVisualPanel";
 import ChatMarkdown from "../ChatMarkdown";
+import type { AssistantCitationSourceAnchor } from "../../lib/assistantTextSelection";
+import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
@@ -63,6 +66,10 @@ export function SideWorkPanel(props: {
   onOpenTurn?: (entryId: string) => void;
   onClose: () => void;
   showHeader?: boolean;
+  onQuoteText?: ((text: string, label: string) => boolean) | undefined;
+  onCiteAssistantText?:
+    | ((citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => boolean)
+    | undefined;
 }) {
   const { parent } = props;
   const storageKey = `stark-code:side-work:${scopedThreadKey(scopeThreadRef(parent.environmentId, parent.id))}`;
@@ -74,6 +81,7 @@ export function SideWorkPanel(props: {
     }
   });
   const [selected, setSelected] = useState<SideWorkRecord | null>(null);
+  const [replyViewport, setReplyViewport] = useState<HTMLDivElement | null>(null);
   const [tab, setTab] = useState<SideWorkTab>("question");
   const [request, setRequest] = useState("");
   const [busy, setBusy] = useState(false);
@@ -115,6 +123,7 @@ export function SideWorkPanel(props: {
         )
         .map((message, index) => ({
           id: message.id,
+          messageId: message.id,
           text: message.text,
           label: `${index + 1}. ${message.text.replace(/\s+/g, " ").slice(0, 90)}`,
         }));
@@ -291,6 +300,8 @@ export function SideWorkPanel(props: {
             threadRef={parentRef}
             cwd={parent.worktreePath ?? props.workspaceRoot}
             answers={readerAnswers}
+            onQuoteText={props.onQuoteText}
+            onCiteAssistantText={props.onCiteAssistantText}
             emptyMessage={
               props.nativeShellMode
                 ? "Completed native replies appear here after a new shell session starts. Codex may ask you to approve the capture hook first. You can also paste a reply."
@@ -402,7 +413,19 @@ export function SideWorkPanel(props: {
               </div>
             ) : null}
           </div>
-          <div className="min-h-0 flex-1 space-y-4 overflow-auto p-3" aria-live="polite">
+          <div
+            ref={setReplyViewport}
+            className="min-h-0 flex-1 space-y-4 overflow-auto p-3"
+            aria-live="polite"
+            data-assistant-citation-viewport="true"
+          >
+            {props.onCiteAssistantText && selectedRef ? (
+              <AssistantSelectionToolbar
+                viewport={replyViewport}
+                threadRef={selectedRef}
+                onCite={props.onCiteAssistantText}
+              />
+            ) : null}
             {selectedProjection?.messages
               .filter((message) => message.role !== "system")
               .map((message, index) =>
@@ -418,14 +441,22 @@ export function SideWorkPanel(props: {
                     <p className="mt-2 whitespace-pre-wrap break-words">{message.text}</p>
                   </details>
                 ) : (
-                  <ChatMarkdown
+                  <div
                     key={message.id}
-                    reader
-                    text={message.text}
-                    cwd={selectedShell?.worktreePath ?? props.workspaceRoot}
-                    threadRef={selectedRef ?? undefined}
-                    isStreaming={message.streaming}
-                  />
+                    data-assistant-citation-source={
+                      message.role === "assistant" && !message.streaming ? message.id : undefined
+                    }
+                    data-assistant-citation-environment={selectedRef?.environmentId}
+                    data-assistant-citation-thread={selectedRef?.threadId}
+                  >
+                    <ChatMarkdown
+                      reader
+                      text={message.text}
+                      cwd={selectedShell?.worktreePath ?? props.workspaceRoot}
+                      threadRef={selectedRef ?? undefined}
+                      isStreaming={message.streaming}
+                    />
+                  </div>
                 ),
               )}
             {htmlRenders.map((render) => (

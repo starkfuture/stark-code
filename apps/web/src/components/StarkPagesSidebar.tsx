@@ -8,6 +8,8 @@ import {
 } from "@starkfuture/shared/starkPages";
 import { Button } from "./ui/button";
 import type { StarkPageTarget } from "../starkPageTabs";
+import { readPageSelection, type PageSelection, type StarkPageQuote } from "../starkPageQuote";
+import { PagesQuoteSelection } from "./PagesQuoteSelection";
 
 const EMPTY = "No pages yet. Ask Claude for a decision or a report, or run /stark-workbench:page.";
 
@@ -22,6 +24,7 @@ export function StarkPagesSidebar(props: {
   readonly active?: boolean;
   readonly onPageChange?: ((page: StarkPageTarget) => void) | undefined;
   readonly onOpenPage?: ((page: StarkPageTarget) => void) | undefined;
+  readonly onQuote?: ((quote: StarkPageQuote) => boolean) | undefined;
 }) {
   const {
     projectRoot,
@@ -33,10 +36,14 @@ export function StarkPagesSidebar(props: {
     active = true,
     onOpenPage,
     onPageChange,
+    onQuote,
   } = props;
   const publishingEnabled = canPublish && agent === "claude";
   const frame = useRef<HTMLIFrameElement>(null);
-  const trusted = useRef<{ key: string; ready: boolean } | null>(null);
+  const trusted = useRef<{ key: string; ready: boolean; selectionToken?: string } | null>(null);
+  const [selection, setSelection] = useState<
+    (PageSelection & { key: string; slug: string }) | null
+  >(null);
   const connectionTimer = useRef<number | null>(null);
   const [retry, setRetry] = useState(0);
   const [discovery, setDiscovery] = useState<{
@@ -134,6 +141,9 @@ export function StarkPagesSidebar(props: {
             type: "host",
             canPublish: publishingEnabled,
             agent: agent,
+            ...(active && onQuote && trusted.current.selectionToken
+              ? { selectionToken: trusted.current.selectionToken }
+              : {}),
             ...(initialSlug ? { presentation: "document" } : {}),
           },
           origin,
@@ -148,6 +158,28 @@ export function StarkPagesSidebar(props: {
     };
     const onMessage = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== origin) return;
+      if (
+        active &&
+        onQuote &&
+        trusted.current?.key === panelKey &&
+        trusted.current.ready &&
+        trusted.current.selectionToken
+      ) {
+        const selected = readPageSelection(
+          event.data,
+          "stark-pages",
+          trusted.current.selectionToken,
+        );
+        if (
+          selected !== null &&
+          event.data.v === 1 &&
+          event.data.slug === shownSlug.current &&
+          shownSlug.current
+        ) {
+          setSelection({ key: panelKey, slug: shownSlug.current, ...selected });
+          return;
+        }
+      }
       const message = parseStarkPagesMessage(event.data);
       if (!message) return;
       if (message.type === "ready") {
@@ -159,7 +191,10 @@ export function StarkPagesSidebar(props: {
           });
           return;
         }
-        trusted.current = { key: panelKey, ready: true };
+        // A new handshake invalidates selection messages queued by an older document.
+        // @effect-diagnostics-next-line cryptoRandomUUID:off -- Per-frame message capability, never persisted.
+        trusted.current = { key: panelKey, ready: true, selectionToken: crypto.randomUUID() };
+        setSelection(null);
         if (connectionTimer.current !== null) window.clearTimeout(connectionTimer.current);
         connectionTimer.current = null;
         setNotice(null);
@@ -177,13 +212,12 @@ export function StarkPagesSidebar(props: {
       if (message.type === "show") {
         shownSlug.current = message.page.slug;
         const page = { kind: "local" as const, ...message.page };
+        // Followed catalog pages remain previews until the user opens a tab.
+        setSelectedPage({ key: panelKey, page });
+        setSelection(null);
         onPageChange?.(page);
         if (initialSlug) {
           if (active) onOpenPage?.(page);
-        } else {
-          // The mirror follows new pages automatically. Opening a tab is an
-          // explicit user action, never a side effect of that background feed.
-          setSelectedPage({ key: panelKey, page });
         }
       } else if (message.type === "publish-request") {
         if (!active) return;
@@ -241,6 +275,7 @@ export function StarkPagesSidebar(props: {
     active,
     onOpenPage,
     onPageChange,
+    onQuote,
   ]);
 
   return (
@@ -276,6 +311,24 @@ export function StarkPagesSidebar(props: {
             Open page in tab
           </Button>
         </div>
+      ) : null}
+      {active &&
+      onQuote &&
+      selection?.key === panelKey &&
+      (selection.text || selection.tooLong) &&
+      selectedPage?.key === panelKey &&
+      selectedPage.page.slug === selection.slug ? (
+        <PagesQuoteSelection
+          text={selection.text}
+          tooLong={selection.tooLong}
+          onQuote={() => {
+            if (
+              !selection.tooLong &&
+              onQuote({ text: selection.text, page: selectedPage.page, projectRoot })
+            )
+              setSelection(null);
+          }}
+        />
       ) : null}
       {origin && mirror ? (
         <iframe

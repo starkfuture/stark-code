@@ -278,6 +278,7 @@ export function StarkPagesPanel({
                   expanded={expanded}
                   onExitExpanded={restorePanel}
                   onOpenPage={props.onOpenPage}
+                  onQuote={active && view === "published" ? props.onQuote : undefined}
                 />
               ) : null}
             </div>

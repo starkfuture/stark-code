@@ -220,14 +220,18 @@ function selectedTextBoundary(range: Range, node: Node, last: boolean): Text | n
 export function captureAssistantTextSelection(
   viewport: HTMLElement,
   selection: Selection | null,
+  sourceRoot?: HTMLElement,
 ): { source: HTMLElement; selector: AssistantTextSelector; range: Range } | null {
   if (selection === null || selection.isCollapsed || selection.rangeCount !== 1) return null;
   const range = selection.getRangeAt(0).cloneRange();
   const first = selectedTextBoundary(range, range.commonAncestorContainer, false);
   const last = selectedTextBoundary(range, range.commonAncestorContainer, true);
   if (first === null || last === null) return null;
-  const source = first.parentElement?.closest<HTMLElement>("[data-assistant-citation-source]");
-  if (!source || !viewport.contains(source)) return null;
+  // Captured terminal/pasted replies share selection filtering, but have no
+  // assistant message ID. Their caller supplies the actual source container.
+  const source =
+    sourceRoot ?? first.parentElement?.closest<HTMLElement>("[data-assistant-citation-source]");
+  if (!source || !source.contains(first) || !viewport.contains(source)) return null;
 
   // Paragraph selection can end at the next block's offset 0 or a parent
   // boundary. Validate the text actually selected, not that empty endpoint.

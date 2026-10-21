@@ -163,6 +163,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
       ...(defaultSchema.protocols?.href ?? []),
       "file",
       "stark-citation",
+      "stark-quote",
       "stark-context",
       THREAD_LINK_PROTOCOL,
     ],

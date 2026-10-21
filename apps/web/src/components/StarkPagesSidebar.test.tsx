@@ -366,3 +366,64 @@ it("keeps initial and followed catalog pages as previews until the user opens a 
     title: "New report",
   });
 });
+
+it("offers local page quotes only for the trusted current selection and an explicit active click", async () => {
+  const onQuote = vi.fn(() => true);
+  const view = (active: boolean) => (
+    <StarkPagesSidebar {...props()} active={active} onQuote={onQuote} />
+  );
+  await act(async () => {
+    renderer = create(view(true), {
+      createNodeMock: (element) =>
+        element.type === "iframe" ? { contentWindow: frameWindow } : null,
+    });
+  });
+  await ready();
+  await message({ ...request, type: "show" });
+  const host = frameWindow.postMessage.mock.calls.findLast(([data]) => data.type === "host")![0];
+  const selection = {
+    v: 1,
+    source: "stark-pages",
+    type: "selection",
+    selectionToken: host.selectionToken,
+    slug: "decision-one",
+    text: "The chosen evidence",
+    title: "Untrusted title",
+  };
+  const actions = () =>
+    renderer!.root
+      .findAllByType("button")
+      .filter((button) => button.children.includes("Quote in chat"));
+  await message(selection, { source: {} });
+  await message(selection, { origin: "http://127.0.0.1:4318" });
+  await message({ ...selection, selectionToken: "old" });
+  await message({ ...selection, slug: "another-page" });
+  expect(actions()).toHaveLength(0);
+  await message({ ...selection, text: "", tooLong: true });
+  expect(actions()[0]!.props.disabled).toBe(true);
+  expect(renderer!.root.findByProps({ role: "status" }).children.join("")).toContain(
+    "Shorten selection",
+  );
+  await message(selection);
+  expect(onQuote).not.toHaveBeenCalled();
+  expect(actions()).toHaveLength(1);
+  onQuote.mockReturnValueOnce(false);
+  await act(async () => actions()[0]!.props.onClick());
+  expect(actions()).toHaveLength(1);
+  await act(async () => actions()[0]!.props.onClick());
+  expect(onQuote).toHaveBeenCalledTimes(2);
+  expect(onQuote).toHaveBeenLastCalledWith({
+    text: "The chosen evidence",
+    page: { kind: "local", slug: "decision-one", title: "Decision" },
+    projectRoot: "/project",
+  });
+  expect(actions()).toHaveLength(0);
+  await act(async () => renderer!.update(view(false)));
+  await message(selection);
+  expect(actions()).toHaveLength(0);
+  await act(async () => renderer!.update(view(true)));
+  await ready();
+  await message({ ...request, type: "show" });
+  await message(selection);
+  expect(actions()).toHaveLength(0);
+});

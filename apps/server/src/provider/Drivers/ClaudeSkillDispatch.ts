@@ -23,6 +23,7 @@
  *
  * @module provider/Drivers/ClaudeSkillDispatch
  */
+import { collectGeneratedReferenceDataRanges } from "@starkfuture/shared/composerContextReferences";
 
 /**
  * Same token shape the composer and timeline chips recognise
@@ -50,10 +51,12 @@ export function planClaudeSkillDispatch(
   prompt: string,
   skillNames: ReadonlySet<string>,
 ): ClaudeSkillDispatch | undefined {
+  const references = collectGeneratedReferenceDataRanges(prompt);
   const mentions = [...prompt.matchAll(SKILL_MENTION_PATTERN)].flatMap((match) => {
     const name = match[2] ?? "";
     if (!skillNames.has(name)) return [];
     const start = (match.index ?? 0) + (match[1]?.length ?? 0);
+    if (references.some((range) => start >= range.start && start < range.end)) return [];
     return [{ name, start, end: (match.index ?? 0) + match[0].length }];
   });
   const last = mentions.at(-1);

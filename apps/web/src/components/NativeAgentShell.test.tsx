@@ -19,18 +19,28 @@ const state = vi.hoisted(() => ({
   escapes: 0,
   replies: [] as NativeAgentReply[],
   restart: vi.fn(),
+  canRestart: true,
   generate: vi.fn(),
   back: vi.fn(),
   warning: undefined as ((warning: NativeMcpWarning) => void) | undefined,
   exit: undefined as (() => void) | undefined,
+  launchError: undefined as ((message: string | null) => void) | undefined,
 }));
-vi.mock("@effect/atom-react", () => ({ useAtomValue: () => true }));
+vi.mock("@effect/atom-react", () => ({
+  useAtomValue: (atom: unknown) => (atom === "restart-permission" ? state.canRestart : true),
+}));
 vi.mock("../state/responseVisuals", () => ({
   responseVisualsEnvironment: { format: { permissionAtom: () => "visual-permission" } },
 }));
-vi.mock("../state/terminal", () => ({ terminalEnvironment: { restart: "restart" } }));
+vi.mock("../state/terminal", () => ({
+  terminalEnvironment: {
+    restart: { permissionAtom: () => "restart-permission" },
+    write: { permissionAtom: () => "write-permission" },
+  },
+}));
 vi.mock("../state/use-atom-command", () => ({
-  useAtomCommand: (command: unknown) => (command === "restart" ? state.restart : state.generate),
+  useAtomCommand: (command: { permissionAtom?: () => string }) =>
+    command.permissionAtom?.() === "restart-permission" ? state.restart : state.generate,
 }));
 vi.mock("../state/nativeReplies", () => ({
   useNativeReplies: (_ref: unknown, enabled: boolean) => ({
@@ -45,12 +55,15 @@ vi.mock("./ThreadTerminalDrawer", () => ({
   TerminalViewport: ({
     onMcpWarning,
     onSessionExited,
+    onSessionLaunchError,
   }: {
     onMcpWarning?: (warning: NativeMcpWarning) => void;
     onSessionExited?: () => void;
+    onSessionLaunchError?: (message: string | null) => void;
   }) => {
     state.warning = onMcpWarning;
     state.exit = onSessionExited;
+    state.launchError = onSessionLaunchError;
     useEffect(() => {
       state.mounts++;
       return () => {
@@ -75,13 +88,13 @@ let container: HTMLDivElement;
 const thread = makeThreadFixture();
 const threadRef = scopeThreadRef(thread.environmentId, thread.id);
 const instanceId = ProviderInstanceId.make("claude-reader");
-const render = () =>
+const render = (driver = "claudeAgent") =>
   act(() =>
     root.render(
       <NativeAgentShell
         threadRef={threadRef}
         providerInstanceId={instanceId}
-        driver="claudeAgent"
+        driver={driver}
         cwd="/work"
         worktreePath={null}
         keybindings={[]}
@@ -129,8 +142,10 @@ beforeEach(() => {
   state.escapes = 0;
   state.warning = undefined;
   state.exit = undefined;
+  state.launchError = undefined;
+  state.canRestart = true;
   state.back.mockReset();
-  state.restart.mockReset();
+  state.restart.mockReset().mockResolvedValue({ _tag: "Success", value: { status: "running" } });
   state.generate.mockReset().mockResolvedValue({
     _tag: "Success",
     value: {
@@ -207,12 +222,68 @@ it("surfaces passive connection warnings without changing terminal input or rest
   expect(container.textContent).not.toContain("A connector may need sign-in.");
   await act(() => state.warning?.("connection"));
   expect(container.textContent).toContain("A connection warning appeared in the terminal.");
-  state.restart.mockResolvedValue({ _tag: "Success" });
+  state.restart.mockResolvedValue({ _tag: "Success", value: { status: "running" } });
   await act(() => state.exit?.());
   await click("Start another session");
   expect(container.textContent).not.toContain("A connection warning appeared in the terminal.");
   expect(state.restart).toHaveBeenCalledTimes(1);
 });
+
+it.each(["claudeAgent", "codex"])(
+  "retries a failed %s session in place after its workspace becomes available",
+  async (driver) => {
+    await render(driver);
+    const input = container.querySelector<HTMLInputElement>('[aria-label="CLI input"]')!;
+    const error =
+      "A native agent is already running in this workspace. Exit it or use another Git worktree.";
+    await act(() => state.launchError?.(error));
+    expect(button("Retry native session").disabled).toBe(false);
+    expect(state.restart).not.toHaveBeenCalled();
+
+    state.canRestart = false;
+    await render(driver);
+    expect(button("Retry native session").disabled).toBe(true);
+    await click("Retry native session");
+    expect(state.restart).not.toHaveBeenCalled();
+    state.canRestart = true;
+    await render(driver);
+
+    let complete: ((value: unknown) => void) | undefined;
+    state.restart.mockReturnValueOnce(
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+    );
+    await click("Retry native session");
+    expect(button("Starting…").disabled).toBe(true);
+    await click("Starting…");
+    expect(state.restart).toHaveBeenCalledTimes(1);
+    await act(async () => complete?.({ _tag: "Success", value: { status: "error", error } }));
+    expect(button("Retry native session").disabled).toBe(false);
+
+    // A successful user retry after the owner exits keeps the same chat and viewport.
+    await click("Retry native session");
+    expect(state.restart).toHaveBeenLastCalledWith({
+      environmentId: threadRef.environmentId,
+      input: {
+        threadId: threadRef.threadId,
+        terminalId: `native-agent-${instanceId}`,
+        cwd: "/work",
+        worktreePath: null,
+        providerInstanceId: instanceId,
+        agentShell: true,
+        cols: 100,
+        rows: 30,
+      },
+    });
+    expect(container.textContent).not.toContain("Retry native session");
+    expect(container.textContent).not.toContain("The native session could not start.");
+    expect(container.querySelector('[aria-label="CLI input"]')).toBe(input);
+    expect(state.mounts).toBe(1);
+    expect(state.unmounts).toBe(0);
+    expect(state.back).not.toHaveBeenCalled();
+  },
+);
 
 it("preserves the selected reply, reading position and generated overview when the terminal is shown", async () => {
   await render();

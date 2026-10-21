@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   otherCommand: vi.fn(),
   navigate: vi.fn(),
   error: null as string | null,
+  launchError: vi.fn(),
   createSurface:
     vi.fn<
       (
@@ -51,7 +52,12 @@ vi.mock("../state/use-atom-command", () => ({
   useAtomCommand: (command: string) => (command === "resize" ? state.resize : state.otherCommand),
 }));
 vi.mock("../state/terminalSessions", () => ({
-  useAttachedTerminalSession: () => ({ ...session, error: state.error }),
+  useAttachedTerminalSession: () => ({
+    ...session,
+    error: state.error,
+    status: state.error ? "error" : "running",
+    summary: { status: state.error ? "error" : "running" },
+  }),
 }));
 vi.mock("~/terminal/ghostty/surface", () => ({
   GhosttyTerminalSurface: { create: state.createSurface },
@@ -86,6 +92,7 @@ let renderer: ReactTestRenderer | undefined;
 beforeEach(() => {
   state.allowed = true;
   state.error = null;
+  state.launchError.mockReset();
   state.navigate.mockReset();
   state.listeners.clear();
   state.resize.mockReset().mockResolvedValue(AsyncResult.success(undefined));
@@ -114,9 +121,11 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("shows native launch refusal in the shell and opens the affected provider settings", async () => {
-  state.error =
-    "Stark requires supervised Codex. Remove -s danger-full-access from this account's launch arguments.";
+it.each([
+  "Stark requires supervised Codex. Remove -s danger-full-access from this account's launch arguments.",
+  "A native agent is already running in this workspace (thread claude-voice). Exit it or use another Git worktree.",
+])("shows native launch refusal before the terminal surface initializes: %s", async (message) => {
+  state.error = message;
   await act(async () => {
     renderer = create(
       <TerminalViewport
@@ -129,6 +138,7 @@ it("shows native launch refusal in the shell and opens the affected provider set
         providerInstanceId={"codex_work" as import("@starkfuture/contracts").ProviderInstanceId}
         agentShell
         onSessionExited={state.otherCommand}
+        onSessionLaunchError={state.launchError}
         focusRequestId={0}
         autoFocus={false}
         visible
@@ -140,7 +150,8 @@ it("shows native launch refusal in the shell and opens the affected provider set
     );
   });
   const alert = renderer!.root.findByProps({ role: "alert" });
-  expect(alert.findByType("p").children.join("")).toContain("Remove -s danger-full-access");
+  expect(alert.findByType("p").children.join("")).toBe(message);
+  expect(state.launchError).toHaveBeenLastCalledWith(message);
   const button = alert.findByType("button");
   expect(button.children.join("")).toBe("Open provider settings");
   await act(async () => button.props.onClick());

@@ -174,6 +174,8 @@ export const TerminalSessionSnapshot = Schema.Struct({
   cwd: Schema.String.check(Schema.isNonEmpty()),
   worktreePath: Schema.NullOr(TrimmedNonEmptyStringSchema),
   status: TerminalSessionStatus,
+  /** Retained startup failure, including for clients attaching after the error event. */
+  error: Schema.optional(Schema.String),
   pid: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   history: Schema.String,
   exitCode: Schema.NullOr(Schema.Int),
@@ -192,6 +194,7 @@ export const TerminalSummary = Schema.Struct({
   cwd: Schema.String.check(Schema.isNonEmpty()),
   worktreePath: Schema.NullOr(TrimmedNonEmptyStringSchema),
   status: TerminalSessionStatus,
+  error: Schema.optional(Schema.String),
   pid: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   exitCode: Schema.NullOr(Schema.Int),
   exitSignal: Schema.NullOr(Schema.Int),

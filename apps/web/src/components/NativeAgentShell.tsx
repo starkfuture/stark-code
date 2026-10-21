@@ -1,4 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
+import { useAtomValue } from "@effect/atom-react";
 import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
@@ -42,6 +43,8 @@ export function NativeAgentShell(props: {
   readonly onBackToChat: () => void;
 }) {
   const [ended, setEnded] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
   const [view, setView] = useState<"terminal" | "reader" | "both">("terminal");
   const [expanded, setExpanded] = useState(false);
   const [portalHost, setPortalHost] = useState<HTMLDivElement | null>(null);
@@ -63,6 +66,9 @@ export function NativeAgentShell(props: {
     Schema.Boolean,
   );
   const restart = useAtomCommand(terminalEnvironment.restart, "restart native agent shell");
+  const canRestart = useAtomValue(
+    terminalEnvironment.restart.permissionAtom(props.threadRef.environmentId),
+  );
   const terminalId = nativeAgentTerminalId(props.providerInstanceId);
   const replies = useNativeReplies(props.threadRef, true, terminalId);
   const latestReply = replies.data?.at(-1);
@@ -70,6 +76,36 @@ export function NativeAgentShell(props: {
   const showTerminal = () => {
     if (view === "reader") chooseView("terminal");
     setTerminalFocusRequest((request) => request + 1);
+  };
+  const restartSession = async () => {
+    if (!canRestart || restarting) return;
+    setRestarting(true);
+    try {
+      const result = await restart({
+        environmentId: props.threadRef.environmentId,
+        input: {
+          threadId: props.threadRef.threadId,
+          terminalId,
+          cwd: props.cwd,
+          worktreePath: props.worktreePath,
+          providerInstanceId: props.providerInstanceId,
+          agentShell: true,
+          cols: 100,
+          rows: 30,
+        },
+      });
+      if (result._tag !== "Success") return;
+      if (result.value.status === "error") {
+        setLaunchError(result.value.error ?? "The native session could not start.");
+        return;
+      }
+      setEnded(false);
+      setLaunchError(null);
+      setMcpWarning(null);
+      showTerminal();
+    } finally {
+      setRestarting(false);
+    }
   };
   return (
     <Dialog.Root
@@ -128,7 +164,7 @@ export function NativeAgentShell(props: {
                   terminalId={terminalId}
                   requestId={props.voiceRequestId}
                   onRequestConsumed={props.onVoiceRequestConsumed}
-                  ended={ended}
+                  ended={ended || launchError !== null || restarting}
                   onShowTerminal={showTerminal}
                 />
                 <NativeMcpReloadControl driver={props.driver} onShowTerminal={showTerminal} />
@@ -231,6 +267,7 @@ export function NativeAgentShell(props: {
                   agentShell
                   existingOnly={props.existingOnly}
                   onSessionExited={() => setEnded(true)}
+                  onSessionLaunchError={setLaunchError}
                   onMcpWarning={setMcpWarning}
                   focusRequestId={(props.focusRequestId ?? 1) + terminalFocusRequest}
                   autoFocus
@@ -271,36 +308,24 @@ export function NativeAgentShell(props: {
                 </>
               </div>
             </div>
-            {ended ? (
+            {ended || launchError !== null ? (
               <div className="flex shrink-0 items-center justify-between border-t px-4 py-2">
                 <span className="text-sm text-muted-foreground">
-                  The native session has exited.
+                  {launchError
+                    ? "The native session could not start."
+                    : "The native session has exited."}
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    void restart({
-                      environmentId: props.threadRef.environmentId,
-                      input: {
-                        threadId: props.threadRef.threadId,
-                        terminalId,
-                        cwd: props.cwd,
-                        worktreePath: props.worktreePath,
-                        providerInstanceId: props.providerInstanceId,
-                        agentShell: true,
-                        cols: 100,
-                        rows: 30,
-                      },
-                    }).then((result) => {
-                      if (result._tag === "Success") {
-                        setEnded(false);
-                        setMcpWarning(null);
-                      }
-                    });
-                  }}
+                  disabled={!canRestart || restarting}
+                  onClick={() => void restartSession()}
                 >
-                  Start another session
+                  {restarting
+                    ? "Starting…"
+                    : launchError
+                      ? "Retry native session"
+                      : "Start another session"}
                 </Button>
               </div>
             ) : null}

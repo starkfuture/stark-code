@@ -17,6 +17,7 @@ import { NativeCodexStatusParser, type NativeCodexStatus } from "./NativeCodexSt
 import {
   claimAgentWorkspace,
   releaseAgentWorkspace,
+  WorkspaceAgentBusyError,
 } from "../workspace/WorkspaceAgentOwnership.ts";
 /**
  * TerminalManager - Terminal session orchestration service interface.
@@ -319,6 +320,7 @@ interface TerminalSessionState {
   cwd: string;
   worktreePath: string | null;
   status: TerminalSessionStatus;
+  error: string | null;
   pid: number | null;
   history: BoundedTerminalHistory;
   pendingHistoryControlSequence: string;
@@ -422,6 +424,7 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     cwd: session.cwd,
     worktreePath: session.worktreePath,
     status: session.status,
+    ...(session.error !== null ? { error: session.error } : {}),
     pid: session.pid,
     history: session.history.value(),
     exitCode: session.exitCode,
@@ -440,6 +443,7 @@ function summary(session: TerminalSessionState): TerminalSummary {
     cwd: session.cwd,
     worktreePath: session.worktreePath,
     status: session.status,
+    ...(session.error !== null ? { error: session.error } : {}),
     pid: session.pid,
     exitCode: session.exitCode,
     exitSignal: session.exitSignal,
@@ -2291,6 +2295,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     const startingAt = yield* nowIso;
     yield* modifyManagerState((state) => {
       session.status = "starting";
+      session.error = null;
       session.processGeneration = Symbol("terminal process generation");
       session.cwd = input.cwd;
       session.worktreePath = input.worktreePath ?? null;
@@ -2361,10 +2366,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
                     kind: "native",
                   }),
                 catch: (cause) =>
-                  new TerminalProviderEnvironmentError({
-                    providerInstanceId: input.providerInstanceId!,
-                    cause,
-                  }),
+                  cause instanceof WorkspaceAgentBusyError
+                    ? cause
+                    : new TerminalProviderEnvironmentError({
+                        providerInstanceId: input.providerInstanceId!,
+                        cause,
+                      }),
               });
               shellCandidates = [
                 yield* options.resolveAgentShellLaunch(
@@ -2506,6 +2513,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       yield* modifyManagerState((state) => {
         cleanupProcessHandles(session);
         session.status = "error";
+        session.error = error.message;
         session.pid = null;
         session.process = null;
         session.codexStatusParser = null;
@@ -2772,6 +2780,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         cwd: input.cwd,
         worktreePath: input.worktreePath ?? null,
         status: "starting",
+        error: null,
         pid: null,
         history,
         pendingHistoryControlSequence: "",
@@ -3284,6 +3293,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           cwd: input.cwd,
           worktreePath: input.worktreePath ?? null,
           status: "starting",
+          error: null,
           pid: null,
           history: new BoundedTerminalHistory(historyLineLimit, "", historyByteLimit),
           pendingHistoryControlSequence: "",

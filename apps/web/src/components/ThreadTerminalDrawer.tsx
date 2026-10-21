@@ -400,6 +400,7 @@ interface TerminalViewportProps {
   agentShell?: boolean;
   existingOnly?: boolean | undefined;
   onMcpWarning?: (warning: NativeMcpWarning) => void;
+  onSessionLaunchError?: (message: string | null) => void;
   onSessionExited: () => void;
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
   focusRequestId: number;
@@ -429,6 +430,7 @@ export function TerminalViewport({
   agentShell,
   existingOnly,
   onMcpWarning,
+  onSessionLaunchError,
   onSessionExited,
   onAddTerminalContext,
   focusRequestId,
@@ -528,6 +530,14 @@ export function TerminalViewport({
   const terminalOutput = terminalSession.output;
   const terminalError = terminalSession.error;
   const terminalStatus = terminalSession.status;
+  const launchError =
+    terminalStatus === "error" && terminalSession.summary?.status === "error"
+      ? terminalError
+      : null;
+  useEffect(() => {
+    // A disconnected attach stream must not offer to restart a healthy agent.
+    onSessionLaunchError?.(launchError);
+  }, [launchError, onSessionLaunchError]);
   const outputCursorRef = useRef<TerminalOutputCursor>(INITIAL_TERMINAL_OUTPUT_CURSOR);
   const mcpWarningDetector = useRef(createNativeMcpWarningDetector());
   const handleMcpOutput = useEffectEvent((update: TerminalOutputUpdate) => {

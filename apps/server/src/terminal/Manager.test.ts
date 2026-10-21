@@ -3079,6 +3079,72 @@ it.layer(
   );
 
   it.effect(
+    "retains a native workspace refusal for late subscribers and clears it on a safe retry",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "stark-native-busy-" });
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          resolveProviderInstanceEnvironment: () => Effect.succeed({}),
+          resolveAgentShellLaunch: () => Effect.succeed({ shell: "/installed/agent", args: [] }),
+        });
+        const owner = openInput({
+          cwd,
+          threadId: "claude-voice",
+          terminalId: "native-agent-claude",
+          providerInstanceId: ProviderInstanceId.make("claude"),
+          agentShell: true,
+        });
+        const blocked = openInput({
+          cwd,
+          threadId: "codex-voice",
+          terminalId: "native-agent-codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          agentShell: true,
+        });
+        yield* manager.open(owner);
+        const refused = yield* manager.open(blocked);
+        expect(refused).toMatchObject({
+          status: "error",
+          pid: null,
+          error: expect.stringContaining("already running in this workspace (thread claude-voice)"),
+        });
+        expect(ptyAdapter.spawnInputs).toHaveLength(1);
+        expect(ptyAdapter.processes[0]?.killed).toBe(false);
+
+        // Native thread creation can finish before the viewport subscribes.
+        // Reattaching must replay the reason without retrying or touching the owner.
+        const attached = yield* Ref.make<ReadonlyArray<TerminalAttachStreamEvent>>([]);
+        const detach = yield* manager.attachStream(blocked, (event) =>
+          Ref.update(attached, (events) => [...events, event]),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(detach));
+        expect(yield* Ref.get(attached)).toEqual([{ type: "snapshot", snapshot: refused }]);
+        const metadata = yield* Ref.make<ReadonlyArray<TerminalMetadataStreamEvent>>([]);
+        const stopMetadata = yield* manager.subscribeMetadata((event) =>
+          Ref.update(metadata, (events) => [...events, event]),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(stopMetadata));
+        expect(yield* Ref.get(metadata)).toContainEqual({
+          type: "snapshot",
+          terminals: expect.arrayContaining([
+            expect.objectContaining({ threadId: blocked.threadId, error: refused.error }),
+          ]),
+        });
+        expect(ptyAdapter.spawnInputs).toHaveLength(1);
+
+        yield* manager.close({ threadId: owner.threadId, terminalId: owner.terminalId });
+        const retried = yield* manager.restart({ ...blocked, cols: 100, rows: 24 });
+        expect(retried.status).toBe("running");
+        expect(retried.error).toBeUndefined();
+        expect(ptyAdapter.spawnInputs).toHaveLength(2);
+        expect(yield* Ref.get(attached)).toContainEqual(
+          expect.objectContaining({ type: "restarted", snapshot: retried }),
+        );
+      }),
+  );
+
+  it.effect(
     "rejects unsafe native Codex sandbox arguments before PTY spawn and releases workspace ownership",
     () =>
       Effect.gen(function* () {

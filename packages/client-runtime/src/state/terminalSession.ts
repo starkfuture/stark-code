@@ -104,7 +104,7 @@ function terminalBufferStateFromSnapshot(
   return {
     output: resetOutput(current.output, snapshot.history, maxBufferBytes),
     status: snapshot.status,
-    error: null,
+    error: snapshot.error ?? null,
     updatedAt: snapshot.updatedAt,
     version: current.version + 1,
     lifecycleVersion: current.lifecycleVersion,
@@ -125,7 +125,7 @@ export function combineTerminalSessionState(
     summary,
     output: buffer.output,
     status: buffer.version > 0 ? buffer.status : (summary?.status ?? buffer.status),
-    error: buffer.error,
+    error: buffer.version > 0 ? buffer.error : (summary?.error ?? null),
     hasRunningSubprocess: summary?.hasRunningSubprocess ?? false,
     updatedAt: latestTimestamp(summary?.updatedAt ?? null, buffer.updatedAt),
     version: buffer.version,

@@ -36,6 +36,43 @@ const BASE_SNAPSHOT: TerminalSessionSnapshot = {
 };
 
 describe("terminal session reducers", () => {
+  it("shows a retained launch failure on late attachment and removes it after restart", () => {
+    const message =
+      "A native agent is already running in this workspace (thread claude-voice). Exit it or use another Git worktree.";
+    const failedSnapshot = {
+      ...BASE_SNAPSHOT,
+      status: "error" as const,
+      pid: null,
+      error: message,
+    };
+    const summary = { ...failedSnapshot, hasRunningSubprocess: false };
+    expect(combineTerminalSessionState(summary, EMPTY_TERMINAL_BUFFER_STATE)).toMatchObject({
+      status: "error",
+      error: message,
+    });
+
+    const attached = applyTerminalAttachStreamEvent(nextTerminalAttachSeedState(), {
+      type: "snapshot",
+      snapshot: failedSnapshot,
+    });
+    expect(combineTerminalSessionState(summary, attached)).toMatchObject({
+      status: "error",
+      error: message,
+    });
+
+    const restarted = applyTerminalAttachStreamEvent(attached, {
+      type: "restarted",
+      threadId: TARGET.threadId,
+      terminalId: TARGET.terminalId,
+      snapshot: BASE_SNAPSHOT,
+    });
+    // The older metadata must not resurrect the failure after a live restart.
+    expect(combineTerminalSessionState(summary, restarted)).toMatchObject({
+      status: "running",
+      error: null,
+    });
+  });
+
   it("prefers live attach status over stale metadata after the attach stream starts", () => {
     const summary = applyTerminalMetadataStreamEvent([], {
       type: "snapshot",

@@ -67,7 +67,7 @@ const finding = (overrides: Partial<LookoutFinding>): LookoutFinding => ({
   ],
   speech: { action: "inbox", why: "low confidence", toldSession: false },
   deliveredAt: null,
-  revision: 1,
+  revision: "a1b2c3d",
   createdAt: "2026-11-05T15:00:00.000Z",
   updatedAt: "2026-11-05T15:00:00.000Z",
   decisionNote: null,

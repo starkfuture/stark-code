@@ -61,7 +61,8 @@ export const LookoutFinding = Schema.Struct({
   evidence: Schema.Array(LookoutEvidence),
   speech: Schema.NullOr(LookoutSpeech),
   deliveredAt: Schema.NullOr(Schema.String),
-  revision: Schema.Number,
+  /** The code revision Lookout last checked the finding at, such as `4f9c2a1b7e+wt.3d5e8a90`. */
+  revision: Schema.String,
   createdAt: Schema.String,
   updatedAt: Schema.String,
   decisionNote: Schema.NullOr(Schema.String),

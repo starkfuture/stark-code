@@ -110,7 +110,13 @@ function useLookoutData(
   }, [bridge, showClosed, view]);
 
   useEffect(() => {
-    if (active) void refresh();
+    if (!active) return;
+    void refresh();
+    // Closing the panel (or changing what it shows) abandons a refresh in flight, so it starts no more Lookout processes.
+    return () => {
+      generation.current++;
+      inFlight.current = false;
+    };
   }, [active, refresh]);
 
   const installed = status?.installed ?? null;

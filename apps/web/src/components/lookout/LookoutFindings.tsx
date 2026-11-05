@@ -115,10 +115,7 @@ function FindingRow({
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger
-        aria-label={`${severity.label}: ${finding.title}`}
-        className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      >
+      <CollapsibleTrigger className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         <span className="flex shrink-0 pt-0.5">
           <Badge size="sm" variant={severity.variant}>
             {severity.label}

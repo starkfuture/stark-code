@@ -44,6 +44,7 @@ import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
 import * as DesktopAssets from "./app/DesktopAssets.ts";
 import * as StarkPages from "./starkPages/StarkPages.ts";
 import * as PublishedPages from "./starkPages/PublishedPages.ts";
+import * as Lookout from "./lookout/Lookout.ts";
 import * as DesktopWorkbench from "./starkPages/DesktopWorkbench.ts";
 import * as DesktopDictation from "./dictation/DesktopDictation.ts";
 import * as NativeDictationHost from "./dictation/NativeDictationHost.ts";
@@ -150,6 +151,7 @@ const layerElectron = Layer.mergeAll(
 const layerDesktopFoundation = Layer.mergeAll(
   DesktopDictation.layer.pipe(Layer.provide(NativeDictationHost.layer)),
   PublishedPages.layer,
+  Lookout.layer,
   Layer.unwrap(
     Effect.gen(function* () {
       const environment = yield* DesktopEnvironment.DesktopEnvironment;

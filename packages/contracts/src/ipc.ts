@@ -15,6 +15,7 @@ import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from
 import type { EditorId } from "./editor.ts";
 import type { PreviewForwardedShortcut } from "./keybindings.ts";
 import type { StarkPublishedPagesBridge } from "./starkPublishedPages.ts";
+import type { LookoutBridge } from "./lookout.ts";
 
 import type {
   DesktopAppActivationRequest,
@@ -1176,6 +1177,8 @@ export interface NativeDictationBridge {
 export interface DesktopBridge {
   readonly dictation?: NativeDictationBridge;
   readonly publishedPages?: StarkPublishedPagesBridge;
+  /** This Mac's Lookout reviewer; absent on desktop builds predating it. */
+  readonly lookout?: LookoutBridge;
   getAppBranding: () => DesktopAppBranding | null;
   /** Absolute path of a dropped or picked file; absent on desktop builds predating it. */
   getPathForFile?: (file: File) => string;

@@ -4,6 +4,7 @@ import {
   FileTextIcon,
   LayoutGridIcon,
   MessageCircleIcon,
+  ScanEyeIcon,
   TerminalIcon,
 } from "lucide-react";
 import { Fragment } from "react";
@@ -53,7 +54,9 @@ function ToolItem({
         ? MessageCircleIcon
         : action.id === "terminal"
           ? TerminalIcon
-          : null;
+          : action.id === "lookout"
+            ? ScanEyeIcon
+            : null;
   return (
     <MenuItem
       aria-label={action.label}

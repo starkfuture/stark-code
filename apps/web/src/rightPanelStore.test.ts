@@ -132,6 +132,25 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanel(state.byThreadKey, refA)).toBe("files");
   });
 
+  it("docks Lookout like the other auxiliary panels and hands the dock back on close", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "files");
+    store.openAuxiliary(refA, "lookout");
+    let state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("lookout");
+    expect(selectActiveRightPanel(state.byThreadKey, refA)).toBeNull();
+
+    store.openAuxiliary(refA, "pages");
+    state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("pages");
+
+    store.openAuxiliary(refA, "lookout");
+    store.close(refA);
+    state = useRightPanelStore.getState();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBeNull();
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refB)).toBeNull();
+  });
+
   it("removes auxiliary ownership with its thread and excludes it from persistence", () => {
     const store = useRightPanelStore.getState();
     store.openAuxiliary(refA, "pages");

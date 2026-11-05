@@ -13,6 +13,7 @@ import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
 import { PUBLISHED_PAGES_CHANNELS } from "./ipc/publishedPagesChannels.ts";
+import { LOOKOUT_CHANNELS } from "./ipc/lookoutChannels.ts";
 import { mergeLegacyLocalStorage } from "./legacyLocalStorageMerge.ts";
 
 const SNAP_SHOT_EVENT_TYPES = new Set([
@@ -237,6 +238,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     listTools: () => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.listTools),
     read: (input) => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.read, input),
     openPage: (input) => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.openPage, input),
+  },
+  lookout: {
+    status: () => ipcRenderer.invoke(LOOKOUT_CHANNELS.status),
+    findings: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.findings, input),
+    activity: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.activity, input),
+    decide: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.decide, input),
+    pause: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.pause, input),
+    resume: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.resume, input),
   },
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),

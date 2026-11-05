@@ -8,19 +8,29 @@ import { RightPanelResizeHandle } from "../preview/RightPanelResizeHandle";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-/** Keep drafts and selected answers mounted when another tool occupies the panel. */
+/**
+ * The docked tool frame beside the chat. Keep drafts and selected answers
+ * mounted when another tool occupies the panel. Other tools reuse it with their
+ * own `title`, the `name` its button labels use, and a width key.
+ */
 export function ConversationToolsPanel({
   active,
   inline,
   onClose,
   tools,
   children,
+  title = "Conversation tools",
+  name = "conversation tools",
+  widthStorageKey = "starkcode:conversation-tools-panel-width",
 }: {
   readonly active: boolean;
   readonly inline: boolean;
   readonly onClose: () => void;
   readonly children: ReactNode;
   readonly tools?: ReactNode;
+  readonly title?: string;
+  readonly name?: string;
+  readonly widthStorageKey?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [portalHost, setPortalHost] = useState<HTMLDivElement | null>(null);
@@ -30,7 +40,7 @@ export function ConversationToolsPanel({
   const { width, handlers } = usePreviewPanelInlineSize(panel, {
     enabled: active && !overlay,
     container: portalHost?.parentElement,
-    widthStorageKey: "starkcode:conversation-tools-panel-width",
+    widthStorageKey,
     defaultWidth: 420,
   });
   useLayoutEffect(() => {
@@ -76,7 +86,7 @@ export function ConversationToolsPanel({
           <Dialog.Popup
             ref={panel}
             role={overlay ? "dialog" : "complementary"}
-            aria-label="Conversation tools"
+            aria-label={title}
             aria-modal={(active && overlay) || undefined}
             initialFocus={false}
             hidden={!active}
@@ -106,7 +116,7 @@ export function ConversationToolsPanel({
                   "drag-region min-h-(--workspace-topbar-height) pl-(--workspace-controls-left) wco:pr-(--workspace-native-controls-inset)",
               )}
             >
-              <h2 className="min-w-0 truncate pl-1 text-sm font-medium">Conversation tools</h2>
+              <h2 className="min-w-0 truncate pl-1 text-sm font-medium">{title}</h2>
               <div className="flex shrink-0 items-center gap-1">
                 {tools}
                 <Tooltip>
@@ -116,11 +126,7 @@ export function ConversationToolsPanel({
                         ref={expandButton}
                         size="icon-sm"
                         variant="ghost"
-                        aria-label={
-                          expanded
-                            ? "Return conversation tools to side panel"
-                            : "Expand conversation tools"
-                        }
+                        aria-label={expanded ? `Return ${name} to side panel` : `Expand ${name}`}
                         onClick={() => (expanded ? restorePanel() : setExpanded(true))}
                       >
                         {expanded ? <Minimize2Icon aria-hidden /> : <Maximize2Icon aria-hidden />}
@@ -128,7 +134,7 @@ export function ConversationToolsPanel({
                     }
                   />
                   <TooltipPopup side="bottom" positionMethod="fixed">
-                    {expanded ? "Show beside chat" : "Expand conversation tools"}
+                    {expanded ? "Show beside chat" : `Expand ${name}`}
                   </TooltipPopup>
                 </Tooltip>
                 <Tooltip>
@@ -137,7 +143,7 @@ export function ConversationToolsPanel({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        aria-label="Close conversation tools"
+                        aria-label={`Close ${name}`}
                         onClick={onClose}
                       >
                         <XIcon aria-hidden />
@@ -145,7 +151,7 @@ export function ConversationToolsPanel({
                     }
                   />
                   <TooltipPopup side="bottom" positionMethod="fixed">
-                    Close conversation tools
+                    Close {name}
                   </TooltipPopup>
                 </Tooltip>
               </div>

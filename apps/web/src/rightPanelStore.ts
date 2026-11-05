@@ -32,7 +32,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-requests",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
-export type AuxiliaryPanel = "pages" | "side-work";
+export type AuxiliaryPanel = "pages" | "side-work" | "lookout";
 
 export interface DeviceTabTarget {
   hostId: string;

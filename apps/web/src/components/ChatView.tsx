@@ -9,6 +9,7 @@ import { useNeedsYouSelection } from "../needsYouSelection";
 import { requestConfirmDialog } from "../confirmDialog";
 import { NativeAgentShell, nativeAgentTerminalId } from "./NativeAgentShell";
 import { StarkPagesPanel } from "./StarkPagesPanel";
+import { LookoutPanel } from "./lookout/LookoutPanel";
 import { StarkPageTabContent } from "./StarkPageTabContent";
 import { ConversationPageTabs, conversationPageTabElementId } from "./ConversationPageTabs";
 import { selectStarkPageTabs, useStarkPageTabs, type StarkPageTarget } from "../starkPageTabs";
@@ -2329,6 +2330,7 @@ export default function ChatView(props: ChatViewProps) {
     threadKey: activeThreadKey,
     pages: auxiliaryPanel === "pages",
     sideWork: sideWorkOpen,
+    lookout: auxiliaryPanel === "lookout",
   });
   // Keep drafts and readers mounted while changing tools, but never reuse them
   // for another conversation.
@@ -2337,15 +2339,18 @@ export default function ChatView(props: ChatViewProps) {
       threadKey: activeThreadKey,
       pages: auxiliaryPanel === "pages",
       sideWork: sideWorkOpen,
+      lookout: auxiliaryPanel === "lookout",
     });
   } else if (
     (auxiliaryPanel === "pages" && !visitedPanels.pages) ||
-    (sideWorkOpen && !visitedPanels.sideWork)
+    (sideWorkOpen && !visitedPanels.sideWork) ||
+    (auxiliaryPanel === "lookout" && !visitedPanels.lookout)
   ) {
     setVisitedPanels({
       ...visitedPanels,
       pages: visitedPanels.pages || auxiliaryPanel === "pages",
       sideWork: visitedPanels.sideWork || sideWorkOpen,
+      lookout: visitedPanels.lookout || auxiliaryPanel === "lookout",
     });
   }
   const closeAuxiliaryPanel = useCallback(() => {
@@ -2793,6 +2798,10 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [hasPagesWorkspace, pagesTarget]);
   const pagesOpen = pagesAvailable && auxiliaryPanel === "pages";
+  // Lookout reviews Claude Code sessions on this computer, so it needs the desktop
+  // bridge. Its findings are sorted by folder only when the folder is local.
+  const lookoutAvailable = isElectron && window.desktopBridge?.lookout !== undefined;
+  const lookoutOpen = lookoutAvailable && auxiliaryPanel === "lookout";
   const pageWorkspaceKey =
     activeThreadKey && activeProject
       ? JSON.stringify([activeThreadKey, activeThread?.worktreePath ?? activeProject.workspaceRoot])
@@ -2897,6 +2906,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [pageWorkspaceKey, rightPanelOpen, auxiliaryPanel]);
   const pagesInline = !shouldUsePlanSidebarSheet;
   const sideWorkInline = !shouldUsePlanSidebarSheet;
+  const lookoutInline = !shouldUsePlanSidebarSheet;
   const openBookmarkedTurn = useCallback(
     (entryId: string) => {
       if (!activeThreadKey) return;
@@ -12100,6 +12110,19 @@ export default function ChatView(props: ChatViewProps) {
           },
         },
         {
+          id: "lookout",
+          label: "Lookout",
+          disabled: !lookoutAvailable || !activeThreadRef,
+          description: lookoutAvailable
+            ? "Your independent reviewer"
+            : "Lookout runs in the Stark Code desktop app",
+          active: lookoutOpen,
+          onSelect: () => {
+            if (activeThreadRef && lookoutAvailable)
+              useRightPanelStore.getState().openAuxiliary(activeThreadRef, "lookout");
+          },
+        },
+        {
           id: "terminal",
           label: "Terminal",
           disabled: !activeProject || !canOperateTerminal,
@@ -12260,7 +12283,7 @@ export default function ChatView(props: ChatViewProps) {
     </Tooltip>
   );
   const panelLayoutControls =
-    pagesOpen || sideWorkOpen ? null : (
+    pagesOpen || sideWorkOpen || lookoutOpen ? null : (
       <div
         className="fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center gap-1 [-webkit-app-region:no-drag]"
         data-workspace-titlebar-controls
@@ -13165,6 +13188,23 @@ export default function ChatView(props: ChatViewProps) {
               onPublishRequest={stagePagePublish}
               onOpenPage={openPageTab}
               onQuote={quotePageInChat}
+              onClose={closeAuxiliaryPanel}
+            />
+          ) : null}
+          {visitedPanels.threadKey === activeThreadKey &&
+          visitedPanels.lookout &&
+          lookoutAvailable ? (
+            <LookoutPanel
+              active={lookoutOpen}
+              inline={lookoutInline}
+              tools={panelToggleControls}
+              projectRoot={
+                pagesAvailable && activeProject
+                  ? (activeThreadWorktreePath ?? activeProject.workspaceRoot)
+                  : null
+              }
+              timestampFormat={timestampFormat}
+              onQuote={quoteTextInChat}
               onClose={closeAuxiliaryPanel}
             />
           ) : null}

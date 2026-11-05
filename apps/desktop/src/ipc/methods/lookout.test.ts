@@ -65,6 +65,34 @@ describe("Lookout IPC", () => {
     }),
   );
 
+  it.effect("trusts the app's own scheme for the current build only", () =>
+    Effect.gen(function* () {
+      const answer = { installed: false, launcher: "/x" };
+      const serve = (url: string, isDevelopment: boolean) => {
+        const frame = { url };
+        const event = { sender: { id: 9 }, senderFrame: frame };
+        return Effect.exit(
+          status.handler(undefined, event as never).pipe(
+            Effect.provideService(ElectronWindow.ElectronWindow, {
+              currentMainOrFirst: Effect.succeedSome({ webContents: { id: 9, mainFrame: frame } }),
+            } as never),
+            Effect.provideService(DesktopEnvironment.DesktopEnvironment, {
+              isDevelopment,
+              devServerUrl: Option.none(),
+            } as never),
+            Effect.provideService(Lookout.Lookout, {
+              status: () => Effect.succeed(answer),
+            } as never),
+          ),
+        );
+      };
+      expect(Exit.isSuccess(yield* serve("starkcode-dev://app/", true))).toBe(true);
+      expect(Exit.isSuccess(yield* serve("starkcode://app/", false))).toBe(true);
+      expect(Exit.isFailure(yield* serve("starkcode-dev://app/", false))).toBe(true);
+      expect(Exit.isFailure(yield* serve("starkcode-dev://evil/", true))).toBe(true);
+    }),
+  );
+
   it.effect("rejects malformed payloads before the service runs", () =>
     Effect.gen(function* () {
       calls.length = 0;

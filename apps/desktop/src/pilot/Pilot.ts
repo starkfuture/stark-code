@@ -140,7 +140,7 @@ const interpretPilotOutput = <A>(
 };
 
 /** `PILOT_HOME` with a leading `~` expanded, like Pilot itself resolves it. */
-const pilotHome = (
+export const pilotHome = (
   configured: string | undefined,
   homeDirectory: string,
   path: Path.Path,

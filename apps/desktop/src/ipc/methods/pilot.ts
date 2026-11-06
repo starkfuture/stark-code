@@ -14,6 +14,7 @@ import {
   PilotDecisionResponse,
   PilotFindingsInput,
   PilotFindingsResponse,
+  PilotInstallResponse,
   PilotPauseInput,
   PilotPauseResponse,
   PilotStatusResponse,
@@ -21,6 +22,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Pilot from "../../pilot/Pilot.ts";
+import * as PilotInstaller from "../../pilot/PilotInstaller.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 import { PILOT_CHANNELS } from "../pilotChannels.ts";
 import { isTrustedAppSender } from "../trustedAppSender.ts";
@@ -32,13 +34,26 @@ class PilotSenderError extends Schema.TaggedError<PilotSenderError>()("PilotSend
 }
 
 // Findings quote source code, the chat quotes the person's own prompts and
-// rules, and decide/pause/ask/nudge/settings change Pilot's state or spend its budget,
-// so every method is limited to the app's own window.
+// rules, decide/pause/ask/nudge/settings change Pilot's state or spend its budget,
+// and install changes the person's Claude Code plugins, so every method is
+// limited to the app's own window.
+const requireAppWindow = (event?: DesktopIpc.DesktopIpcInvokeEvent) =>
+  Effect.gen(function* () {
+    if (!(yield* isTrustedAppSender(event))) return yield* new PilotSenderError();
+  });
+
 const authorized = Effect.fn("desktop.pilot.authorize")(function* (
   event?: DesktopIpc.DesktopIpcInvokeEvent,
 ) {
-  if (!(yield* isTrustedAppSender(event))) return yield* new PilotSenderError();
+  yield* requireAppWindow(event);
   return yield* Pilot.Pilot;
+});
+
+const authorizedInstaller = Effect.fn("desktop.pilot.authorizeInstall")(function* (
+  event?: DesktopIpc.DesktopIpcInvokeEvent,
+) {
+  yield* requireAppWindow(event);
+  return yield* PilotInstaller.PilotInstaller;
 });
 
 export const status = DesktopIpc.makeIpcMethod({
@@ -148,5 +163,25 @@ export const settings = DesktopIpc.makeIpcMethod({
   handler: (input, event) =>
     Effect.gen(function* () {
       return yield* (yield* authorized(event)).settings(input);
+    }),
+});
+
+export const installStatus = DesktopIpc.makeIpcMethod({
+  channel: PILOT_CHANNELS.installStatus,
+  payload: Schema.Void,
+  result: PilotInstallResponse,
+  handler: (_input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorizedInstaller(event)).status();
+    }),
+});
+
+export const install = DesktopIpc.makeIpcMethod({
+  channel: PILOT_CHANNELS.install,
+  payload: Schema.Void,
+  result: PilotInstallResponse,
+  handler: (_input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorizedInstaller(event)).install();
     }),
 });

@@ -402,6 +402,70 @@ export type PilotResponse<T> =
   | typeof PilotFailure.Type
   | { readonly installed: true; readonly ok: true; readonly value: T };
 
+/**
+ * Where the Pilot plugin Claude Code runs comes from. Stark Code ships a copy
+ * of Pilot; installing copies it to a fixed, versioned folder and points
+ * Claude Code at that folder.
+ * - `unsupported`: this build ships no Pilot, or this system cannot run it.
+ * - `not-installed`: Claude Code has no Pilot plugin.
+ * - `legacy`: Lookout, or a Pilot read from somewhere other than a fixed copy.
+ * - `update`: a fixed copy older than the one this app ships.
+ * - `installed`: a fixed copy at least as new as this app's.
+ */
+export const PilotInstallState = Schema.Literals([
+  "unsupported",
+  "not-installed",
+  "legacy",
+  "update",
+  "installed",
+]);
+export type PilotInstallState = typeof PilotInstallState.Type;
+
+/** A plugin installing removes, so only one set of Pilot hooks runs. */
+export const PilotReplacedPlugin = Schema.Struct({
+  /** Claude Code's plugin id, such as `lookout@lookout` or `pilot@pilot`. */
+  id: Schema.String,
+  version: Schema.NullOr(Schema.String),
+  /** The folder Claude Code reads it from, home shown as `~`; null for other sources. */
+  source: Schema.NullOr(Schema.String),
+});
+export type PilotReplacedPlugin = typeof PilotReplacedPlugin.Type;
+
+/** Paths are shown with the home folder as `~`. */
+export const PilotInstallStatus = Schema.Struct({
+  state: PilotInstallState,
+  /** The Pilot this app ships; null when it ships none. */
+  bundledVersion: Schema.NullOr(Schema.String),
+  /** The fixed copy Claude Code runs now, if any. */
+  installedVersion: Schema.NullOr(Schema.String),
+  /** The Claude Code profile installing changes. */
+  profile: Schema.String,
+  /** The fixed folder installing copies Pilot to. */
+  target: Schema.NullOr(Schema.String),
+  replaces: Schema.Array(PilotReplacedPlugin),
+  /** Whether installing writes and installs the fixed copy; false when it only removes Lookout. */
+  installsCopy: Schema.Boolean,
+  /** The Claude command Pilot thinks with (`claude_bin`); null means `claude` from PATH. */
+  claudeBin: Schema.NullOr(Schema.String),
+  /**
+   * Settings a replaced Pilot read from its folder's `.env` that Pilot's
+   * config file lacks. The fixed copy has no `.env`, so installing waits
+   * until they are in the config file.
+   */
+  envOnlySettings: Schema.Array(Schema.String),
+  configFile: Schema.String,
+  /** Why Pilot cannot be installed here, in plain words; set only when unsupported. */
+  note: Schema.NullOr(Schema.String),
+});
+export type PilotInstallStatus = typeof PilotInstallStatus.Type;
+
+/** Install status, or why it could not be read or the install stopped. */
+export const PilotInstallResponse = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true), value: PilotInstallStatus }),
+  Schema.Struct({ ok: Schema.Literal(false), reason: PilotFailureReason, error: Schema.String }),
+]);
+export type PilotInstallResponse = typeof PilotInstallResponse.Type;
+
 /** Every method resolves with a response; only an untrusted caller or a malformed payload rejects. */
 export interface PilotBridge {
   status(): Promise<PilotResponse<PilotStatus>>;
@@ -417,4 +481,8 @@ export interface PilotBridge {
   nudge(input: PilotNudgeInput): Promise<PilotResponse<PilotNudgeResult>>;
   /** Reads the engines, or sets the default one. */
   settings(input: PilotSettingsInput): Promise<PilotResponse<PilotSettings>>;
+  /** Where Claude Code's Pilot comes from; absent on desktop builds that cannot install it. */
+  installStatus?(): Promise<PilotInstallResponse>;
+  /** Installs or updates the fixed copy this app ships and removes older ones; resolves with the new status. */
+  install?(): Promise<PilotInstallResponse>;
 }

@@ -30,6 +30,8 @@ import {
   LINUX_CAPTURE_EXTRA_RESOURCES,
   LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
   MAC_DICTATION_EXTRA_RESOURCES,
+  PILOT_EXTRA_RESOURCE,
+  stagePilotPlugin,
   LINUX_FILE_EXCLUSIONS,
   MAC_FILE_EXCLUSIONS,
   InvalidMacPasskeyRpDomainError,
@@ -579,6 +581,33 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
   });
 
+  it.effect("stages Pilot as its plugin files only", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stageResourcesDir = yield* fs.makeTempDirectoryScoped();
+      const repoRoot = path.resolve(import.meta.dirname, "..");
+      yield* stagePilotPlugin({ repoRoot, stageResourcesDir });
+      const staged = path.join(stageResourcesDir, PILOT_EXTRA_RESOURCE.to);
+      const entries = yield* fs.readDirectory(staged, { recursive: true });
+      for (const required of [
+        "package.json",
+        ".claude-plugin/plugin.json",
+        ".claude-plugin/marketplace.json",
+        "hooks/hooks.json",
+        "src/boot.mjs",
+        "src/cli.ts",
+      ])
+        assert.include(entries, required);
+      assert.isFalse(
+        entries.some((entry) =>
+          /^(test|examples|docs|node_modules)(\/|$)|(^|\/)\.env$/.test(entry),
+        ),
+        "only the plugin's runtime files ship",
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it("limits Electron locales and excludes separately packaged resources", () => {
     assert.deepStrictEqual(DESKTOP_ELECTRON_LANGUAGES, ["en-US"]);
     // Every platform staging input is emitted once at resources/, so adding one
@@ -587,6 +616,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     // forgetting the exclusion leaves the exclusion list untouched, so it still
     // matches. Assert the invariant first, where the failure names the culprit.
     for (const resource of [
+      PILOT_EXTRA_RESOURCE,
       ...WSL_RUNTIME_EXTRA_RESOURCES,
       ...LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
       ...MAC_DICTATION_EXTRA_RESOURCES,
@@ -603,6 +633,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "!apps/desktop/resources/stark-workbench/**/*",
       "!apps/desktop/prod-resources/stark-workbench",
       "!apps/desktop/prod-resources/stark-workbench/**/*",
+      "!apps/desktop/resources/pilot",
+      "!apps/desktop/resources/pilot/**/*",
+      "!apps/desktop/prod-resources/pilot",
+      "!apps/desktop/prod-resources/pilot/**/*",
       "!**/node_modules/@cursor/sdk-*/**/*",
       "!apps/desktop/prod-resources/cursor-sdk",
       "!apps/desktop/prod-resources/cursor-sdk/**/*",
@@ -2238,6 +2272,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         from: "apps/desktop/prod-resources/resource-monitor",
         to: "resource-monitor",
       },
+      { from: "apps/desktop/prod-resources/pilot", to: "pilot" },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [
       "aarch64-apple-darwin",

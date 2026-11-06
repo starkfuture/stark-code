@@ -45,6 +45,7 @@ import * as DesktopAssets from "./app/DesktopAssets.ts";
 import * as StarkPages from "./starkPages/StarkPages.ts";
 import * as PublishedPages from "./starkPages/PublishedPages.ts";
 import * as Pilot from "./pilot/Pilot.ts";
+import * as PilotInstaller from "./pilot/PilotInstaller.ts";
 import * as DesktopWorkbench from "./starkPages/DesktopWorkbench.ts";
 import * as DesktopDictation from "./dictation/DesktopDictation.ts";
 import * as NativeDictationHost from "./dictation/NativeDictationHost.ts";
@@ -152,6 +153,11 @@ const layerDesktopFoundation = Layer.mergeAll(
   DesktopDictation.layer.pipe(Layer.provide(NativeDictationHost.layer)),
   PublishedPages.layer,
   Pilot.layer,
+  Layer.unwrap(
+    Effect.map(DesktopEnvironment.DesktopEnvironment, (environment) =>
+      PilotInstaller.layer({ bundledRoot: PilotInstaller.bundledRoot(environment) }),
+    ),
+  ),
   Layer.unwrap(
     Effect.gen(function* () {
       const environment = yield* DesktopEnvironment.DesktopEnvironment;

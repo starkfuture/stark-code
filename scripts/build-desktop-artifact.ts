@@ -25,6 +25,7 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
+import pilotPackageJson from "../packages/pilot/package.json" with { type: "json" };
 
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
 import { prepareStarkWorkbench } from "./prepare-stark-workbench.mjs";
@@ -991,6 +992,10 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/resources/stark-workbench/**/*",
   "!apps/desktop/prod-resources/stark-workbench",
   "!apps/desktop/prod-resources/stark-workbench/**/*",
+  "!apps/desktop/resources/pilot",
+  "!apps/desktop/resources/pilot/**/*",
+  "!apps/desktop/prod-resources/pilot",
+  "!apps/desktop/prod-resources/pilot/**/*",
   // Cursor finds platform assets by walking up from argv[1]. Keep them outside
   // asar so spawning helpers and loading native addons both use real paths.
   "!**/node_modules/@cursor/sdk-*/**/*",
@@ -1131,6 +1136,15 @@ export const WSL_RUNTIME_EXTRA_RESOURCES = [
   WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE,
   WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE,
 ] as const;
+/**
+ * Pilot's Claude Code plugin. The app copies it to ~/.pilot/plugin/<version>
+ * when the person installs Pilot (apps/desktop/src/pilot/PilotInstaller.ts
+ * reads it from resources/pilot).
+ */
+export const PILOT_EXTRA_RESOURCE = {
+  from: "apps/desktop/prod-resources/pilot",
+  to: "pilot",
+} as const;
 export const DESKTOP_EXTRA_RESOURCES = [
   {
     // electron-builder drops node_modules directly under a resource's `from`.
@@ -1147,6 +1161,7 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
   },
+  PILOT_EXTRA_RESOURCE,
 ] as const;
 
 export class PackagedStarkWorkbenchMissingError extends Schema.TaggedError<PackagedStarkWorkbenchMissingError>()(
@@ -2506,6 +2521,26 @@ export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (inp
     ),
     { label: "build Linux browser secret helper", verbose: input.verbose },
   );
+});
+
+/**
+ * Stages Pilot as its plugin only: the files packages/pilot/package.json
+ * lists. Tests, examples and node_modules stay out; Pilot runs on Node
+ * built-ins alone.
+ */
+export const stagePilotPlugin = Effect.fn("stagePilotPlugin")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const source = path.join(input.repoRoot, "packages", "pilot");
+  const destination = path.join(input.stageResourcesDir, PILOT_EXTRA_RESOURCE.to);
+  yield* fs.remove(destination, { recursive: true, force: true });
+  for (const entry of ["package.json", ...pilotPackageJson.files]) {
+    yield* fs.makeDirectory(path.dirname(path.join(destination, entry)), { recursive: true });
+    yield* fs.copy(path.join(source, entry), path.join(destination, entry));
+  }
 });
 
 export const stageDictation = Effect.fn("stageDictation")(function* (input: {
@@ -3918,6 +3953,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     arch: options.arch,
     verbose: options.verbose,
   });
+  yield* stagePilotPlugin({ repoRoot, stageResourcesDir });
 
   yield* assertPlatformBuildResources(
     options.platform,

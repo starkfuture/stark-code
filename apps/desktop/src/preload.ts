@@ -251,6 +251,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     cancelAsk: () => ipcRenderer.invoke(PILOT_CHANNELS.cancelAsk),
     nudge: (input) => ipcRenderer.invoke(PILOT_CHANNELS.nudge, input),
     settings: (input) => ipcRenderer.invoke(PILOT_CHANNELS.settings, input),
+    installStatus: () => ipcRenderer.invoke(PILOT_CHANNELS.installStatus),
+    install: () => ipcRenderer.invoke(PILOT_CHANNELS.install),
   },
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),

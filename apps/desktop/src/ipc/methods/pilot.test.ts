@@ -6,7 +6,20 @@ import * as Option from "effect/Option";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as Pilot from "../../pilot/Pilot.ts";
-import { ask, cancelAsk, chat, decide, findings, nudge, pause, settings, status } from "./pilot.ts";
+import * as PilotInstaller from "../../pilot/PilotInstaller.ts";
+import {
+  ask,
+  cancelAsk,
+  chat,
+  decide,
+  findings,
+  install,
+  installStatus,
+  nudge,
+  pause,
+  settings,
+  status,
+} from "./pilot.ts";
 
 // These tests provide the Electron services; importing the package must not download a runtime.
 vi.mock("electron", () => ({}));
@@ -215,6 +228,48 @@ describe("Pilot chat IPC", () => {
         value: { ok: true },
       });
       expect(calls).toEqual(["ask", "nudge"]);
+    }),
+  );
+});
+
+describe("Pilot install IPC", () => {
+  const mainFrame = { url: "starkcode://app/chat" };
+  const window = { webContents: { id: 5, mainFrame } };
+  const calls: string[] = [];
+  const answer = { ok: false, reason: "unavailable", error: "no claude" } as const;
+  const run = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
+    operation.pipe(
+      Effect.provideService(ElectronWindow.ElectronWindow, {
+        currentMainOrFirst: Effect.succeedSome(window),
+      } as never),
+      Effect.provideService(DesktopEnvironment.DesktopEnvironment, {
+        isDevelopment: false,
+        devServerUrl: Option.none(),
+      } as never),
+      Effect.provideService(PilotInstaller.PilotInstaller, {
+        status: () => Effect.sync(() => (calls.push("status"), answer)),
+        install: () => Effect.sync(() => (calls.push("install"), answer)),
+      }),
+    );
+
+  it.effect("changes Claude Code's plugins only for the app's own window", () =>
+    Effect.gen(function* () {
+      const trusted = { sender: { id: 5 }, senderFrame: mainFrame };
+      expect(yield* run(installStatus.handler(undefined, trusted as never))).toEqual(answer);
+      expect(yield* run(install.handler(undefined, trusted as never))).toEqual(answer);
+      for (const event of [
+        undefined,
+        { sender: { id: 6 }, senderFrame: mainFrame },
+        { sender: { id: 5 }, senderFrame: { url: "https://example.com/" } },
+      ]) {
+        expect(
+          Exit.isFailure(yield* Effect.exit(run(install.handler(undefined, event as never)))),
+        ).toBe(true);
+        expect(
+          Exit.isFailure(yield* Effect.exit(run(installStatus.handler(undefined, event as never)))),
+        ).toBe(true);
+      }
+      expect(calls).toEqual(["status", "install"]);
     }),
   );
 });

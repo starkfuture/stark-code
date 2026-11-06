@@ -10,4 +10,6 @@ export const PILOT_CHANNELS = {
   cancelAsk: "desktop:pilot:cancel-ask",
   nudge: "desktop:pilot:nudge",
   settings: "desktop:pilot:settings",
+  installStatus: "desktop:pilot:install-status",
+  install: "desktop:pilot:install",
 } as const;

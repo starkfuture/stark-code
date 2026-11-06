@@ -1,6 +1,13 @@
 import {
   LookoutActivityInput,
   LookoutActivityResponse,
+  LookoutAnswerResponse,
+  LookoutAskInput,
+  LookoutCancelAskResult,
+  LookoutChatInput,
+  LookoutChatResponse,
+  LookoutNudgeInput,
+  LookoutNudgeResponse,
   LookoutDecideInput,
   LookoutDecisionResponse,
   LookoutFindingsInput,
@@ -25,8 +32,9 @@ class LookoutSenderError extends Schema.TaggedError<LookoutSenderError>()(
   }
 }
 
-// Findings quote source code, and decide/pause change Lookout's state, so
-// every method is limited to the app's own window.
+// Findings quote source code, the chat quotes the person's own prompts and
+// rules, and decide/pause/ask/nudge change Lookout's state or spend its budget,
+// so every method is limited to the app's own window.
 const authorized = Effect.fn("desktop.lookout.authorize")(function* (
   event?: DesktopIpc.DesktopIpcInvokeEvent,
 ) {
@@ -91,5 +99,45 @@ export const resume = DesktopIpc.makeIpcMethod({
   handler: (input, event) =>
     Effect.gen(function* () {
       return yield* (yield* authorized(event)).resume(input);
+    }),
+});
+
+export const chat = DesktopIpc.makeIpcMethod({
+  channel: LOOKOUT_CHANNELS.chat,
+  payload: LookoutChatInput,
+  result: LookoutChatResponse,
+  handler: (input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorized(event)).chat(input);
+    }),
+});
+
+export const ask = DesktopIpc.makeIpcMethod({
+  channel: LOOKOUT_CHANNELS.ask,
+  payload: LookoutAskInput,
+  result: LookoutAnswerResponse,
+  handler: (input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorized(event)).ask(input);
+    }),
+});
+
+export const cancelAsk = DesktopIpc.makeIpcMethod({
+  channel: LOOKOUT_CHANNELS.cancelAsk,
+  payload: Schema.Void,
+  result: LookoutCancelAskResult,
+  handler: (_input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorized(event)).cancelAsk();
+    }),
+});
+
+export const nudge = DesktopIpc.makeIpcMethod({
+  channel: LOOKOUT_CHANNELS.nudge,
+  payload: LookoutNudgeInput,
+  result: LookoutNudgeResponse,
+  handler: (input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorized(event)).nudge(input);
     }),
 });

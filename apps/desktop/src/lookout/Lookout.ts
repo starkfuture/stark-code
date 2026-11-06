@@ -1,14 +1,22 @@
 import {
+  LOOKOUT_ASK_MAX_LENGTH,
   LOOKOUT_NOTE_MAX_LENGTH,
   LookoutActivity,
+  LookoutAnswer,
+  LookoutChat,
   LookoutDecision,
   LookoutFindings,
+  LookoutNudgeResult,
   LookoutPauseState,
   LookoutStatus,
   type LookoutActivityInput,
+  type LookoutAskInput,
+  type LookoutCancelAskResult,
+  type LookoutChatInput,
   type LookoutDecideInput,
   type LookoutFailureReason,
   type LookoutFindingsInput,
+  type LookoutNudgeInput,
   type LookoutPauseInput,
   type LookoutResponse,
 } from "@starkfuture/contracts";
@@ -34,7 +42,9 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 // Output can quote source code, so it is never logged.
 
 const API_VERSION = 1;
-const TIMEOUT = "10 seconds";
+const TIMEOUT_SECONDS = 10;
+/** Lookout answers a question within 60 seconds or reports its own timeout; allow for its start-up. */
+const ASK_TIMEOUT_SECONDS = 70;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_ERROR_LENGTH = 500;
 /** Matches Lookout's `<repo>#<id>` handle; the repository part is a name, key or path. */
@@ -53,6 +63,16 @@ const lookoutArgs = (method: string, flags: Flags = {}): string[] => {
     args.push(value === true ? `--${name}` : `--${name}=${value}`);
   }
   return args;
+};
+
+/** Why a question cannot be sent, in words for the panel, or null when it can. */
+export const askInputError = (input: LookoutAskInput): string | null => {
+  if (input.text.trim().length === 0) return "Write a question first.";
+  if (input.text.length > LOOKOUT_ASK_MAX_LENGTH)
+    return `Keep the question under ${LOOKOUT_ASK_MAX_LENGTH} characters.`;
+  // A command-line argument cannot carry a NUL character.
+  if (input.text.includes("\0")) return "The question contains a character Lookout cannot read.";
+  return null;
 };
 
 /** Why a decision cannot be sent, in words for the panel, or null when it can. */
@@ -152,6 +172,13 @@ export class Lookout extends Context.Service<
     readonly resume: (
       input: LookoutPauseInput,
     ) => Effect.Effect<LookoutResponse<LookoutPauseState>>;
+    readonly chat: (input: LookoutChatInput) => Effect.Effect<LookoutResponse<LookoutChat>>;
+    /** One question at a time: a new question, or `cancelAsk`, stops the one in flight. */
+    readonly ask: (input: LookoutAskInput) => Effect.Effect<LookoutResponse<LookoutAnswer>>;
+    readonly cancelAsk: () => Effect.Effect<LookoutCancelAskResult>;
+    readonly nudge: (
+      input: LookoutNudgeInput,
+    ) => Effect.Effect<LookoutResponse<LookoutNudgeResult>>;
   }
 >()("@starkfuture/desktop/lookout/Lookout") {}
 
@@ -163,6 +190,8 @@ export const make = Effect.gen(function* () {
   // Decisions and pauses write Lookout's databases; send them one at a time.
   const mutations = yield* Semaphore.make(1);
   const reads = new Map<string, Deferred.Deferred<LookoutResponse<unknown>>>();
+  // Completing it stops the question in flight; its process is killed as the run's scope closes.
+  let stopCurrentAsk: Deferred.Deferred<void> | null = null;
 
   const isExecutableFile = (file: string) =>
     fs.stat(file).pipe(
@@ -186,6 +215,7 @@ export const make = Effect.gen(function* () {
     method: string,
     flags: Flags,
     decode: (value: unknown) => Option.Option<A>,
+    timeoutSeconds = TIMEOUT_SECONDS,
   ): Effect.Effect<LookoutResponse<A>> =>
     Effect.gen(function* () {
       const environment = yield* HostProcess.Environment;
@@ -222,7 +252,7 @@ export const make = Effect.gen(function* () {
           );
           return { stdout, exitCode: Number(exitCode) } satisfies Outcome;
         }),
-      ).pipe(Effect.timeoutOption(TIMEOUT), Effect.result);
+      ).pipe(Effect.timeoutOption(`${timeoutSeconds} seconds`), Effect.result);
 
       if (Result.isFailure(outcome)) {
         switch (outcome.failure) {
@@ -235,7 +265,7 @@ export const make = Effect.gen(function* () {
         }
       }
       if (Option.isNone(outcome.success))
-        return fail("timeout", "Lookout did not answer within 10 seconds.");
+        return fail("timeout", `Lookout did not answer within ${timeoutSeconds} seconds.`);
       const { stdout, exitCode } = outcome.success.value;
       return interpretLookoutOutput(decode, stdout, exitCode);
     }).pipe(Effect.withSpan("Lookout.run", { attributes: { method } }));
@@ -263,6 +293,16 @@ export const make = Effect.gen(function* () {
   const decodeActivity = Schema.decodeUnknownOption(LookoutActivity);
   const decodeDecision = Schema.decodeUnknownOption(LookoutDecision);
   const decodePause = Schema.decodeUnknownOption(LookoutPauseState);
+  const decodeChat = Schema.decodeUnknownOption(LookoutChat);
+  const decodeAnswer = Schema.decodeUnknownOption(LookoutAnswer);
+  const decodeNudge = Schema.decodeUnknownOption(LookoutNudgeResult);
+
+  const stopAsk = () => {
+    const current = stopCurrentAsk;
+    stopCurrentAsk = null;
+    if (current) Deferred.doneUnsafe(current, Effect.void);
+    return current !== null;
+  };
 
   const setPaused = (method: "pause" | "resume", input: LookoutPauseInput) =>
     mutations.withPermit(run(method, { repo: input.repo }, decodePause));
@@ -285,6 +325,39 @@ export const make = Effect.gen(function* () {
     },
     pause: (input) => setPaused("pause", input),
     resume: (input) => setPaused("resume", input),
+    chat: (input) => read("chat", { since: input.since, limit: input.limit }, decodeChat),
+    ask: (input) =>
+      Effect.suspend(() => {
+        const invalid = askInputError(input);
+        if (invalid !== null) return Effect.succeed(fail("invalid", invalid));
+        // The panel asks one question at a time; an older question still running is abandoned.
+        stopAsk();
+        const stop = Deferred.makeUnsafe<void>();
+        stopCurrentAsk = stop;
+        return run("ask", { text: input.text }, decodeAnswer, ASK_TIMEOUT_SECONDS).pipe(
+          Effect.raceFirst(
+            Deferred.await(stop).pipe(
+              Effect.as(fail("cancelled", "You stopped waiting for Lookout's answer.")),
+            ),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (stopCurrentAsk === stop) stopCurrentAsk = null;
+            }),
+          ),
+        );
+      }),
+    cancelAsk: () => Effect.sync(() => ({ cancelled: stopAsk() })),
+    nudge: (input) =>
+      mutations.withPermit(
+        run(
+          "nudge",
+          "all" in input
+            ? { all: true, action: input.action }
+            : { id: input.id, action: input.action },
+          decodeNudge,
+        ),
+      ),
   });
 });
 

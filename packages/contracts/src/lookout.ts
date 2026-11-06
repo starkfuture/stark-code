@@ -121,6 +121,12 @@ export const LookoutStatus = Schema.Struct({
     availableCents: Schema.Number,
   }),
   repos: Schema.Array(LookoutRepo),
+  /** Lookout nudges the person has not seen yet. Absent from Lookout versions without chat. */
+  unread: Schema.optional(Schema.Number),
+  /** Claude Code sessions active in the last 6 hours. */
+  sessions: Schema.optional(Schema.Number),
+  /** Whether Lookout also reviews finished work (off by default since chat). */
+  reviewWork: Schema.optional(Schema.Boolean),
 });
 export type LookoutStatus = typeof LookoutStatus.Type;
 
@@ -164,6 +170,77 @@ export const LookoutPauseState = Schema.Struct({
 });
 export type LookoutPauseState = typeof LookoutPauseState.Type;
 
+/**
+ * What a nudge says the person is forgetting: a standing rule, something they
+ * said earlier, something waiting on them, a detail the session lacks, or a
+ * fact that matters before something hard to undo.
+ */
+export const LookoutNudgeKind = Schema.Literals(["rule", "earlier", "pending", "missing", "risky"]);
+export type LookoutNudgeKind = typeof LookoutNudgeKind.Type;
+
+export const LookoutMessageState = Schema.Literals([
+  "new",
+  "seen",
+  "sent",
+  "dismissed",
+  "useful",
+  "not_useful",
+]);
+export type LookoutMessageState = typeof LookoutMessageState.Type;
+
+/**
+ * One exact quote behind a nudge or answer. `where` is `path:line` for rules
+ * and memory, and `session label · time` for prompts and session messages.
+ * `found` is false when Lookout could not find the quote in its source.
+ */
+export const LookoutQuote = Schema.Struct({
+  source: Schema.Literals(["rule", "memory", "prompt", "session", "nudge"]),
+  where: Schema.String,
+  quote: Schema.String,
+  found: Schema.Boolean,
+});
+export type LookoutQuote = typeof LookoutQuote.Type;
+
+/** One entry in the Lookout chat thread; quotes and text are redacted by Lookout before storage. */
+export const LookoutMessage = Schema.Struct({
+  id: Schema.Number,
+  at: Schema.String,
+  role: Schema.Literals(["you", "lookout"]),
+  kind: Schema.Literals(["nudge", "answer", "message", "note"]),
+  nudgeKind: Schema.NullOr(LookoutNudgeKind),
+  text: Schema.String,
+  evidence: Schema.Array(LookoutQuote),
+  session: Schema.NullOr(Schema.String),
+  /** Repository name, " · ", and the session's first prompt (at most 40 characters). */
+  sessionLabel: Schema.NullOr(Schema.String),
+  repo: Schema.NullOr(Schema.String),
+  state: LookoutMessageState,
+});
+export type LookoutMessage = typeof LookoutMessage.Type;
+
+export const LookoutChat = Schema.Struct({
+  messages: Schema.Array(LookoutMessage),
+  unread: Schema.Number,
+});
+export type LookoutChat = typeof LookoutChat.Type;
+
+export const LookoutAnswer = Schema.Struct({
+  question: LookoutMessage,
+  answer: LookoutMessage,
+});
+export type LookoutAnswer = typeof LookoutAnswer.Type;
+
+/** `message` is the nudge after the change; a change to every nudge (`all`) may return none. */
+export const LookoutNudgeResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  message: Schema.optional(Schema.NullOr(LookoutMessage)),
+});
+export type LookoutNudgeResult = typeof LookoutNudgeResult.Type;
+
+/** Whether a question was still waiting for Lookout's answer when it was cancelled. */
+export const LookoutCancelAskResult = Schema.Struct({ cancelled: Schema.Boolean });
+export type LookoutCancelAskResult = typeof LookoutCancelAskResult.Type;
+
 const LookoutRepoSelector = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
 
 export const LookoutFindingsInput = Schema.Struct({
@@ -198,10 +275,53 @@ export type LookoutDecideInput = typeof LookoutDecideInput.Type;
 export const LookoutPauseInput = Schema.Struct({ repo: Schema.optional(LookoutRepoSelector) });
 export type LookoutPauseInput = typeof LookoutPauseInput.Type;
 
+const LookoutMessageId = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+);
+
+/** Without `since`, the newest messages; with it, only messages after that id. */
+export const LookoutChatInput = Schema.Struct({
+  since: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+  ),
+  limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))),
+});
+export type LookoutChatInput = typeof LookoutChatInput.Type;
+
+export const LOOKOUT_ASK_MAX_LENGTH = 4000;
+
+export const LookoutAskInput = Schema.Struct({
+  text: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(LOOKOUT_ASK_MAX_LENGTH),
+    // Something to ask, and nothing a command line cannot carry.
+    Schema.isPattern(/\S/),
+    Schema.isPattern(/^[^\0]*$/),
+  ),
+});
+export type LookoutAskInput = typeof LookoutAskInput.Type;
+
+export const LookoutNudgeAction = Schema.Literals([
+  "send",
+  "seen",
+  "dismiss",
+  "useful",
+  "not_useful",
+]);
+export type LookoutNudgeAction = typeof LookoutNudgeAction.Type;
+
+/** One nudge by id, or every unseen nudge at once (marking them seen is the only bulk action). */
+export const LookoutNudgeInput = Schema.Union([
+  Schema.Struct({ id: LookoutMessageId, action: LookoutNudgeAction }),
+  Schema.Struct({ all: Schema.Literal(true), action: Schema.Literal("seen") }),
+]);
+export type LookoutNudgeInput = typeof LookoutNudgeInput.Type;
+
 /**
  * Why a call returned no value: the input was rejected before running Lookout,
  * Lookout reported an error, it did not answer in time, it could not start
- * (for example `node` is missing from PATH), or it speaks another API version.
+ * (for example `node` is missing from PATH), it speaks another API version, or
+ * the person cancelled the question.
  */
 export const LookoutFailureReason = Schema.Literals([
   "invalid",
@@ -209,6 +329,7 @@ export const LookoutFailureReason = Schema.Literals([
   "timeout",
   "unavailable",
   "incompatible",
+  "cancelled",
 ]);
 export type LookoutFailureReason = typeof LookoutFailureReason.Type;
 
@@ -236,6 +357,9 @@ export const LookoutFindingsResponse = lookoutResponse(LookoutFindings);
 export const LookoutActivityResponse = lookoutResponse(LookoutActivity);
 export const LookoutDecisionResponse = lookoutResponse(LookoutDecision);
 export const LookoutPauseResponse = lookoutResponse(LookoutPauseState);
+export const LookoutChatResponse = lookoutResponse(LookoutChat);
+export const LookoutAnswerResponse = lookoutResponse(LookoutAnswer);
+export const LookoutNudgeResponse = lookoutResponse(LookoutNudgeResult);
 
 export type LookoutResponse<T> =
   | typeof LookoutNotInstalled.Type
@@ -250,4 +374,9 @@ export interface LookoutBridge {
   decide(input: LookoutDecideInput): Promise<LookoutResponse<LookoutDecision>>;
   pause(input: LookoutPauseInput): Promise<LookoutResponse<LookoutPauseState>>;
   resume(input: LookoutPauseInput): Promise<LookoutResponse<LookoutPauseState>>;
+  chat(input: LookoutChatInput): Promise<LookoutResponse<LookoutChat>>;
+  /** Waits for Lookout's answer (up to about a minute); `cancelAsk` ends the wait early. */
+  ask(input: LookoutAskInput): Promise<LookoutResponse<LookoutAnswer>>;
+  cancelAsk(): Promise<LookoutCancelAskResult>;
+  nudge(input: LookoutNudgeInput): Promise<LookoutResponse<LookoutNudgeResult>>;
 }

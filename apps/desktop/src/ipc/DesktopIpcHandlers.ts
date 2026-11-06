@@ -167,6 +167,10 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(LookoutIpc.decide);
   yield* ipc.handle(LookoutIpc.pause);
   yield* ipc.handle(LookoutIpc.resume);
+  yield* ipc.handle(LookoutIpc.chat);
+  yield* ipc.handle(LookoutIpc.ask);
+  yield* ipc.handle(LookoutIpc.cancelAsk);
+  yield* ipc.handle(LookoutIpc.nudge);
   yield* ipc.handle(StarkPagesIpc.ensureMirror);
   yield* ipc.handle(StarkPagesIpc.openFollow);
   yield* ipc.handle(StarkPagesIpc.openLink);

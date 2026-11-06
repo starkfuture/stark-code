@@ -246,6 +246,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     decide: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.decide, input),
     pause: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.pause, input),
     resume: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.resume, input),
+    chat: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.chat, input),
+    ask: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.ask, input),
+    cancelAsk: () => ipcRenderer.invoke(LOOKOUT_CHANNELS.cancelAsk),
+    nudge: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.nudge, input),
   },
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),

@@ -67,6 +67,8 @@ const fakeLookout = (
   gate?: Deferred.Deferred<void>,
 ) => {
   const calls: Spawned[] = [];
+  /** Runs stopped before they exited, such as a cancelled question. */
+  const interrupted: Array<ReadonlyArray<string>> = [];
   const spawned = Deferred.makeUnsafe<void>();
   const spawner = ChildProcessSpawner.make((command) =>
     Effect.sync(() => {
@@ -81,6 +83,7 @@ const fakeLookout = (
         pid: ChildProcessSpawner.ProcessId(1),
         exitCode: (gate ? Deferred.await(gate) : Effect.void).pipe(
           Effect.as(ChildProcessSpawner.ExitCode(reply.exitCode ?? 0)),
+          Effect.onInterrupt(() => Effect.sync(() => interrupted.push(args))),
         ),
         isRunning: Effect.succeed(false),
         kill: () => Effect.void,
@@ -94,7 +97,27 @@ const fakeLookout = (
       });
     }),
   );
-  return { calls, spawner, spawned };
+  return { calls, interrupted, spawner, spawned };
+};
+
+// A chat message as Lookout returns it.
+const message = (id: number, role: "you" | "lookout", text: string) => ({
+  id,
+  at: "2026-11-06T09:13:00.000Z",
+  role,
+  kind: role === "you" ? "message" : "answer",
+  nudgeKind: null,
+  text,
+  evidence: [],
+  session: null,
+  sessionLabel: null,
+  repo: null,
+  state: "seen",
+});
+const ANSWER = {
+  api: 1,
+  question: message(42, "you", "what's waiting on me?"),
+  answer: message(43, "lookout", "Nothing is waiting on you."),
 };
 
 /** A temporary Lookout home, with or without its launcher, and the service reading it. */
@@ -273,6 +296,91 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
       expect(a).toEqual(b);
       expect(a).toMatchObject({ ok: true });
       expect(fake.calls).toHaveLength(1);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("passes chat, question and nudge values as attached flags", () =>
+    Effect.gen(function* () {
+      const fake = fakeLookout({ stdout: JSON.stringify({ api: 1, error: "nope" }), exitCode: 1 });
+      const { service, within } = yield* setup(fake);
+      yield* within(service.chat({ since: 40, limit: 200 }));
+      yield* within(service.chat({}));
+      yield* within(service.ask({ text: "--all\nwhat did I ask yesterday?" }));
+      yield* within(service.nudge({ id: 41, action: "not_useful" }));
+      yield* within(service.nudge({ all: true, action: "seen" }));
+      expect(fake.calls.map((call) => call.args)).toEqual([
+        ["api", "chat", "--since=40", "--limit=200"],
+        ["api", "chat"],
+        ["api", "ask", "--text=--all\nwhat did I ask yesterday?"],
+        ["api", "nudge", "--id=41", "--action=not_useful"],
+        ["api", "nudge", "--all", "--action=seen"],
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("rejects a blank question before running Lookout", () =>
+    Effect.gen(function* () {
+      const fake = fakeLookout({ stdout: JSON.stringify(ANSWER) });
+      const { service, within } = yield* setup(fake);
+      for (const text of ["   ", "a\0b", "x".repeat(4001)])
+        expect(yield* within(service.ask({ text }))).toMatchObject({
+          ok: false,
+          reason: "invalid",
+        });
+      expect(fake.calls).toHaveLength(0);
+      expect(yield* within(service.ask({ text: "what's waiting on me?" }))).toMatchObject({
+        ok: true,
+        value: { answer: { text: "Nothing is waiting on you." } },
+      });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("waits seventy seconds for an answer, not ten", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const fake = fakeLookout({ stdout: "" }, gate);
+      const { service, within } = yield* setup(fake);
+      const call = yield* within(service.ask({ text: "what's waiting on me?" })).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* Deferred.await(fake.spawned);
+      yield* TestClock.adjust("61 seconds");
+      expect(call.pollUnsafe()).toBeUndefined();
+      yield* TestClock.adjust("10 seconds");
+      expect(yield* Fiber.join(call)).toMatchObject({
+        ok: false,
+        reason: "timeout",
+        error: "Lookout did not answer within 70 seconds.",
+      });
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("stops a cancelled question and leaves nothing in flight", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const fake = fakeLookout({ stdout: JSON.stringify(ANSWER) }, gate);
+      const { service, within } = yield* setup(fake);
+      expect(yield* service.cancelAsk()).toEqual({ cancelled: false });
+      const first = yield* within(service.ask({ text: "first" })).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* Deferred.await(fake.spawned);
+      expect(yield* service.cancelAsk()).toEqual({ cancelled: true });
+      expect(yield* Fiber.join(first)).toMatchObject({ ok: false, reason: "cancelled" });
+      expect(fake.interrupted).toEqual([["api", "ask", "--text=first"]]);
+      expect(yield* service.cancelAsk()).toEqual({ cancelled: false });
+
+      // A new question replaces one still in flight, and then answers normally.
+      const second = yield* within(service.ask({ text: "second" })).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      const third = yield* within(service.ask({ text: "third" })).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      expect(yield* Fiber.join(second)).toMatchObject({ ok: false, reason: "cancelled" });
+      yield* Deferred.succeed(gate, undefined);
+      expect(yield* Fiber.join(third)).toMatchObject({ ok: true });
+      expect(yield* service.cancelAsk()).toEqual({ cancelled: false });
     }).pipe(Effect.scoped),
   );
 

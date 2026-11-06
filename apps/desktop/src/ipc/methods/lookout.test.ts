@@ -6,7 +6,7 @@ import * as Option from "effect/Option";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as Lookout from "../../lookout/Lookout.ts";
-import { decide, findings, pause, status } from "./lookout.ts";
+import { ask, cancelAsk, chat, decide, findings, nudge, pause, status } from "./lookout.ts";
 
 // These tests provide the Electron services; importing the package must not download a runtime.
 vi.mock("electron", () => ({}));
@@ -115,6 +115,100 @@ describe("Lookout IPC", () => {
           value: { findings: [] },
         },
       );
+    }),
+  );
+});
+
+describe("Lookout chat IPC", () => {
+  const mainFrame = { url: "starkcode://app/chat" };
+  const window = { webContents: { id: 3, mainFrame } };
+  const trusted = { sender: { id: 3 }, senderFrame: mainFrame };
+  const calls: string[] = [];
+  const run = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
+    operation.pipe(
+      Effect.provideService(ElectronWindow.ElectronWindow, {
+        currentMainOrFirst: Effect.succeedSome(window),
+      } as never),
+      Effect.provideService(DesktopEnvironment.DesktopEnvironment, {
+        isDevelopment: false,
+        devServerUrl: Option.none(),
+      } as never),
+      Effect.provideService(Lookout.Lookout, {
+        chat: () =>
+          Effect.sync(
+            () => (
+              calls.push("chat"),
+              { installed: true, ok: true, value: { messages: [], unread: 2 } }
+            ),
+          ),
+        ask: () =>
+          Effect.sync(
+            () => (
+              calls.push("ask"),
+              { installed: true, ok: false, reason: "cancelled", error: "x" }
+            ),
+          ),
+        cancelAsk: () => Effect.sync(() => (calls.push("cancelAsk"), { cancelled: true })),
+        nudge: () =>
+          Effect.sync(
+            () => (calls.push("nudge"), { installed: true, ok: true, value: { ok: true } }),
+          ),
+      } as never),
+    );
+  const operations = (event: unknown) => [
+    chat.handler({ since: 3 }, event as never),
+    ask.handler({ text: "what's waiting on me?" }, event as never),
+    cancelAsk.handler(undefined, event as never),
+    nudge.handler({ id: 4, action: "send" }, event as never),
+  ];
+
+  it.effect("serves chat, questions and nudges only to the app window", () =>
+    Effect.gen(function* () {
+      calls.length = 0;
+      for (const event of [
+        undefined,
+        { sender: { id: 4 }, senderFrame: mainFrame },
+        { sender: { id: 3 }, senderFrame: { url: mainFrame.url } },
+        { sender: { id: 3 }, senderFrame: { url: "https://example.com/" } },
+      ]) {
+        for (const operation of operations(event))
+          expect(Exit.isFailure(yield* Effect.exit(run(operation)))).toBe(true);
+      }
+      expect(calls).toEqual([]);
+      for (const operation of operations(trusted))
+        expect(Exit.isSuccess(yield* Effect.exit(run(operation)))).toBe(true);
+      expect(calls).toEqual(["chat", "ask", "cancelAsk", "nudge"]);
+    }),
+  );
+
+  it.effect("rejects malformed questions and nudges before the service runs", () =>
+    Effect.gen(function* () {
+      calls.length = 0;
+      for (const operation of [
+        ask.handler({ text: "" }, trusted as never),
+        ask.handler({ text: "  " }, trusted as never),
+        ask.handler({ text: "x".repeat(4001) }, trusted as never),
+        ask.handler({ text: 42 }, trusted as never),
+        nudge.handler({ id: 4, action: "delete" }, trusted as never),
+        nudge.handler({ id: "4", action: "seen" }, trusted as never),
+        nudge.handler({ all: true, action: "send" }, trusted as never),
+        nudge.handler({ action: "seen" }, trusted as never),
+        chat.handler({ since: -1 }, trusted as never),
+        chat.handler({ limit: 0 }, trusted as never),
+      ]) {
+        expect(Exit.isFailure(yield* Effect.exit(run(operation)))).toBe(true);
+      }
+      expect(calls).toEqual([]);
+      expect(yield* run(ask.handler({ text: "x".repeat(4000) }, trusted as never))).toMatchObject({
+        ok: false,
+        reason: "cancelled",
+      });
+      expect(yield* run(nudge.handler({ all: true, action: "seen" }, trusted as never))).toEqual({
+        installed: true,
+        ok: true,
+        value: { ok: true },
+      });
+      expect(calls).toEqual(["ask", "nudge"]);
     }),
   );
 });

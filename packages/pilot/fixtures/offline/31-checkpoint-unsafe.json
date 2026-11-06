@@ -1,0 +1,135 @@
+{
+  "_label": "OFFLINE FIXTURE - hand-written expected assessment for examples/orders-service. NOT model output; replayed through the fake session protocol to exercise the pipeline.",
+  "name": "checkpoint-create-retry-unsafe",
+  "match": {
+    "kinds": [
+      "checkpoint"
+    ],
+    "all": [
+      {
+        "source": "file:src/ordersClient.js",
+        "re": "Retry transient failures"
+      }
+    ],
+    "none": [
+      {
+        "source": "file:src/ordersClient.js",
+        "re": "Idempotency-Key"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "costCents": 34,
+      "toolLog": [
+        {
+          "command": "cd /workspace/review/repo && npm test",
+          "output": "# tests 4\n# pass 4\n# fail 0"
+        },
+        {
+          "command": "node dup-experiment.mjs",
+          "output": "result: \"AbortError\" | orders created: 3"
+        }
+      ],
+      "submission": {
+        "phase": "checkpoint",
+        "summary": "createOrder is now retried on timeouts without an Idempotency-Key. The new test only covers 503, which the contract says is safe; the timeout case is not covered. A sandbox experiment (300 ms server delay, 100 ms client timeout) produced 3 orders for one checkout.",
+        "findings": [
+          {
+            "fingerprint": "order-create-retry-without-idempotency-key",
+            "issue_type": "defect",
+            "severity": "critical",
+            "attribution": "introduced",
+            "proof": "reproduced",
+            "session_awareness": "unaware",
+            "risk_areas": [
+              "money"
+            ],
+            "category": "omission",
+            "title": "Retrying order creation without an Idempotency-Key can charge customers twice",
+            "statement": "createOrder now retries POST /orders on timeouts (AbortError) and 5xx without an Idempotency-Key. A request that timed out after the order was committed is sent again and creates a second order and charge. The coding agent's claim that a failed request does not create an order is contradicted by the API contract, and an experiment reproduces the duplicate.",
+            "failure_case": "POST /orders commits the order but the response is slower than the client timeout; the retry sends the same order again and the customer is charged twice.",
+            "controls_checked": "No Idempotency-Key header, no dedupe on the server for repeated bodies, and the contract says a timed-out request may already be committed.",
+            "why_it_matters": "Directly contradicts R2 / the project goal (exactly one order and one charge per checkout). The idempotency mechanism needs to exist before create retries are introduced.",
+            "evidence": [
+              {
+                "type": "file",
+                "path": "src/ordersClient.js",
+                "line_start": 35,
+                "line_end": 40,
+                "quote": "Retry transient failures (timeouts, 5xx) so checkout survives a flaky Orders API. return withRetry(() => request(baseUrl, \"/orders\", { method: \"POST\","
+              },
+              {
+                "type": "file",
+                "path": "src/retry.js",
+                "line_start": 3,
+                "quote": "err?.name === \"AbortError\""
+              },
+              {
+                "type": "file",
+                "path": "docs/orders-api.md",
+                "line_start": 9,
+                "quote": "A client-side timeout does not mean the order was not created: the order may be committed after your client gave up."
+              },
+              {
+                "type": "event",
+                "event_ref": "coding_agent_report",
+                "quote": "Retries are safe here because a failed request doesn't create an order."
+              },
+              {
+                "type": "command",
+                "command": "node dup-experiment.mjs",
+                "output_excerpt": "result: \"AbortError\" | orders created: 3",
+                "exit_code": 0
+              }
+            ],
+            "confidence": 0.95,
+            "uncertainty": "The experiment uses the repository's fake API, which follows the documented contract; the real API's timing will differ but the contract states the same behaviour.",
+            "suggested_next_action": "Send one Idempotency-Key per checkout attempt on every createOrder attempt, and add a timeout-after-commit test.",
+            "handoff_prompt": "Before adding retries to createOrder: generate one Idempotency-Key per checkout attempt in placeOrder, pass it to createOrder, and send it as the Idempotency-Key header on every retry attempt (docs/orders-api.md). Add a test where the first POST times out after the order is committed and assert exactly one order exists.",
+            "related_paths": [
+              "src/ordersClient.js",
+              "src/checkout.js",
+              "docs/orders-api.md"
+            ]
+          },
+          {
+            "_note": "DELIBERATELY UNGROUNDED fixture finding: its quote does not exist in the repo. It must be hidden as 'unverified' by the grounding check.",
+            "fingerprint": "retry-storm-amplifies-outage",
+            "issue_type": "suggestion",
+            "severity": "low",
+            "attribution": "amplified",
+            "proof": "source_proven",
+            "session_awareness": "unaware",
+            "risk_areas": [],
+            "category": "risk",
+            "title": "Unbounded retries could amplify an Orders API outage",
+            "statement": "createOrder retries up to 10 times with no jitter, which multiplies load during an outage.",
+            "failure_case": "During an Orders API outage every checkout sends up to 3 requests instead of 1, tripling load on a struggling service.",
+            "controls_checked": "Backoff exists but there is no jitter or circuit breaker.",
+            "why_it_matters": "Checkout reliability during incidents.",
+            "evidence": [
+              {
+                "type": "file",
+                "path": "src/ordersClient.js",
+                "quote": "maxRetries: 10, jitter: false"
+              }
+            ],
+            "confidence": 0.4,
+            "uncertainty": "Plausible-sounding but not checked.",
+            "suggested_next_action": "Cap retries and add jitter.",
+            "related_paths": [
+              "src/ordersClient.js"
+            ]
+          }
+        ],
+        "still_valid": [
+          "client-timeout-ambiguous-order-outcome"
+        ],
+        "escalate": {
+          "needed": false
+        }
+      }
+    }
+  ]
+}

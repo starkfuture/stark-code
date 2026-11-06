@@ -1,0 +1,44 @@
+{
+  "_label": "OFFLINE FIXTURE - hand-written expected assessment for examples/orders-service. NOT model output; replayed through the fake session protocol to exercise the pipeline.",
+  "name": "checkpoint-get-retry-legit",
+  "match": {
+    "kinds": [
+      "checkpoint"
+    ],
+    "all": [
+      {
+        "source": "file:src/ordersClient.js",
+        "re": "Reads are safe to retry"
+      }
+    ],
+    "none": [
+      {
+        "source": "file:src/ordersClient.js",
+        "re": "Retry transient failures|idempotencyKey"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "costCents": 18,
+      "toolLog": [
+        {
+          "command": "cd /workspace/review/repo && npm test",
+          "output": "# tests 3\n# pass 3\n# fail 0"
+        }
+      ],
+      "submission": {
+        "phase": "checkpoint",
+        "summary": "withRetry now wraps getOrder only; createOrder is unchanged. Retrying GET is safe per the contract. The coding agent's claim (createOrder unchanged, 3 tests pass) checks out.",
+        "findings": [],
+        "still_valid": [
+          "client-timeout-ambiguous-order-outcome",
+          "order-create-retry-without-idempotency-key"
+        ],
+        "escalate": {
+          "needed": false
+        }
+      }
+    }
+  ]
+}

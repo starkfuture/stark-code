@@ -4,6 +4,8 @@
   "rules": { "types": "off", "nsTypes": "off" },
   // These executables are supplied by the OS or installed separately from npm.
   "ignoreBinaries": ["eas", "file", "mkfifo", "pkill", "pkg-config", "plutil", "sips"],
+  // Pilot is a plain-Node Claude Code plugin with its own entry points (hooks, commands, scripts).
+  "ignoreWorkspaces": ["packages/pilot"],
   "workspaces": {
     ".": {
       // Keep vendored reference repositories outside the root project.
@@ -38,7 +40,11 @@
       // The Vite+ web build prerequisite.
       // Native and disk-loaded provider packages stay external to the bundle; the
       // CLI archive and desktop sidecar stage them from this manifest.
-      "ignoreDependencies": ["@effect/platform-node-shared", "@starkfuture/web", "@napi-rs/keyring"],
+      "ignoreDependencies": [
+        "@effect/platform-node-shared",
+        "@starkfuture/web",
+        "@napi-rs/keyring",
+      ],
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.

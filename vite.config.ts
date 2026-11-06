@@ -68,6 +68,8 @@ export default defineConfig({
       "**/dist/**",
       "**/dist-electron/**",
       "**/.{idea,git,cache,output,temp}/**",
+      // Pilot runs its own suite with node --test (packages/pilot/package.json).
+      "packages/pilot/**",
     ],
     hookTimeout: 60_000,
     testTimeout: 60_000,
@@ -98,6 +100,8 @@ export default defineConfig({
       "apps/mobile/ios/**",
       "apps/mobile/uniwind-types.d.ts",
       "*.icon/**",
+      // Pilot keeps the style of the plain-Node plugin it ships as; see packages/pilot/README.md.
+      "packages/pilot/**",
     ],
     sortPackageJson: {},
     overrides: [
@@ -122,6 +126,7 @@ export default defineConfig({
       "apps/mobile/android/**",
       "apps/mobile/ios/**",
       "apps/mobile/uniwind-types.d.ts",
+      "packages/pilot/**",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-starkcode/index.ts", "@shadcn/lint"],

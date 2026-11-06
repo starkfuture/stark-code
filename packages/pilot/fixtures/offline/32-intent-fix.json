@@ -1,0 +1,28 @@
+{
+  "_label": "OFFLINE FIXTURE - hand-written expected assessment for examples/orders-service. NOT model output; replayed through the fake session protocol to exercise the pipeline.",
+  "name": "intent-idempotency-fix",
+  "match": {
+    "kinds": [
+      "intent"
+    ],
+    "all": [
+      {
+        "source": "events",
+        "re": "Idempotency-Key that stays the same"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "costCents": 10,
+      "submission": {
+        "phase": "checkpoint",
+        "summary": "The request matches the documented fix: one key reused across retries of one checkout.",
+        "findings": [],
+        "escalate": {
+          "needed": false
+        }
+      }
+    }
+  ]
+}

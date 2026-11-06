@@ -1,0 +1,16 @@
+{
+  "name": "pilot",
+  "displayName": "Pilot",
+  "version": "0.3.0",
+  "description": "Pilot watches what you ask your Claude Code sessions and tells you, in a chat, when you're about to forget something: a rule you wrote, something you said earlier, a question waiting on you. It always quotes the source and stays silent otherwise. It thinks with Claude or Codex, your choice.",
+  "author": {
+    "name": "Stark Future"
+  },
+  "license": "UNLICENSED",
+  "keywords": [
+    "prompts",
+    "reminders",
+    "oversight",
+    "hooks"
+  ]
+}

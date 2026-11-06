@@ -1,0 +1,35 @@
+{
+  "name": "@starkfuture/pilot",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Pilot: watches what you ask your Claude Code sessions and tells you when you're forgetting something",
+  "bin": {
+    "pilot": "./scripts/pilot",
+    "lookout": "./scripts/lookout"
+  },
+  "files": [
+    ".claude-plugin",
+    "commands",
+    "fixtures/offline",
+    "hooks",
+    "scripts/lookout",
+    "scripts/pilot",
+    "src",
+    "README.md"
+  ],
+  "type": "module",
+  "scripts": {
+    "demo": "bash scripts/demo.sh",
+    "smoke": "node --disable-warning=ExperimentalWarning scripts/contract-smoke.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"test/*.test.ts\"",
+    "trial": "bash scripts/trial.sh",
+    "trial-nudges": "bash scripts/trial-nudges.sh",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

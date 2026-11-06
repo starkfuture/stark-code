@@ -1,0 +1,10 @@
+{
+  "name": "orders-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Demo repo for lookout: checkout backend that places orders through an upstream Orders API",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}

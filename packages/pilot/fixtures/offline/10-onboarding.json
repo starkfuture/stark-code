@@ -1,0 +1,191 @@
+{
+  "_label": "OFFLINE FIXTURE - hand-written expected assessment for examples/orders-service. NOT model output; replayed through the fake session protocol to exercise the pipeline.",
+  "name": "onboarding-orders-service",
+  "match": {
+    "kinds": [
+      "onboarding"
+    ]
+  },
+  "turns": [
+    {
+      "costCents": 30,
+      "toolLog": [
+        {
+          "command": "cd /workspace/review/repo && npm test",
+          "output": "# tests 2\n# pass 2\n# fail 0"
+        }
+      ],
+      "submission": {
+        "phase": "baseline",
+        "summary": "placeOrder makes a single POST /orders with a 5 s timeout and no retries. The goal (exactly one order per checkout) depends on how timeouts are handled: the documented API latency (up to 10 s) exceeds the client timeout, and a timeout does not mean the order failed.",
+        "notes_update": {
+          "requirements": [
+            {
+              "text": "Each checkout creates exactly one order and one charge, including when the client retries or times out.",
+              "source": "repo",
+              "status": "confirmed",
+              "evidence": "README.md goal"
+            }
+          ],
+          "assumptions": [
+            {
+              "text": "A client-side timeout means the order was not created.",
+              "source": "inferred",
+              "status": "refuted",
+              "evidence": "docs/orders-api.md: A client-side timeout does not mean the order was not created: the order may be committed after your client gave up."
+            }
+          ],
+          "open_questions": [
+            {
+              "text": "What does the storefront do when placeOrder throws after a timeout - does the customer resubmit?",
+              "source": "copilot"
+            }
+          ],
+          "evidence_log": [
+            {
+              "text": "Baseline tests: 2 pass (npm test).",
+              "source": "copilot"
+            }
+          ]
+        },
+        "findings": [
+          {
+            "fingerprint": "client-timeout-ambiguous-order-outcome",
+            "issue_type": "decision",
+            "severity": "high",
+            "attribution": "pre_existing",
+            "proof": "source_proven",
+            "session_awareness": "unaware",
+            "risk_areas": [
+              "money"
+            ],
+            "category": "assumption",
+            "title": "A checkout timeout does not mean no order was placed",
+            "statement": "createOrder gives up after 5 s, but the Orders API documents responses of up to 10 s and says a client timeout does not mean the order was not created. Today a slow success surfaces to the customer as a failed checkout while the order and charge exist.",
+            "failure_case": "Orders API takes longer than the 5 s client timeout to commit an order; the client aborts and reports failure although the order exists, so checkout cannot tell whether it charged the customer.",
+            "controls_checked": "Looked for an idempotency key, an order lookup by checkout id, and a timeout that covers the documented latency; none exist.",
+            "why_it_matters": "The goal is exactly one order and one charge per checkout. A customer who sees a failure and tries again is charged twice, even before any retry logic exists.",
+            "evidence": [
+              {
+                "type": "file",
+                "path": "src/ordersClient.js",
+                "line_start": 2,
+                "quote": "const DEFAULT_TIMEOUT_MS = 5000;"
+              },
+              {
+                "type": "file",
+                "path": "docs/orders-api.md",
+                "line_start": 9,
+                "quote": "Under load the API can take up to 10 seconds to respond. A client-side timeout does not mean the order was not created: the order may be committed after your client gave up."
+              }
+            ],
+            "confidence": 0.7,
+            "uncertainty": "I cannot see the storefront: if it reconciles orders after an error, the customer-facing impact is smaller.",
+            "suggested_next_action": "Decide how a timed-out checkout is reconciled (idempotent retry or status lookup) before changing retry behaviour.",
+            "related_paths": [
+              "src/ordersClient.js",
+              "docs/orders-api.md"
+            ]
+          }
+        ],
+        "escalate": {
+          "needed": false
+        }
+      }
+    },
+    {
+      "costCents": 30,
+      "submission": {
+        "phase": "comparison",
+        "summary": "The proposal fits R1 for reads, but for order creation it assumes retries are harmless. The documented contract says POST /orders is not idempotent without a key, so the proposal conflicts with R2 unless an Idempotency-Key is added first.",
+        "notes_update": {
+          "requirements": [
+            {
+              "text": "Each checkout creates exactly one order and one charge, including when the client retries or times out.",
+              "source": "repo",
+              "status": "confirmed",
+              "evidence": "README.md goal"
+            }
+          ],
+          "assumptions": [
+            {
+              "text": "A client-side timeout means the order was not created.",
+              "source": "inferred",
+              "status": "refuted",
+              "evidence": "docs/orders-api.md: A client-side timeout does not mean the order was not created: the order may be committed after your client gave up."
+            }
+          ],
+          "open_questions": [
+            {
+              "text": "What does the storefront do when placeOrder throws after a timeout - does the customer resubmit?",
+              "source": "copilot"
+            }
+          ],
+          "evidence_log": [
+            {
+              "text": "Baseline tests: 2 pass (npm test).",
+              "source": "copilot"
+            }
+          ],
+          "proposed_solutions": [
+            {
+              "text": "Client-side retries with exponential backoff around createOrder and getOrder.",
+              "source": "developer",
+              "status": "proposed"
+            }
+          ]
+        },
+        "findings": [
+          {
+            "fingerprint": "order-create-retry-without-idempotency-key",
+            "issue_type": "defect",
+            "severity": "critical",
+            "attribution": "introduced",
+            "proof": "source_proven",
+            "session_awareness": "unaware",
+            "risk_areas": [
+              "money"
+            ],
+            "category": "omission",
+            "title": "Retrying order creation without an Idempotency-Key can charge customers twice",
+            "statement": "The proposed approach retries all Orders API calls on timeouts and 5xx. POST /orders is not idempotent unless an Idempotency-Key is sent, and a timed-out request may already have created the order. Retrying it as proposed creates duplicate orders and charges. Retrying GET /orders/:id is fine.",
+            "failure_case": "POST /orders commits the order but the response is slower than the client timeout; the retry sends the same order again and the customer is charged twice.",
+            "controls_checked": "No Idempotency-Key header, no dedupe on the server for repeated bodies, and the contract says a timed-out request may already be committed.",
+            "why_it_matters": "Directly contradicts R2 / the project goal (exactly one order and one charge per checkout). The idempotency mechanism needs to exist before create retries are introduced.",
+            "evidence": [
+              {
+                "type": "file",
+                "path": "docs/orders-api.md",
+                "line_start": 7,
+                "quote": "Not idempotent by default: every accepted request creates a new order and a new charge."
+              },
+              {
+                "type": "file",
+                "path": "docs/orders-api.md",
+                "line_start": 9,
+                "quote": "A client-side timeout does not mean the order was not created: the order may be committed after your client gave up."
+              },
+              {
+                "type": "event",
+                "event_ref": "proposed_approach",
+                "quote": "Add client-side retries with exponential backoff around the Orders API calls"
+              }
+            ],
+            "confidence": 0.9,
+            "uncertainty": "Confirmed from the documented contract; not yet demonstrated against code because the retry does not exist yet.",
+            "suggested_next_action": "Before adding create retries, generate one Idempotency-Key per checkout attempt and send it on every attempt. Retry GET freely.",
+            "handoff_prompt": "Before adding retries to createOrder: generate one Idempotency-Key per checkout attempt in placeOrder, pass it to createOrder, and send it as the Idempotency-Key header on every retry attempt (docs/orders-api.md). Add a test where the first POST times out after the order is committed and assert exactly one order exists.",
+            "related_paths": [
+              "src/ordersClient.js",
+              "src/checkout.js",
+              "docs/orders-api.md"
+            ]
+          }
+        ],
+        "escalate": {
+          "needed": false
+        }
+      }
+    }
+  ]
+}

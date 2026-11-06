@@ -1,0 +1,83 @@
+{
+  "_label": "OFFLINE FIXTURE - hand-written expected assessment for examples/orders-service. NOT model output; replayed through the fake session protocol to exercise the pipeline.",
+  "name": "checkpoint-idempotency-fixed",
+  "match": {
+    "kinds": [
+      "checkpoint",
+      "manual"
+    ],
+    "all": [
+      {
+        "source": "file:src/ordersClient.js",
+        "re": "Idempotency-Key"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "costCents": 24,
+      "toolLog": [
+        {
+          "command": "node dup-experiment.mjs",
+          "output": "result: {\"orderId\":\"ord_1\",\"status\":\"paid\"} | orders created: 1"
+        }
+      ],
+      "submission": {
+        "phase": "checkpoint",
+        "summary": "createOrder now sends the same Idempotency-Key on every attempt, and the duplicate-order experiment produces one order. The earlier findings are resolved. One open question: the key is generated per placeOrder call, not per checkout.",
+        "findings": [
+          {
+            "fingerprint": "idempotency-key-scoped-to-call-not-checkout",
+            "issue_type": "defect",
+            "severity": "medium",
+            "attribution": "introduced",
+            "proof": "source_proven",
+            "session_awareness": "unaware",
+            "risk_areas": [
+              "money"
+            ],
+            "category": "assumption",
+            "title": "Idempotency key is per placeOrder call, not per checkout",
+            "statement": "placeOrder generates a new randomUUID() on each call. Retries inside one call are deduplicated, but if the storefront calls placeOrder again for the same checkout (double submit, page retry after an error), a new key creates a new order.",
+            "failure_case": "The checkout page calls placeOrder again after a failure the user sees (for example a page retry); a new key is generated, so the second call creates a second order.",
+            "controls_checked": "The key is reused across retries inside one placeOrder call; nothing ties it to the checkout across calls.",
+            "why_it_matters": "The goal is one order per checkout, not per call. Whether this matters depends on how the storefront calls placeOrder.",
+            "evidence": [
+              {
+                "type": "file",
+                "path": "src/checkout.js",
+                "line_start": 7,
+                "quote": "client.createOrder(cart, { idempotencyKey: randomUUID() })"
+              },
+              {
+                "type": "file",
+                "path": "docs/orders-api.md",
+                "line_start": 8,
+                "quote": "a unique string per checkout attempt"
+              }
+            ],
+            "confidence": 0.55,
+            "uncertainty": "Depends on storefront behaviour that is not in this repository.",
+            "suggested_next_action": "If the storefront can resubmit, derive the key from a stable checkout id passed in by the caller.",
+            "related_paths": [
+              "src/checkout.js"
+            ]
+          }
+        ],
+        "resolved": [
+          {
+            "fingerprint": "order-create-retry-without-idempotency-key",
+            "reason": "createOrder sends one Idempotency-Key across retries; experiment shows 1 order."
+          },
+          {
+            "fingerprint": "client-timeout-ambiguous-order-outcome",
+            "reason": "A timed-out create is now retried with the same key and replayed, so the outcome is reconciled."
+          }
+        ],
+        "escalate": {
+          "needed": false
+        }
+      }
+    }
+  ]
+}

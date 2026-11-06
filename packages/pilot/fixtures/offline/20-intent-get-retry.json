@@ -1,0 +1,28 @@
+{
+  "_label": "OFFLINE FIXTURE - hand-written expected assessment for examples/orders-service. NOT model output; replayed through the fake session protocol to exercise the pipeline.",
+  "name": "intent-get-retry-safe",
+  "match": {
+    "kinds": [
+      "intent"
+    ],
+    "all": [
+      {
+        "source": "events",
+        "re": "retries.*to getOrder"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "costCents": 12,
+      "submission": {
+        "phase": "checkpoint",
+        "summary": "Request: retries for getOrder. GET /orders/:id is documented as read-only and safe to retry, so this serves R1 without risking R2.",
+        "findings": [],
+        "escalate": {
+          "needed": false
+        }
+      }
+    }
+  ]
+}

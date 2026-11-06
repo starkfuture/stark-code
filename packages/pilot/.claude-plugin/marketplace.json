@@ -1,0 +1,13 @@
+{
+  "name": "pilot",
+  "owner": {
+    "name": "Stark Future"
+  },
+  "plugins": [
+    {
+      "name": "pilot",
+      "source": "./",
+      "description": "Pilot tells you when you're about to forget something across your Claude Code sessions."
+    }
+  ]
+}

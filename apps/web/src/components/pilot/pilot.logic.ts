@@ -227,6 +227,7 @@ const RUN_KINDS: Record<string, string> = {
   manual: "Review you asked for",
   onboarding: "First look at the repository",
   ask: "Answered your question",
+  "chat-answer": "Answered your question",
 };
 
 const RUN_STATUSES: Record<string, string> = {
@@ -234,12 +235,35 @@ const RUN_STATUSES: Record<string, string> = {
   starting: "Starting",
   running: "Running now",
   done: "Done",
-  skipped: "Nothing new to check",
+  skipped: "Skipped",
   failed: "Failed",
   timed_out: "Took too long",
   budget_reached: "Stopped at the budget",
   cancelled: "Cancelled",
+  nudge: "Spoke up",
+  silent: "Nothing to say",
+  dropped: "Held back",
+  held: "Held back",
 };
+
+/** Statuses whose summary is the run's internal reason; the status word says enough. */
+const UNFINISHED_OR_FAILED = new Set([
+  "queued",
+  "starting",
+  "running",
+  "failed",
+  "timed_out",
+  "budget_reached",
+  "cancelled",
+]);
+
+/** Why Pilot held a reminder back, in plain words; unknown reasons are left to the status word. */
+const HELD_BACK_REASONS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^repeats nudge/i, "It had already said that"],
+  [/quote did not match/i, "A quote didn't match its source"],
+  [/quotes only the new prompt/i, "Nothing earlier to quote"],
+  [/^no quote/i, "Nothing to quote"],
+];
 
 const RUN_TRIGGERS: Record<string, string> = {
   prompt: "after your prompt",
@@ -248,6 +272,7 @@ const RUN_TRIGGERS: Record<string, string> = {
   "edits-idle": "after edits went quiet",
   "changed-outside-edits": "after files changed outside the session",
   manual: "on request",
+  question: "for your question",
   escalation: "to look closer",
   onboard: "when Pilot started watching",
 };
@@ -257,6 +282,8 @@ const RUN_TRIGGERS: Record<string, string> = {
  * "[checkpoint]", "finding(s)", snapshot ids and pointers to the CLI.
  */
 export function plainRunSummary(summary: string): string {
+  const pilotLine = plainPilotSummary(summary.trim());
+  if (pilotLine !== null) return pilotLine;
   const lines = summary
     .split("\n")
     .map((line) =>
@@ -275,6 +302,40 @@ export function plainRunSummary(summary: string): string {
   return text ? text[0]!.toUpperCase() + text.slice(1) : "";
 }
 
+/**
+ * Pilot's own prompt-check and answer summaries, such as
+ * "nudge #3 (pending, confidence 0.85)" or "answered by Codex (4/4 quotes found)",
+ * without ids, confidence scores or slugs. Null when the summary is not one of them.
+ */
+function plainPilotSummary(summary: string): string | null {
+  const [main = "", ...rest] = summary.split(/\s+·\s+(?=\w+ instead:)/);
+  const instead = rest.join(" ").replace(/^(\w+) instead: (.*)$/, "used $1 instead: $2");
+  const withInstead = (text: string) => [text, instead].filter(Boolean).join(" · ");
+  const nudge =
+    /^nudge(?: #\d+)? \((\w+), confidence [\d.]+\)(; queued for the session's next turn)?$/.exec(
+      main,
+    );
+  if (nudge) {
+    const label = NUDGE_KIND_LABELS[nudge[1] as PilotNudgeKind] ?? "A reminder";
+    return withInstead(nudge[2] ? `${label}, sent to the session` : label);
+  }
+  if (main === "silent") return withInstead("");
+  const skipped = /^skipped: (.+)$/.exec(main);
+  if (skipped) return withInstead(skipped[1]![0]!.toUpperCase() + skipped[1]!.slice(1));
+  const held = /^(?:dropped|held): (.*)$/.exec(main);
+  if (held) {
+    const reason = HELD_BACK_REASONS.find(([pattern]) => pattern.test(held[1]!))?.[1] ?? "";
+    return withInstead(reason);
+  }
+  const answered = /^answered by (\w+) \((\d+)\/(\d+) quotes found\)(?:; (.*))?$/.exec(main);
+  if (answered) {
+    const [, engine, found, total, fallback] = answered;
+    const quotes = total === "0" ? "no quotes" : `${found} of ${total} quotes found`;
+    return withInstead([`With ${engine}`, quotes, fallback].filter(Boolean).join(" · "));
+  }
+  return null;
+}
+
 /** One Pilot run in plain words; unknown kinds, statuses and triggers are left out, never shown raw. */
 export function describeRun(run: PilotActivityRun): {
   readonly title: string;
@@ -287,12 +348,14 @@ export function describeRun(run: PilotActivityRun): {
     ?.split("+")
     .map((part) => RUN_TRIGGERS[part])
     .find(Boolean);
-  const finished = run.status === "done" || run.status === "skipped";
+  // Unfinished and failed runs carry an internal reason; the status already says what happened.
+  const summary = UNFINISHED_OR_FAILED.has(run.status)
+    ? null
+    : plainRunSummary(run.summary) || null;
   return {
-    title: `${kind} in ${run.repo}`,
+    title: run.repo ? `${kind} in ${run.repo}` : kind,
     detail: [status, trigger].filter(Boolean).join(", "),
-    // Other summaries carry the failure's internal reason; the status already says what happened.
-    summary: finished ? plainRunSummary(run.summary) || null : null,
+    summary,
   };
 }
 

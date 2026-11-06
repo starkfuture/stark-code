@@ -174,6 +174,94 @@ describe("activity in plain words", () => {
     });
   });
 
+  it("reads Pilot's prompt checks and answers in plain words", () => {
+    // Captured from `pilot api activity` after a trial with real model runs.
+    const cases = [
+      [
+        {
+          kind: "prompt-check",
+          status: "nudge",
+          trigger: "prompt",
+          summary: "nudge #3 (pending, confidence 0.85)",
+        },
+        {
+          title: "Checked a prompt in shop",
+          detail: "Spoke up, after your prompt",
+          summary: "Waiting on you",
+        },
+      ],
+      [
+        {
+          kind: "prompt-check",
+          status: "nudge",
+          trigger: "prompt",
+          summary: "nudge #1 (rule, confidence 0.90); queued for the session's next turn",
+        },
+        { summary: "Your rule, sent to the session" },
+      ],
+      [
+        { kind: "prompt-check", status: "silent", trigger: "prompt", summary: "silent" },
+        { detail: "Nothing to say, after your prompt", summary: null },
+      ],
+      [
+        {
+          kind: "prompt-check",
+          status: "dropped",
+          trigger: "prompt",
+          summary: "dropped: repeats nudge #3",
+        },
+        { detail: "Held back, after your prompt", summary: "It had already said that" },
+      ],
+      [
+        {
+          kind: "chat-answer",
+          status: "done",
+          trigger: "question",
+          summary: "answered by Codex (4/4 quotes found)",
+        },
+        {
+          title: "Answered your question in shop",
+          detail: "Done, for your question",
+          summary: "With Codex · 4 of 4 quotes found",
+        },
+      ],
+      [
+        {
+          kind: "chat-answer",
+          status: "done",
+          trigger: "question",
+          summary: "answered by Claude (2/3 quotes found); today's 40 Codex runs are used up",
+        },
+        { summary: "With Claude · 2 of 3 quotes found · today's 40 Codex runs are used up" },
+      ],
+      [
+        {
+          kind: "prompt-check",
+          status: "nudge",
+          trigger: "prompt",
+          summary: "nudge (risky, confidence 0.92) · Claude instead: Codex is signed out",
+        },
+        { summary: "Hard to undo · used Claude instead: Codex is signed out" },
+      ],
+      [
+        {
+          kind: "chat-answer",
+          status: "failed",
+          trigger: "question",
+          summary: "failed: model timed out",
+        },
+        { detail: "Failed, for your question", summary: null },
+      ],
+    ] as const;
+    for (const [input, expected] of cases) {
+      const described = describeRun(run({ repo: "shop", ...input }));
+      expect(described).toMatchObject(expected);
+      expect(JSON.stringify(described)).not.toMatch(
+        /confidence|#\d|queued for|prompt-check|chat-answer/,
+      );
+    }
+  });
+
   it("describes session events without session ids", () => {
     const event = { at: "", repo: "billing", session: "5f0c2a9e", agentType: null };
     expect(describeEvent({ ...event, kind: "prompt" })).toBe("You sent a prompt");

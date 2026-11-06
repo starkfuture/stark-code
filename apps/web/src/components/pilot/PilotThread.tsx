@@ -101,12 +101,15 @@ function Time({ at, timestampFormat }: { at: string; timestampFormat: TimestampF
 
 function NudgeCard({
   message,
+  unseen,
   busy,
   error,
   timestampFormat,
   onAct,
 }: {
   message: PilotMessage;
+  /** Not seen by the person yet; marked seen once it is on screen. */
+  unseen: boolean;
   busy: PilotNudgeAction | null;
   error: string | null;
   timestampFormat: TimestampFormat;
@@ -128,7 +131,7 @@ function NudgeCard({
   return (
     <article
       aria-label={kind ? NUDGE_KIND_LABELS[kind] : "Pilot"}
-      data-unseen-nudge={message.state === "new" ? message.id : undefined}
+      data-unseen-nudge={unseen ? message.id : undefined}
       className="flex min-w-0 flex-col gap-2 rounded-lg border border-border p-3"
     >
       <div className="flex min-w-0 items-center justify-between gap-2">
@@ -229,6 +232,7 @@ export function PilotThread({
   busy,
   errors,
   empty,
+  sentMayBeUnseen,
   onAct,
   onCancelAsk,
   onSeen,
@@ -242,6 +246,11 @@ export function PilotThread({
   busy: ReadonlyMap<number, PilotNudgeAction>;
   errors: ReadonlyMap<number, string>;
   empty: ReactNode;
+  /**
+   * Pilot sends some reminders to their session on its own; they stay unread
+   * until the person sees them, but the message does not say whether they did.
+   */
+  sentMayBeUnseen: boolean;
   onAct: PilotNudgeAct;
   onCancelAsk: () => void;
   onSeen: (ids: readonly number[]) => void;
@@ -266,8 +275,11 @@ export function PilotThread({
     if (pending) followBottom.current = true;
   }, [pending]);
 
+  const isUnseen = (message: PilotMessage) =>
+    message.kind === "nudge" &&
+    (message.state === "new" || (sentMayBeUnseen && message.state === "sent"));
   const unseen = messages
-    .filter((message) => message.kind === "nudge" && message.state === "new")
+    .filter(isUnseen)
     .map((message) => message.id)
     .join(",");
   const onSeenRef = useRef(onSeen);
@@ -313,6 +325,7 @@ export function PilotThread({
                 {message.kind === "nudge" && message.role !== "you" ? (
                   <NudgeCard
                     message={message}
+                    unseen={isUnseen(message)}
                     busy={busy.get(message.id) ?? null}
                     error={errors.get(message.id) ?? null}
                     timestampFormat={timestampFormat}

@@ -65,6 +65,7 @@ import {
   notePilotSeen,
   notePilotStatus,
   notePilotUnread,
+  usePilotIndicator,
   usePoll,
 } from "./pilotStore";
 
@@ -325,6 +326,7 @@ export function PilotContent({
   const [pendingRepo, setPendingRepo] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const unread = usePilotIndicator((state) => state.unread);
   const [settings, setSettings] = useState<PilotSettings | null>(null);
   // The engine for the next question when it differs from the default; null follows the default.
   const [nextEngine, setNextEngine] = useState<PilotEngine | null>(null);
@@ -339,7 +341,8 @@ export function PilotContent({
   // Nudges already taken off the top bar's count, so seeing and acting on one counts once.
   const counted = useRef(new Set<number>());
   const countSeen = (message: Pick<PilotMessage, "id" | "state">) => {
-    if (message.state !== "new" || counted.current.has(message.id)) return;
+    if ((message.state !== "new" && message.state !== "sent") || counted.current.has(message.id))
+      return;
     counted.current.add(message.id);
     notePilotSeen(1);
   };
@@ -506,6 +509,8 @@ export function PilotContent({
       if (askToken.current === token) {
         setPending(null);
         refreshThread();
+        // Codex runs left today, and whether an engine fell back, change with each answer.
+        refreshSettings();
       }
     }
   };
@@ -704,6 +709,10 @@ export function PilotContent({
           timestampFormat={timestampFormat}
           busy={busy}
           errors={nudgeErrors}
+          sentMayBeUnseen={
+            unread >
+            messages.filter((message) => message.kind === "nudge" && message.state === "new").length
+          }
           empty={
             <Notice title="Nothing to remind you of">
               {emptyThreadText(watch, value.sessions)}

@@ -485,3 +485,23 @@ it("changes the default engine from the options menu", async () => {
   expect(bridge.settings).toHaveBeenCalledWith({ engine: "codex" });
   expect(engineToggle("Codex").getAttribute("aria-pressed")).toBe("true");
 });
+
+it("marks a reminder Pilot sent on its own as seen while it still counts as unread", async () => {
+  const sent = message(1, { text: "Merge only on merge #N.", state: "sent" });
+  bridge.chat.mockImplementation(async (input: { since?: number }) =>
+    ok({ messages: input.since === undefined ? [sent] : [], unread: 1 }),
+  );
+  bridge.nudge.mockResolvedValue(ok({ ok: true, message: sent }));
+  await render();
+  expect(bridge.nudge).toHaveBeenCalledWith({ id: 1, action: "seen" });
+  expect(usePilotIndicator.getState().unread).toBe(0);
+  // Seeing it keeps what happened to it.
+  expect(card("merge #N").textContent).toContain("Sent to the session");
+
+  // Once nothing is unread, a sent reminder is left alone.
+  bridge.nudge.mockClear();
+  bridge.chat.mockImplementation(async () => ok({ messages: [sent], unread: 0 }));
+  await render(false);
+  await render(true);
+  expect(bridge.nudge).not.toHaveBeenCalled();
+});

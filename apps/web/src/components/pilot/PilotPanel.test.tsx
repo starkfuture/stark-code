@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import type {
   PilotBridge,
+  PilotInstallStatus,
   PilotMessage,
   PilotResponse,
   PilotSettings,
@@ -463,6 +464,119 @@ it("shows the install command when Pilot is missing", async () => {
   expect(bridge.chat).not.toHaveBeenCalled();
   await click("Check again");
   expect(bridge.status).toHaveBeenCalledTimes(2);
+});
+
+const PLUGIN: PilotInstallStatus = {
+  state: "not-installed",
+  bundledVersion: "0.4.0",
+  installedVersion: null,
+  profile: "~/.claude",
+  target: "~/.pilot/plugin/0.4.0",
+  replaces: [],
+  installsCopy: true,
+  claudeBin: null,
+  envOnlySettings: [],
+  configFile: "~/.pilot/config.json",
+  note: null,
+};
+const INSTALLED: PilotInstallStatus = {
+  ...PLUGIN,
+  state: "installed",
+  installedVersion: "0.4.0",
+  installsCopy: false,
+};
+
+it("installs Pilot from the panel after saying what it changes", async () => {
+  bridge.status.mockResolvedValue({ installed: false, launcher: "/Users/me/.pilot/bin/pilot" });
+  bridge.installStatus = vi.fn(async () => ({ ok: true, value: PLUGIN }));
+  bridge.install = vi.fn(async () => ({ ok: true, value: INSTALLED }));
+  await render();
+  const text = container.textContent ?? "";
+  expect(text).toContain(
+    "Adds Pilot 0.4.0 to Claude Code (~/.claude) from a fixed copy in ~/.pilot/plugin/0.4.0.",
+  );
+  expect(text).toContain("Pilot will use the claude command on your PATH");
+  expect(text).not.toContain("scripts/pilot install");
+  expect(bridge.install).not.toHaveBeenCalled();
+  await click("Install Pilot");
+  expect(bridge.install).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toContain("Pilot 0.4.0 is installed");
+  expect(container.textContent).toContain("It starts with your next Claude Code session.");
+  // The status word follows: the plugin is there, Pilot is just not running yet.
+  expect(container.textContent).toContain("Not running");
+  expect(container.textContent).not.toContain("Not installed");
+});
+
+it("waits for settings a replaced checkout keeps in its .env", async () => {
+  bridge.installStatus = vi.fn(async () => ({
+    ok: true,
+    value: {
+      ...PLUGIN,
+      state: "legacy",
+      replaces: [{ id: "pilot@pilot", version: "0.3.0", source: "~/work/dev-copilot" }],
+      envOnlySettings: ["claude_bin", "mode"],
+    },
+  }));
+  bridge.install = vi.fn();
+  await render();
+  const text = container.textContent ?? "";
+  expect(text).toContain(
+    "Replaces the Pilot that Claude Code (~/.claude) reads from ~/work/dev-copilot",
+  );
+  expect(text).toContain("First add claude_bin and mode to ~/.pilot/config.json");
+  expect(button("Install").disabled).toBe(true);
+  expect(bridge.install).not.toHaveBeenCalled();
+});
+
+it("updates an older fixed copy from a quiet row above the thread", async () => {
+  bridge.installStatus = vi.fn(async () => ({
+    ok: true,
+    value: { ...PLUGIN, state: "update", installedVersion: "0.3.0", claudeBin: "claude" },
+  }));
+  bridge.install = vi.fn(async () => ({ ok: true, value: INSTALLED }));
+  await render();
+  expect(container.textContent).toContain("Updates Pilot 0.3.0 to 0.4.0");
+  await click("Update");
+  expect(container.textContent).not.toContain("Updates Pilot 0.3.0 to 0.4.0");
+  expect(container.textContent).toContain(
+    "Pilot 0.4.0 is installed. New Claude Code sessions use it.",
+  );
+  // The chat refreshes Pilot's status after the change.
+  expect(bridge.status.mock.calls.length).toBeGreaterThan(1);
+});
+
+it("falls back to the install command, with the reason, when Claude Code cannot be read", async () => {
+  bridge.status.mockResolvedValue({ installed: false, launcher: "/Users/me/.pilot/bin/pilot" });
+  bridge.installStatus = vi.fn(async () => ({
+    ok: false,
+    reason: "unavailable",
+    error: "Claude Code's `claude` command was not found. Install Claude Code, then try again.",
+  }));
+  bridge.install = vi.fn();
+  await render();
+  expect(container.textContent).toContain("Claude Code's `claude` command was not found.");
+  expect(container.textContent).toContain("<path-to-pilot-checkout>/scripts/pilot install");
+  expect(bridge.install).not.toHaveBeenCalled();
+});
+
+it("shows why an install stopped and keeps the offer", async () => {
+  bridge.installStatus = vi.fn(async () => ({
+    ok: true,
+    value: {
+      ...PLUGIN,
+      state: "legacy",
+      replaces: [{ id: "lookout@lookout", version: "0.2.0", source: null }],
+    },
+  }));
+  bridge.install = vi.fn(async () => ({
+    ok: false,
+    reason: "failed",
+    error: "Claude Code could not install Pilot.",
+  }));
+  await render();
+  await click("Install");
+  expect(container.textContent).toContain("Claude Code could not install Pilot.");
+  expect(button("Install").disabled).toBe(false);
 });
 
 const engineTrigger = () =>

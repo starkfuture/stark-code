@@ -2,6 +2,7 @@ import type {
   PilotActivityEvent,
   PilotActivityRun,
   PilotEngine,
+  PilotInstallStatus,
   PilotMessage,
   PilotMessageState,
   PilotNudgeKind,
@@ -41,6 +42,63 @@ export const ENGINE_LABELS: Record<PilotEngine, string> = { claude: "Claude", co
 export function codexPlanLabel(codex: PilotSettings["engines"]["codex"]): string {
   const left = codex.runsLeftToday;
   return `Uses your Codex plan · ${left === 1 ? "1 run" : `${left} runs`} left today`;
+}
+
+/** The button the panel offers for Claude Code's Pilot, or null when there is nothing to do. */
+export function installAction(status: PilotInstallStatus | null): "Install" | "Update" | null {
+  if (status === null) return null;
+  if (status.state === "update") return "Update";
+  return status.state === "not-installed" || status.state === "legacy" ? "Install" : null;
+}
+
+const isLookout = (id: string) => id.startsWith("lookout@");
+
+/** What pressing Install or Update changes in the person's Claude Code, in one sentence. */
+export function installPlanText(status: PilotInstallStatus): string {
+  const version = status.bundledVersion ?? "";
+  const claudeCode = `Claude Code (${status.profile})`;
+  const removesLookout = status.replaces.some((plugin) => isLookout(plugin.id));
+  const other = status.replaces.find((plugin) => !isLookout(plugin.id));
+  const copy = `a fixed copy`;
+  const change = !status.installsCopy
+    ? null
+    : other
+      ? `replaces the Pilot that ${claudeCode} ${other.source ? `reads from ${other.source}` : `installs as ${other.id}`} with ${copy} of Pilot ${version}`
+      : status.state === "update"
+        ? `updates Pilot ${status.installedVersion} to ${version} in ${claudeCode}, from ${copy}`
+        : `adds Pilot ${version} to ${claudeCode} from ${copy}`;
+  const where = change ? ` in ${status.target}` : "";
+  const sentence = removesLookout
+    ? change
+      ? `removes Lookout and ${change}`
+      : `removes Lookout from ${claudeCode}; Pilot ${status.installedVersion} stays`
+    : (change ?? "");
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}${where}.`;
+}
+
+/**
+ * What must happen first, or what the person should know: settings a replaced
+ * checkout kept in its `.env`, or which Claude command Pilot will use.
+ */
+export function installNote(status: PilotInstallStatus): {
+  readonly blocks: boolean;
+  readonly text: string;
+} | null {
+  const names = status.envOnlySettings;
+  if (names.length > 0) {
+    const list =
+      names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+    return {
+      blocks: true,
+      text: `First add ${list} to ${status.configFile}: the Pilot being replaced reads ${names.length === 1 ? "it" : "them"} from its folder's .env, which the fixed copy does not have.`,
+    };
+  }
+  if (status.claudeBin === null)
+    return {
+      blocks: false,
+      text: `Pilot will use the claude command on your PATH; set claude_bin in ${status.configFile} to use another.`,
+    };
+  return null;
 }
 
 /** Pilot versions before the chat report no unread count and have no `chat` method. */

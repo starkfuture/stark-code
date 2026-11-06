@@ -1,10 +1,13 @@
-import type { PilotActivityRun, PilotMessage } from "@starkfuture/contracts";
+import type { PilotActivityRun, PilotInstallStatus, PilotMessage } from "@starkfuture/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   budgetLabel,
   describeEvent,
   describeRun,
   emptyThreadText,
+  installAction,
+  installNote,
+  installPlanText,
   newestOpenNudgeId,
   quoteNamesSession,
   pilotWatchState,
@@ -331,5 +334,82 @@ describe("quiet cards", () => {
       ]),
     ).toBe(2);
     expect(newestOpenNudgeId([message(1, { state: "useful" })])).toBeNull();
+  });
+});
+
+describe("installing Pilot", () => {
+  const plugin = (overrides: Partial<PilotInstallStatus> = {}): PilotInstallStatus => ({
+    state: "not-installed",
+    bundledVersion: "0.4.0",
+    installedVersion: null,
+    profile: "~/.claude",
+    target: "~/.pilot/plugin/0.4.0",
+    replaces: [],
+    installsCopy: true,
+    claudeBin: "claude-personal",
+    envOnlySettings: [],
+    configFile: "~/.pilot/config.json",
+    note: null,
+    ...overrides,
+  });
+
+  it("offers Install, Update or nothing", () => {
+    expect(installAction(null)).toBeNull();
+    expect(installAction(plugin())).toBe("Install");
+    expect(installAction(plugin({ state: "legacy" }))).toBe("Install");
+    expect(installAction(plugin({ state: "update" }))).toBe("Update");
+    expect(installAction(plugin({ state: "installed" }))).toBeNull();
+    expect(installAction(plugin({ state: "unsupported" }))).toBeNull();
+  });
+
+  it("says in one sentence what changes in Claude Code", () => {
+    expect(installPlanText(plugin())).toBe(
+      "Adds Pilot 0.4.0 to Claude Code (~/.claude) from a fixed copy in ~/.pilot/plugin/0.4.0.",
+    );
+    expect(
+      installPlanText(
+        plugin({
+          state: "legacy",
+          replaces: [{ id: "pilot@pilot", version: "0.3.0", source: "~/work/dev-copilot" }],
+        }),
+      ),
+    ).toBe(
+      "Replaces the Pilot that Claude Code (~/.claude) reads from ~/work/dev-copilot with a fixed copy of Pilot 0.4.0 in ~/.pilot/plugin/0.4.0.",
+    );
+    expect(
+      installPlanText(
+        plugin({
+          state: "legacy",
+          replaces: [{ id: "lookout@lookout", version: "0.2.0", source: null }],
+        }),
+      ),
+    ).toBe(
+      "Removes Lookout and adds Pilot 0.4.0 to Claude Code (~/.claude) from a fixed copy in ~/.pilot/plugin/0.4.0.",
+    );
+    expect(
+      installPlanText(
+        plugin({
+          state: "legacy",
+          installedVersion: "0.4.0",
+          installsCopy: false,
+          replaces: [{ id: "lookout@lookout", version: "0.2.0", source: null }],
+        }),
+      ),
+    ).toBe("Removes Lookout from Claude Code (~/.claude); Pilot 0.4.0 stays.");
+    expect(installPlanText(plugin({ state: "update", installedVersion: "0.3.0" }))).toBe(
+      "Updates Pilot 0.3.0 to 0.4.0 in Claude Code (~/.claude), from a fixed copy in ~/.pilot/plugin/0.4.0.",
+    );
+  });
+
+  it("waits for settings a replaced checkout kept in its .env, and names the default claude", () => {
+    expect(installNote(plugin({ envOnlySettings: ["claude_bin", "mode"] }))).toEqual({
+      blocks: true,
+      text: "First add claude_bin and mode to ~/.pilot/config.json: the Pilot being replaced reads them from its folder's .env, which the fixed copy does not have.",
+    });
+    expect(installNote(plugin({ claudeBin: null }))).toEqual({
+      blocks: false,
+      text: "Pilot will use the claude command on your PATH; set claude_bin in ~/.pilot/config.json to use another.",
+    });
+    expect(installNote(plugin())).toBeNull();
   });
 });

@@ -349,7 +349,13 @@ plan, and your prompts and rules go to OpenAI when it is chosen. The **…** men
 also pauses Pilot and shows the repositories it watches, what it has done
 recently, and today's budget.
 
-Pilot is installed separately. Until it is, the panel shows the install command.
+Stark Code includes Pilot. Choose **Install Pilot** in the panel to add it to
+Claude Code; the panel first says what will change. Stark Code copies Pilot to
+`~/.pilot/plugin/<version>`, a folder nothing edits, and replaces Lookout or a
+Pilot installed from a checkout, so only one copy runs. Pilot's settings, such
+as `claude_bin`, live in `~/.pilot/config.json`. When a newer Stark Code ships
+a newer Pilot, the panel offers **Update**. New Claude Code sessions use the
+installed copy.
 
 ## View Stark Pages
 

@@ -36,3 +36,26 @@ A maintainer must choose and configure the actual repository, download location,
 platform signing credentials, update feed and contact details before enabling automated
 releases. Hosted clients and relay/sign-in services are separate deployments and remain
 disabled in the current app. No fallback public domain is assumed.
+
+## Interface updates
+
+A Mac build can carry a separate policy for updating its bundled web interface on the
+next launch. The desktop process verifies a signed catalog and every asset, stages the
+complete release in the profile cache, and keeps serving its active interface on the
+desktop protocol until restart. Use a DMG for changes to the shell, server, or native helpers.
+
+Set `STARK_CODE_DESKTOP_UI_UPDATE_POLICY` to a JSON file when packaging the Mac app.
+Supply `kind`, `url` (the exact `.starkui` file), and `publicKey` (base64 DER/SPKI
+Ed25519). The build prints the shell target, derived from its version and commit.
+A `pilot` policy also needs an absolute `pilotHome` matching the isolated Stark home.
+Use a preview version and a loopback HTTP URL for that pilot. A `stark` policy requires
+an approved HTTPS origin. The signed payload format and checks are independent of Apple
+notarization. Builds using this policy without `--signed` get an ad hoc code signature
+so the Apple silicon executable can launch. A downloaded DMG still follows normal
+macOS approval for an app without notarization.
+
+Build the web interface against the target shell and server. Run
+`node scripts/build-desktop-ui-bundle.ts --dist <web-dist> --target <shell-target> --revision <integer> --key-file <Ed25519-PEM> --output <file.starkui>`.
+Keep the private key on the release machine. Publish each revision with a higher integer
+and serve the current bundle directly at the policy URL, with revalidation enabled.
+For recovery, quit Stark Code and launch it with `STARK_CODE_USE_BUNDLED_UI=1`.

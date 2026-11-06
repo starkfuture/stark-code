@@ -26,6 +26,10 @@ import desktopPackageJson from "../apps/desktop/package.json" with { type: "json
 import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 import pilotPackageJson from "../packages/pilot/package.json" with { type: "json" };
+import {
+  decodeUiUpdatePolicy,
+  UI_POLICY_FILE,
+} from "../apps/desktop/src/updates/DesktopUiBundle.ts";
 
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
 import { prepareStarkWorkbench } from "./prepare-stark-workbench.mjs";
@@ -2920,6 +2924,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   // source file was never written fails the electron-builder step.
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
+  uiAdHocEntitlementsPath?: string,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
@@ -3011,7 +3016,19 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           role: "Viewer",
         },
       ],
-      ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      ...(signed || uiAdHocEntitlementsPath !== undefined
+        ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") }
+        : {}),
+      ...(uiAdHocEntitlementsPath !== undefined
+        ? {
+            identity: "-",
+            notarize: false,
+            hardenedRuntime: true,
+            timestamp: "none",
+            entitlements: uiAdHocEntitlementsPath,
+            entitlementsInherit: uiAdHocEntitlementsPath,
+          }
+        : {}),
       ...(macPasskeySigning
         ? {
             entitlements: macPasskeySigning.entitlementsPath,
@@ -3772,6 +3789,33 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const appVersion = options.version ?? serverPackageJson.version;
   const iconAssets = resolveDesktopBuildIconAssets(appVersion);
   const commitHash = yield* resolveGitCommitHash(repoRoot);
+  const uiPolicyPath = yield* Config.String("STARK_CODE_DESKTOP_UI_UPDATE_POLICY").pipe(
+    Config.option,
+  );
+  const uiPolicy = Option.isSome(uiPolicyPath)
+    ? yield* fs.readFileString(path.resolve(repoRoot, uiPolicyPath.value)).pipe(
+        Effect.flatMap((raw) =>
+          Effect.try(() => {
+            const policy = decodeUiUpdatePolicy(
+              { ...JSON.parse(raw), target: appVersion + ":" + commitHash },
+              BRAND.updateFeedOrigins,
+            );
+            const preview = /-(?:preview|pr)\./.test(appVersion);
+            if (
+              options.platform !== "mac" ||
+              !/^[0-9a-f]{12}$/.test(commitHash) ||
+              (policy.kind === "pilot" && (!preview || options.mockUpdates)) ||
+              (policy.kind === "stark" && preview)
+            ) {
+              throw new Error(
+                "UI updates require an eligible macOS build and an isolated pilot profile",
+              );
+            }
+            return policy;
+          }),
+        ),
+      )
+    : undefined;
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
     prefix: `starkcode-desktop-${options.platform}-stage-`,
@@ -3920,7 +3964,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   // On Windows the server tree ships in the server.asar sidecar instead of
   // app.asar (see stageWindowsServerSidecar), so the app stage omits it.
   if (options.platform !== "win") {
-    yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+    const stagedServerDist = path.join(stageAppDir, "apps/server/dist");
+    yield* fs.copy(distDirs.serverDist, stagedServerDist);
+    const stagedUiPolicy = path.join(stagedServerDist, UI_POLICY_FILE);
+    yield* fs.remove(stagedUiPolicy, { force: true });
+    if (uiPolicy !== undefined) {
+      yield* fs.writeFileString(stagedUiPolicy, JSON.stringify(uiPolicy));
+      yield* Effect.log("[desktop-artifact] Interface update target " + uiPolicy.target);
+    }
   }
   yield* stageResourceMonitor({
     repoRoot,
@@ -4009,6 +4060,22 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     );
   }
 
+  const uiEntitlementsPath =
+    uiPolicy !== undefined && !options.signed
+      ? path.join(stageAppDir, "entitlements.ui.plist")
+      : undefined;
+  if (uiEntitlementsPath !== undefined) {
+    yield* fs.writeFileString(
+      uiEntitlementsPath,
+      Plist.build({
+        "com.apple.security.cs.allow-jit": true,
+        "com.apple.security.cs.allow-unsigned-executable-memory": true,
+        "com.apple.security.cs.disable-library-validation": true,
+        "com.apple.security.device.audio-input": true,
+      }),
+    );
+  }
+
   // Windows splits dependencies per process: app.asar carries only the
   // desktop main-process externals, while the server bundle's externals live
   // in the server.asar sidecar (see stageWindowsServerSidecar). macOS and
@@ -4062,6 +4129,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         : undefined,
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
+      uiPolicy !== undefined && !options.signed ? uiEntitlementsPath : undefined,
     ),
     dependencies: stageDependencies,
     devDependencies: {

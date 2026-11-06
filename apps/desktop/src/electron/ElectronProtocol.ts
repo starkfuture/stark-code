@@ -11,6 +11,8 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
+import { readUiBundleAsset, type OpenUiBundle } from "../updates/DesktopUiBundle.ts";
+import * as DesktopUiUpdate from "../updates/DesktopUiUpdate.ts";
 
 export const DESKTOP_HOST = "app";
 const DESKTOP_PRODUCTION_SCHEME = "starkcode";
@@ -52,12 +54,16 @@ export class ElectronProtocolUnregistrationError extends Schema.TaggedError<Elec
   }
 }
 
-// The scheme either proxies to a dev server (`targetOrigin`) or serves the
-// built client from disk (`assetDirectory`).
+type DesktopAssetSource = {
+  readonly assetDirectory: string;
+  readonly updateProfile?: string;
+};
+
+// The scheme proxies to a dev server or serves the selected client from disk.
 export type DesktopProtocolRegistrationInput = {
   readonly scheme: string;
   readonly clerkFrontendApiHostname: string | undefined;
-} & ({ readonly targetOrigin: URL } | { readonly assetDirectory: string });
+} & ({ readonly targetOrigin: URL } | DesktopAssetSource);
 
 export class ElectronProtocol extends Context.Service<
   ElectronProtocol,
@@ -218,7 +224,8 @@ const proxyRequest = Effect.fn("desktop.protocol.proxyRequest")(function* (
 // router handles it, except for asset-shaped misses (`/missing.js`) which 404.
 const serveDesktopAsset = Effect.fn("desktop.protocol.serveAsset")(function* (
   request: Request,
-  assetDirectory: string,
+  source: DesktopAssetSource,
+  activeUi: OpenUiBundle | undefined,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -231,25 +238,33 @@ const serveDesktopAsset = Effect.fn("desktop.protocol.serveAsset")(function* (
     Effect.orElseSucceed(() => null),
   );
   if (pathname === null || pathname.includes("\0")) return new Response(null, { status: 400 });
-  const root = path.resolve(assetDirectory);
+  const root = path.resolve(source.assetDirectory);
   const assetPath = path.resolve(root, `.${pathname}`);
   if (assetPath !== root && !assetPath.startsWith(root + path.sep)) {
     return new Response(null, { status: 404 });
   }
-  const stat = yield* fileSystem.stat(assetPath).pipe(Effect.orElseSucceed(() => null));
+  const assetName = (file: string) => path.relative(root, file).split(path.sep).join("/");
+  const hasAsset = activeUi
+    ? activeUi.files.has(assetName(assetPath))
+    : (yield* fileSystem.stat(assetPath).pipe(Effect.orElseSucceed(() => null)))?.type === "File";
   let filePath = assetPath;
-  if (stat?.type !== "File") {
+  if (!hasAsset) {
     const wantsHtml = request.headers.get("accept")?.includes("text/html") ?? false;
     if (path.extname(assetPath) !== "" && !wantsHtml) {
       return new Response(null, { status: 404 });
     }
     filePath = path.join(root, "index.html");
   }
-  const contents = yield* fileSystem.readFile(filePath).pipe(Effect.orElseSucceed(() => null));
-  if (contents === null) return new Response(null, { status: 404 });
+  const contents = activeUi
+    ? yield* Effect.tryPromise(() => readUiBundleAsset(activeUi, assetName(filePath))).pipe(
+        Effect.orElseSucceed(() => null),
+      )
+    : yield* fileSystem.readFile(filePath).pipe(Effect.orElseSucceed(() => null));
+  if (contents === null) return new Response(null, { status: activeUi ? 503 : 404 });
   return new Response(request.method === "HEAD" ? null : new Uint8Array(contents), {
     headers: {
       "content-type": Option.getOrElse(Mime.getType(filePath), () => "application/octet-stream"),
+      ...(source.updateProfile === undefined ? {} : { "cache-control": "no-store" }),
     },
   });
 });
@@ -265,6 +280,10 @@ export const make = Effect.gen(function* () {
       if (yield* Ref.get(registered)) return;
 
       const contentSecurityPolicy = makeDesktopContentSecurityPolicy(input);
+      const activeUi =
+        "assetDirectory" in input && input.updateProfile !== undefined
+          ? yield* DesktopUiUpdate.setup(input.assetDirectory, input.updateProfile)
+          : undefined;
 
       yield* Effect.acquireRelease(
         Effect.try({
@@ -272,7 +291,7 @@ export const make = Effect.gen(function* () {
             Electron.protocol.handle(input.scheme, async (request) => {
               if ("assetDirectory" in input) {
                 return withContentSecurityPolicy(
-                  await runPromise(serveDesktopAsset(request, input.assetDirectory)),
+                  await runPromise(serveDesktopAsset(request, input, activeUi)),
                   contentSecurityPolicy,
                 );
               }

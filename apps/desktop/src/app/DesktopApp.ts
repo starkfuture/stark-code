@@ -172,14 +172,18 @@ const bootstrap = Effect.gen(function* () {
   yield* logBootstrapInfo("bootstrap start");
 
   const settings = yield* desktopSettings.get;
-  // The renderer is served from the bundled client (or Vite in development)
-  // rather than through the local backend, so the window can open without one.
+  // The renderer can load the installed client or a verified update without a backend.
   const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
   yield* electronProtocol.registerDesktopProtocol({
     scheme: ElectronProtocol.getDesktopScheme(environment.isDevelopment),
     ...(environment.isDevelopment
       ? { targetOrigin: Option.getOrThrow(environment.devServerUrl) }
-      : { assetDirectory: environment.clientAssetsDir }),
+      : {
+          assetDirectory: environment.clientAssetsDir,
+          ...(environment.isPackaged && environment.platform === "darwin"
+            ? { updateProfile: environment.baseDir }
+            : {}),
+        }),
     clerkFrontendApiHostname: DesktopClerk.desktopClerkFrontendApiHostname,
   });
   yield* installDesktopIpcHandlers();

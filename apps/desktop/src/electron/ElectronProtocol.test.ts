@@ -6,6 +6,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from "node:crypto";
+import * as NodeHttp from "node:http";
 import { beforeEach, vi } from "vite-plus/test";
 
 const { handleMock, netFetchMock, unhandleMock } = vi.hoisted(() => ({
@@ -20,6 +23,7 @@ vi.mock("electron", () => ({
 }));
 
 import * as ElectronProtocol from "./ElectronProtocol.ts";
+import { encodeUiBundle, UI_POLICY_FILE } from "../updates/DesktopUiBundle.ts";
 
 const layerProtocol = ElectronProtocol.layer.pipe(Layer.provide(NodeServices.layer));
 
@@ -66,6 +70,96 @@ describe("ElectronProtocol", () => {
       assert.equal((yield* request("/%2e%2e%2fsecret.txt")).status, 404);
       assert.equal((yield* request("/%invalid")).status, 400);
       assert.equal((yield* request("/", { method: "POST" })).status, 405);
+      assert.equal(netFetchMock.mock.calls.length, 0);
+    }).pipe(Effect.provide(Layer.merge(layerProtocol, NodeServices.layer)), Effect.scoped),
+  );
+
+  it.live("serves the staged interface on the next desktop protocol registration", () =>
+    Effect.gen(function* () {
+      const files = yield* FileSystem.FileSystem;
+      const directory = yield* files.makeTempDirectoryScoped();
+      const assetDirectory = `${directory}/client`;
+      yield* files.makeDirectory(assetDirectory);
+      yield* files.writeFileString(`${assetDirectory}/index.html`, "<html>bundled</html>");
+      yield* files.writeFileString(`${assetDirectory}/original.js`, "export default 0;");
+
+      const keys = NodeCrypto.generateKeyPairSync("ed25519");
+      const target = "0.0.1-preview:local";
+      const archive = encodeUiBundle({
+        target,
+        revision: 1,
+        privateKey: keys.privateKey,
+        assets: new Map([
+          ["index.html", Buffer.from('<script src="/updated.js"></script>')],
+          ["updated.js", Buffer.from("export default 1;")],
+        ]),
+      });
+      const feed = yield* Effect.acquireRelease(
+        Effect.promise(
+          () =>
+            new Promise<NodeHttp.Server>((resolve, reject) => {
+              const server = NodeHttp.createServer((_request, response) => {
+                response.setHeader("Connection", "close");
+                response.end(archive);
+              });
+              server.once("error", reject).listen(0, "127.0.0.1", () => resolve(server));
+            }),
+        ),
+        (server) =>
+          Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
+      );
+      const address = feed.address();
+      assert.isOk(address && typeof address !== "string");
+      if (!address || typeof address === "string") return;
+      yield* files.writeFileString(
+        `${directory}/${UI_POLICY_FILE}`,
+        JSON.stringify({
+          kind: "pilot",
+          target,
+          publicKey: keys.publicKey.export({ type: "spki", format: "der" }).toString("base64"),
+          url: `http://127.0.0.1:${address.port}/ui.starkui`,
+          pilotHome: directory,
+        }),
+      );
+
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      const protocol = yield* ElectronProtocol.ElectronProtocol;
+      const register = protocol.registerDesktopProtocol({
+        scheme: "starkcode",
+        assetDirectory,
+        updateProfile: directory,
+        clerkFrontendApiHostname: undefined,
+      });
+      const load = (path: string) =>
+        Effect.promise(() => handler!(new Request(`starkcode://app${path}`)));
+      const isStaged = files.readDirectory(`${directory}/cache`, { recursive: true }).pipe(
+        Effect.map((cached) =>
+          cached.some((file) => file.endsWith("/1.starkui") || file.endsWith("\\1.starkui")),
+        ),
+        Effect.orElseSucceed(() => false),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* register;
+          yield* Effect.gen(function* () {
+            while (!(yield* isStaged)) yield* Effect.sleep("15 millis");
+          }).pipe(Effect.timeout("3 seconds"));
+          const page = yield* load("/");
+          assert.equal(yield* Effect.promise(() => page.text()), "<html>bundled</html>");
+        }),
+      );
+      yield* register;
+      const page = yield* load("/chat/123");
+      assert.equal(yield* Effect.promise(() => page.text()), '<script src="/updated.js"></script>');
+      assert.include(page.headers.get("content-security-policy") ?? "", "default-src 'self'");
+      assert.equal(page.headers.get("cache-control"), "no-store");
+      const script = yield* load("/updated.js");
+      assert.equal(yield* Effect.promise(() => script.text()), "export default 1;");
+      assert.equal((yield* load("/original.js")).status, 404);
       assert.equal(netFetchMock.mock.calls.length, 0);
     }).pipe(Effect.provide(Layer.merge(layerProtocol, NodeServices.layer)), Effect.scoped),
   );

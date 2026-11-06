@@ -8,5 +8,6 @@
   "telemetryEnabled": false,
   "cloudServicesEnabled": false,
   "requireApprovalsByDefault": true,
-  "backgroundNetworkChecksEnabled": false
+  "backgroundNetworkChecksEnabled": false,
+  "updateFeedOrigins": []
 }

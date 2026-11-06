@@ -1,10 +1,15 @@
 import * as Schema from "effect/Schema";
 
-// Pilot is a separate, local reviewer for Claude Code sessions. The desktop
+// Pilot is a separate, local companion for Claude Code sessions: it watches what
+// the person asks and reminds them what they are about to forget. The desktop
 // main process runs its `pilot api <method>` command (JSON API version 1)
 // and forwards the decoded result. Structs ignore keys they do not know, so a
 // newer Pilot can add fields; a changed enum or `api` version reads as
 // "incompatible".
+
+/** The model Pilot thinks with: Claude by default, or the person's Codex plan. */
+export const PilotEngine = Schema.Literals(["claude", "codex"]);
+export type PilotEngine = typeof PilotEngine.Type;
 
 export const PilotSeverity = Schema.Literals(["critical", "high", "medium", "low"]);
 export type PilotSeverity = typeof PilotSeverity.Type;
@@ -127,6 +132,8 @@ export const PilotStatus = Schema.Struct({
   sessions: Schema.optional(Schema.Number),
   /** Whether Pilot also reviews finished work (off by default since chat). */
   reviewWork: Schema.optional(Schema.Boolean),
+  /** The engine Pilot uses unless a question asks for the other one. */
+  engine: Schema.optional(PilotEngine),
 });
 export type PilotStatus = typeof PilotStatus.Type;
 
@@ -216,6 +223,8 @@ export const PilotMessage = Schema.Struct({
   sessionLabel: Schema.NullOr(Schema.String),
   repo: Schema.NullOr(Schema.String),
   state: PilotMessageState,
+  /** Which engine wrote a Pilot message; null for the person's own messages. */
+  engine: Schema.optional(Schema.NullOr(PilotEngine)),
 });
 export type PilotMessage = typeof PilotMessage.Type;
 
@@ -241,6 +250,25 @@ export type PilotNudgeResult = typeof PilotNudgeResult.Type;
 /** Whether a question was still waiting for Pilot's answer when it was cancelled. */
 export const PilotCancelAskResult = Schema.Struct({ cancelled: Schema.Boolean });
 export type PilotCancelAskResult = typeof PilotCancelAskResult.Type;
+
+/** Whether an engine can run now, and why not (signed out, not installed, out of runs). */
+const PilotEngineAvailability = {
+  available: Schema.Boolean,
+  note: Schema.NullOr(Schema.String),
+};
+
+export const PilotSettings = Schema.Struct({
+  engine: PilotEngine,
+  engines: Schema.Struct({
+    claude: Schema.Struct(PilotEngineAvailability),
+    codex: Schema.Struct({
+      ...PilotEngineAvailability,
+      /** Codex runs left under Pilot's daily cap on the person's Codex plan. */
+      runsLeftToday: Schema.Number,
+    }),
+  }),
+});
+export type PilotSettings = typeof PilotSettings.Type;
 
 const PilotRepoSelector = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
 
@@ -299,8 +327,14 @@ export const PilotAskInput = Schema.Struct({
     Schema.isPattern(/\S/),
     Schema.isPattern(/^[^\0]*$/),
   ),
+  /** Send this one question to an engine other than the default. */
+  engine: Schema.optional(PilotEngine),
 });
 export type PilotAskInput = typeof PilotAskInput.Type;
+
+/** Without `engine`, reads the settings; with it, makes that engine the default. */
+export const PilotSettingsInput = Schema.Struct({ engine: Schema.optional(PilotEngine) });
+export type PilotSettingsInput = typeof PilotSettingsInput.Type;
 
 export const PilotNudgeAction = Schema.Literals([
   "send",
@@ -361,6 +395,7 @@ export const PilotPauseResponse = pilotResponse(PilotPauseState);
 export const PilotChatResponse = pilotResponse(PilotChat);
 export const PilotAnswerResponse = pilotResponse(PilotAnswer);
 export const PilotNudgeResponse = pilotResponse(PilotNudgeResult);
+export const PilotSettingsResponse = pilotResponse(PilotSettings);
 
 export type PilotResponse<T> =
   | typeof PilotNotInstalled.Type
@@ -380,4 +415,6 @@ export interface PilotBridge {
   ask(input: PilotAskInput): Promise<PilotResponse<PilotAnswer>>;
   cancelAsk(): Promise<PilotCancelAskResult>;
   nudge(input: PilotNudgeInput): Promise<PilotResponse<PilotNudgeResult>>;
+  /** Reads the engines, or sets the default one. */
+  settings(input: PilotSettingsInput): Promise<PilotResponse<PilotSettings>>;
 }

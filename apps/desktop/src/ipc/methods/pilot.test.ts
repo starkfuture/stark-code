@@ -6,7 +6,7 @@ import * as Option from "effect/Option";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as Pilot from "../../pilot/Pilot.ts";
-import { ask, cancelAsk, chat, decide, findings, nudge, pause, status } from "./pilot.ts";
+import { ask, cancelAsk, chat, decide, findings, nudge, pause, settings, status } from "./pilot.ts";
 
 // These tests provide the Electron services; importing the package must not download a runtime.
 vi.mock("electron", () => ({}));
@@ -149,6 +149,8 @@ describe("Pilot chat IPC", () => {
             ),
           ),
         cancelAsk: () => Effect.sync(() => (calls.push("cancelAsk"), { cancelled: true })),
+        settings: () =>
+          Effect.sync(() => (calls.push("settings"), { installed: false, launcher: "/x" })),
         nudge: () =>
           Effect.sync(
             () => (calls.push("nudge"), { installed: true, ok: true, value: { ok: true } }),
@@ -160,6 +162,7 @@ describe("Pilot chat IPC", () => {
     ask.handler({ text: "what's waiting on me?" }, event as never),
     cancelAsk.handler(undefined, event as never),
     nudge.handler({ id: 4, action: "send" }, event as never),
+    settings.handler({ engine: "codex" }, event as never),
   ];
 
   it.effect("serves chat, questions and nudges only to the app window", () =>
@@ -177,7 +180,7 @@ describe("Pilot chat IPC", () => {
       expect(calls).toEqual([]);
       for (const operation of operations(trusted))
         expect(Exit.isSuccess(yield* Effect.exit(run(operation)))).toBe(true);
-      expect(calls).toEqual(["chat", "ask", "cancelAsk", "nudge"]);
+      expect(calls).toEqual(["chat", "ask", "cancelAsk", "nudge", "settings"]);
     }),
   );
 
@@ -195,6 +198,9 @@ describe("Pilot chat IPC", () => {
         nudge.handler({ action: "seen" }, trusted as never),
         chat.handler({ since: -1 }, trusted as never),
         chat.handler({ limit: 0 }, trusted as never),
+        ask.handler({ text: "hi", engine: "gemini" }, trusted as never),
+        settings.handler({ engine: "gpt" }, trusted as never),
+        settings.handler({ engine: 1 }, trusted as never),
       ]) {
         expect(Exit.isFailure(yield* Effect.exit(run(operation)))).toBe(true);
       }

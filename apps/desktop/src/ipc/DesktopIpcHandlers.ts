@@ -171,6 +171,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(PilotIpc.ask);
   yield* ipc.handle(PilotIpc.cancelAsk);
   yield* ipc.handle(PilotIpc.nudge);
+  yield* ipc.handle(PilotIpc.settings);
   yield* ipc.handle(StarkPagesIpc.ensureMirror);
   yield* ipc.handle(StarkPagesIpc.openFollow);
   yield* ipc.handle(StarkPagesIpc.openLink);

@@ -9,4 +9,5 @@ export const PILOT_CHANNELS = {
   ask: "desktop:pilot:ask",
   cancelAsk: "desktop:pilot:cancel-ask",
   nudge: "desktop:pilot:nudge",
+  settings: "desktop:pilot:settings",
 } as const;

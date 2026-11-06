@@ -1,12 +1,14 @@
 import type {
   PilotActivityEvent,
   PilotActivityRun,
+  PilotEngine,
   PilotMessage,
   PilotMessageState,
   PilotNudgeKind,
   PilotQuote,
   PilotRepo,
   PilotResponse,
+  PilotSettings,
   PilotStatus,
 } from "@starkfuture/contracts";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -32,6 +34,28 @@ export const WATCH_STATE_LABELS: Record<PilotWatchState, string> = {
   "not-installed": "Not installed",
   unknown: "Checking",
 };
+
+export const ENGINE_LABELS: Record<PilotEngine, string> = { claude: "Claude", codex: "Codex" };
+
+/** Codex runs on the person's own plan, so its choice always says so. */
+export function codexPlanLabel(codex: PilotSettings["engines"]["codex"]): string {
+  const left = codex.runsLeftToday;
+  return `Uses your Codex plan · ${left === 1 ? "1 run" : `${left} runs`} left today`;
+}
+
+/**
+ * The line under the composer's engine switch: what Codex costs when it is
+ * chosen, or why an engine cannot be chosen. Pilot falls back to the other
+ * engine on its own and says so in its answer.
+ */
+export function engineHint(settings: PilotSettings, chosen: PilotEngine): string | null {
+  const engine = settings.engines[chosen];
+  if (!engine.available)
+    return engine.note ?? `${ENGINE_LABELS[chosen]} isn't available right now.`;
+  if (chosen === "codex") return codexPlanLabel(settings.engines.codex);
+  const other = settings.engines.codex;
+  return other.available ? null : (other.note ?? "Codex isn't available right now.");
+}
 
 /** Pilot versions before the chat report no unread count and have no `chat` method. */
 export const chatSupported = (status: PilotStatus) => status.unread !== undefined;

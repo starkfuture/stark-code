@@ -1,4 +1,5 @@
 import type {
+  PilotEngine,
   PilotMessage,
   PilotNudgeAction,
   PilotQuote,
@@ -13,6 +14,7 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
+  ENGINE_LABELS,
   NUDGE_KIND_BADGES,
   NUDGE_KIND_LABELS,
   nudgeOutcome,
@@ -26,6 +28,8 @@ export interface PilotPendingQuestion {
   readonly text: string;
   /** The newest message id when it was asked; Pilot stores the question after it. */
   readonly afterId: number | null;
+  /** The engine asked for, when it was not the default. */
+  readonly engine?: PilotEngine | null;
 }
 
 export type PilotNudgeAct = (message: PilotMessage, action: PilotNudgeAction) => void;
@@ -135,7 +139,7 @@ function NudgeCard({
         ) : (
           <span />
         )}
-        <Time at={message.at} timestampFormat={timestampFormat} />
+        <Byline message={message} timestampFormat={timestampFormat} />
       </div>
       <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
       <Quotes evidence={message.evidence} />
@@ -163,7 +167,31 @@ function NudgeCard({
   );
 }
 
-function MessageRow({ message }: { message: PilotMessage }) {
+/** The engine that wrote a Pilot message, then how long ago, both muted. */
+function Byline({
+  message,
+  timestampFormat,
+}: {
+  message: PilotMessage;
+  timestampFormat: TimestampFormat;
+}) {
+  const engine = message.engine ? ENGINE_LABELS[message.engine] : null;
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+      {engine ? <span data-pilot-engine={message.engine}>{engine}</span> : null}
+      {engine && formatRelativeTimeLabel(message.at) ? <span aria-hidden>·</span> : null}
+      <Time at={message.at} timestampFormat={timestampFormat} />
+    </span>
+  );
+}
+
+function MessageRow({
+  message,
+  timestampFormat,
+}: {
+  message: PilotMessage;
+  timestampFormat: TimestampFormat;
+}) {
   if (message.role === "you") {
     return (
       <div className="flex justify-end">
@@ -182,6 +210,7 @@ function MessageRow({ message }: { message: PilotMessage }) {
     <div className="flex min-w-0 flex-col gap-2">
       <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
       <Quotes evidence={message.evidence} />
+      <Byline message={message} timestampFormat={timestampFormat} />
     </div>
   );
 }
@@ -223,11 +252,12 @@ export function PilotThread({
   const showPending = pending !== null && pendingQuestionShown(messages, pending);
   const documentVisible = useDocumentVisible();
 
-  // Follow the bottom as the thread grows or the panel opens, unless the person scrolled up.
+  // Follow the bottom as the thread grows, the panel opens or the composer grows, unless the
+  // person scrolled up.
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element || !content.current) return;
-    return observeResize(content.current, () => {
+    return observeResize([content.current, element], () => {
       if (followBottom.current) element.scrollTop = element.scrollHeight;
     });
   }, []);
@@ -289,7 +319,7 @@ export function PilotThread({
                     onAct={onAct}
                   />
                 ) : (
-                  <MessageRow message={message} />
+                  <MessageRow message={message} timestampFormat={timestampFormat} />
                 )}
               </li>
             ))}

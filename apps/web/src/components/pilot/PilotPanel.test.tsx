@@ -2,7 +2,13 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
-import type { PilotBridge, PilotMessage, PilotResponse, PilotStatus } from "@starkfuture/contracts";
+import type {
+  PilotBridge,
+  PilotMessage,
+  PilotResponse,
+  PilotSettings,
+  PilotStatus,
+} from "@starkfuture/contracts";
 import { PILOT_CHAT_POLL_MS, PilotContent } from "./PilotPanel";
 import { usePilotIndicator } from "./pilotStore";
 
@@ -21,6 +27,15 @@ const STATUS: PilotStatus = {
   unread: 2,
   sessions: 3,
   reviewWork: false,
+  engine: "claude",
+};
+
+const SETTINGS: PilotSettings = {
+  engine: "claude",
+  engines: {
+    claude: { available: true, note: null },
+    codex: { available: true, note: null, runsLeftToday: 37 },
+  },
 };
 
 const message = (id: number, overrides: Partial<PilotMessage> = {}): PilotMessage => ({
@@ -35,6 +50,7 @@ const message = (id: number, overrides: Partial<PilotMessage> = {}): PilotMessag
   sessionLabel: "billing · fix the invoice rounding",
   repo: "billing",
   state: "new",
+  engine: "claude",
   ...overrides,
 });
 
@@ -51,11 +67,18 @@ const THREAD = [
     ],
     state: "seen",
   }),
-  message(2, { role: "you", kind: "message", nudgeKind: null, text: "what's waiting on me?" }),
+  message(2, {
+    role: "you",
+    kind: "message",
+    nudgeKind: null,
+    text: "what's waiting on me?",
+    engine: null,
+  }),
   message(3, {
     kind: "answer",
     nudgeKind: null,
     text: "A session asked which sandbox to use.",
+    engine: "codex",
     evidence: [
       {
         source: "session",
@@ -135,7 +158,10 @@ const advance = async (ms: number) => {
   await settle();
 };
 
+let defaultEngine: "claude" | "codex" = "claude";
+
 beforeEach(() => {
+  defaultEngine = "claude";
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-11-06T09:00:00.000Z"));
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -163,6 +189,11 @@ beforeEach(() => {
     ),
     ask: vi.fn(),
     cancelAsk: vi.fn(async () => ({ cancelled: true })),
+    // Pilot keeps the default engine it was last given.
+    settings: vi.fn(async (input: { engine?: "claude" | "codex" }) => {
+      defaultEngine = input.engine ?? defaultEngine;
+      return ok({ ...SETTINGS, engine: defaultEngine });
+    }),
     findings: vi.fn(),
     activity: vi.fn(async () => ok({ events: [], runs: [] })),
     decide: vi.fn(),
@@ -375,4 +406,82 @@ it("shows the install command when Pilot is missing", async () => {
   expect(bridge.chat).not.toHaveBeenCalled();
   await click("Check again");
   expect(bridge.status).toHaveBeenCalledTimes(2);
+});
+
+const engineToggle = (label: string) =>
+  [
+    ...container.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Engine for the next question"] button',
+    ),
+  ].find((item) => item.textContent === label)!;
+const answered = (text: string) =>
+  ok({
+    question: message(8, { role: "you", kind: "message", nudgeKind: null, text, engine: null }),
+    answer: message(9, { kind: "answer", nudgeKind: null, text: "Done.", engine: "codex" }),
+  });
+
+it("tags each Pilot message with the engine that wrote it", async () => {
+  await render();
+  expect(card("merge only").querySelector("[data-pilot-engine]")?.textContent).toBe("Claude");
+  const tags = [...container.querySelectorAll("[data-pilot-engine]")].map((tag) => tag.textContent);
+  expect(tags).toContain("Codex");
+  // The person's own messages carry no engine.
+  expect(tags).toHaveLength(THREAD.filter((item) => item.engine).length);
+});
+
+it("sends one question to Codex, then returns to the default", async () => {
+  bridge.ask.mockImplementation(async (input: { text: string }) => answered(input.text));
+  await render();
+  expect(engineToggle("Claude").getAttribute("aria-pressed")).toBe("true");
+  await act(async () => engineToggle("Codex").click());
+  expect(container.textContent).toContain("Uses your Codex plan · 37 runs left today");
+  await typeQuestion("what did I ask yesterday?");
+  expect(bridge.ask).toHaveBeenLastCalledWith({
+    text: "what did I ask yesterday?",
+    engine: "codex",
+  });
+  await settle();
+  expect(engineToggle("Claude").getAttribute("aria-pressed")).toBe("true");
+  await typeQuestion("and today?");
+  expect(bridge.ask).toHaveBeenLastCalledWith({ text: "and today?" });
+});
+
+it("disables an engine that cannot run and says why", async () => {
+  bridge.settings.mockResolvedValue(
+    ok({
+      ...SETTINGS,
+      engines: {
+        ...SETTINGS.engines,
+        codex: { available: false, note: "Signed out of Codex", runsLeftToday: 40 },
+      },
+    }),
+  );
+  await render();
+  expect(engineToggle("Codex").disabled).toBe(true);
+  expect(container.textContent).toContain("Signed out of Codex");
+});
+
+it("shows no engine switch for a Pilot without engine settings", async () => {
+  bridge.settings.mockResolvedValue({
+    installed: true,
+    ok: false,
+    reason: "failed",
+    error: 'unknown method "settings"',
+  });
+  await render();
+  expect(container.querySelector('[aria-label="Engine for the next question"]')).toBeNull();
+  expect(container.textContent).not.toContain('unknown method "settings"');
+});
+
+it("changes the default engine from the options menu", async () => {
+  await render();
+  await click("Pilot options");
+  const codex = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+    item.textContent?.startsWith("Codex"),
+  );
+  expect(codex?.textContent).toContain("Uses your Codex plan");
+  await act(async () => codex!.click());
+  await settle();
+  expect(bridge.settings).toHaveBeenCalledWith({ engine: "codex" });
+  expect(engineToggle("Codex").getAttribute("aria-pressed")).toBe("true");
 });

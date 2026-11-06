@@ -8,6 +8,7 @@ import {
   PilotFindings,
   PilotNudgeResult,
   PilotPauseState,
+  PilotSettings,
   PilotStatus,
   type PilotActivityInput,
   type PilotAskInput,
@@ -19,6 +20,7 @@ import {
   type PilotNudgeInput,
   type PilotPauseInput,
   type PilotResponse,
+  type PilotSettingsInput,
 } from "@starkfuture/contracts";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
 import * as Context from "effect/Context";
@@ -35,11 +37,11 @@ import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-// Pilot is a separate reviewer installed on this Mac. Its stable launcher
+// Pilot is a separate companion installed on this Mac. Its stable launcher
 // `$PILOT_HOME/bin/pilot` answers `pilot api <method>` with one JSON
 // object on stdout (API version 1). The renderer never chooses the binary or
 // its arguments; this service builds both and decodes the answer strictly.
-// Output can quote source code, so it is never logged.
+// Output quotes the person's prompts, rules and code, so it is never logged.
 
 const API_VERSION = 1;
 const TIMEOUT_SECONDS = 10;
@@ -170,6 +172,8 @@ export class Pilot extends Context.Service<
     readonly ask: (input: PilotAskInput) => Effect.Effect<PilotResponse<PilotAnswer>>;
     readonly cancelAsk: () => Effect.Effect<PilotCancelAskResult>;
     readonly nudge: (input: PilotNudgeInput) => Effect.Effect<PilotResponse<PilotNudgeResult>>;
+    /** Reads the engines; with `engine`, makes it the default first. */
+    readonly settings: (input: PilotSettingsInput) => Effect.Effect<PilotResponse<PilotSettings>>;
   }
 >()("@starkfuture/desktop/pilot/Pilot") {}
 
@@ -287,6 +291,7 @@ export const make = Effect.gen(function* () {
   const decodeChat = Schema.decodeUnknownOption(PilotChat);
   const decodeAnswer = Schema.decodeUnknownOption(PilotAnswer);
   const decodeNudge = Schema.decodeUnknownOption(PilotNudgeResult);
+  const decodeSettings = Schema.decodeUnknownOption(PilotSettings);
 
   const stopAsk = () => {
     const current = stopCurrentAsk;
@@ -325,7 +330,12 @@ export const make = Effect.gen(function* () {
         stopAsk();
         const stop = Deferred.makeUnsafe<void>();
         stopCurrentAsk = stop;
-        return run("ask", { text: input.text }, decodeAnswer, ASK_TIMEOUT_SECONDS).pipe(
+        return run(
+          "ask",
+          { text: input.text, engine: input.engine },
+          decodeAnswer,
+          ASK_TIMEOUT_SECONDS,
+        ).pipe(
           Effect.raceFirst(
             Deferred.await(stop).pipe(
               Effect.as(fail("cancelled", "You stopped waiting for Pilot's answer.")),
@@ -349,6 +359,10 @@ export const make = Effect.gen(function* () {
           decodeNudge,
         ),
       ),
+    settings: (input) =>
+      input.engine === undefined
+        ? read("settings", {}, decodeSettings)
+        : mutations.withPermit(run("settings", { engine: input.engine }, decodeSettings)),
   });
 });
 

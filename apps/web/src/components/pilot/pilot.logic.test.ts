@@ -5,6 +5,7 @@ import {
   describeEvent,
   describeRun,
   emptyThreadText,
+  engineHint,
   pilotWatchState,
   mergeMessages,
   pendingQuestionShown,
@@ -207,5 +208,31 @@ describe("labels", () => {
 
   it("keeps keys stable and unique for repeated items", () => {
     expect(withKeys(["x", "y", "x"], (v) => v).map(({ key }) => key)).toEqual(["x", "y", "x~1"]);
+  });
+});
+
+describe("engines", () => {
+  const settings = (codex: { available: boolean; note: string | null; runsLeftToday: number }) => ({
+    engine: "claude" as const,
+    engines: { claude: { available: true, note: null }, codex },
+  });
+
+  it("says Codex uses the person's plan whenever it is chosen", () => {
+    const ready = settings({ available: true, note: null, runsLeftToday: 1 });
+    expect(engineHint(ready, "codex")).toBe("Uses your Codex plan · 1 run left today");
+    expect(engineHint(ready, "claude")).toBeNull();
+  });
+
+  it("explains an engine that cannot run", () => {
+    const out = settings({
+      available: false,
+      note: "Codex runs used up for today",
+      runsLeftToday: 0,
+    });
+    expect(engineHint(out, "claude")).toBe("Codex runs used up for today");
+    expect(engineHint(out, "codex")).toBe("Codex runs used up for today");
+    expect(engineHint(settings({ available: false, note: null, runsLeftToday: 0 }), "codex")).toBe(
+      "Codex isn't available right now.",
+    );
   });
 });

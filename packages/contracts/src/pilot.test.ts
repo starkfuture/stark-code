@@ -11,6 +11,8 @@ import {
   PilotFindings,
   PilotNudgeInput,
   PilotNudgeResult,
+  PilotSettings,
+  PilotSettingsInput,
   PilotStatus,
 } from "./pilot.ts";
 
@@ -20,9 +22,10 @@ const FINDINGS_STDOUT = `{"api":1,"findings":[{"ref":"billing#1","repo":"billing
 const DECIDE_STDOUT = `{"api":1,"ok":true,"finding":{"ref":"billing#1","repo":"billing","repoKey":"billing-c7d638836d","id":1,"title":"Invoice totals round per line","severity":"high","issueType":"defect","attribution":"introduced","proof":"source_proven","awareness":"unaware","riskAreas":["money"],"status":"deferred","statement":"Each line is rounded before summing.","failureCase":"100 lines of 0.005 drift the total by 50 cents.","whyItMatters":"Customers are overcharged.","nextAction":"Round once after summing.","handoffPrompt":"Round the invoice total once, after summing the lines.","evidence":[{"type":"file","path":"src/invoice.ts","lineStart":2,"quote":"lines.map((line) => round(line)).reduce((a, b) => a + b, 0);","check":"verified"}],"speech":{"action":"speak","why":"risky: high severity, money; unaware: nothing in the session mentions it","toldSession":false},"deliveredAt":null,"revision":"4f9c2a1b7e+wt.3d5e8a90","createdAt":"2026-11-05T17:43:17.183Z","updatedAt":"2026-11-05T17:43:24.822Z","decisionNote":"Fix lands with the tax rework."}}`;
 
 // `pilot api chat`, `ask` and `nudge` replies as specified for Pilot's chat (API 1, additive).
-const NUDGE = `{"id":41,"at":"2026-11-06T09:12:00.000Z","role":"pilot","kind":"nudge","nudgeKind":"rule","text":"Your rule says to merge only on \\"merge #N\\".","evidence":[{"source":"rule","where":"/Users/me/.claude/CLAUDE.md:12","quote":"Never merge a PR unless the user writes 'merge #<n>'","found":true}],"session":"5f0c2a9e-1b7d-4c1e-9f3a-2b8d6e4c1a70","sessionLabel":"billing · fix the invoice rounding","repo":"billing","state":"new"}`;
+const NUDGE = `{"id":41,"at":"2026-11-06T09:12:00.000Z","role":"pilot","kind":"nudge","nudgeKind":"rule","text":"Your rule says to merge only on \\"merge #N\\".","evidence":[{"source":"rule","where":"/Users/me/.claude/CLAUDE.md:12","quote":"Never merge a PR unless the user writes 'merge #<n>'","found":true}],"session":"5f0c2a9e-1b7d-4c1e-9f3a-2b8d6e4c1a70","sessionLabel":"billing · fix the invoice rounding","repo":"billing","state":"new","engine":"claude"}`;
 const CHAT_STDOUT = `{"api":1,"messages":[${NUDGE}],"unread":1}`;
-const ASK_STDOUT = `{"api":1,"question":{"id":42,"at":"2026-11-06T09:13:00.000Z","role":"you","kind":"message","nudgeKind":null,"text":"what's waiting on me?","evidence":[],"session":null,"sessionLabel":null,"repo":null,"state":"seen"},"answer":{"id":43,"at":"2026-11-06T09:13:20.000Z","role":"pilot","kind":"answer","nudgeKind":null,"text":"A session asked which sandbox to use.","evidence":[{"source":"session","where":"orders · deploy · 2026-11-06T07:00:00.000Z","quote":"Should I use kciam or the w02283 sandbox?","found":false}],"session":null,"sessionLabel":null,"repo":null,"state":"seen"}}`;
+const ASK_STDOUT = `{"api":1,"question":{"id":42,"at":"2026-11-06T09:13:00.000Z","role":"you","kind":"message","nudgeKind":null,"text":"what's waiting on me?","evidence":[],"session":null,"sessionLabel":null,"repo":null,"state":"seen","engine":null},"answer":{"id":43,"at":"2026-11-06T09:13:20.000Z","role":"pilot","kind":"answer","nudgeKind":null,"text":"A session asked which sandbox to use.","evidence":[{"source":"session","where":"orders · deploy · 2026-11-06T07:00:00.000Z","quote":"Should I use kciam or the w02283 sandbox?","found":false}],"session":null,"sessionLabel":null,"repo":null,"state":"seen","engine":"codex"}}`;
+const SETTINGS_STDOUT = `{"api":1,"engine":"claude","engines":{"claude":{"available":true,"note":null},"codex":{"available":false,"note":"Signed out of Codex","runsLeftToday":40}}}`;
 const NUDGE_STDOUT = `{"api":1,"ok":true,"message":${NUDGE.replace('"state":"new"', '"state":"sent"')}}`;
 
 const decodeFindings = Schema.decodeUnknownOption(Schema.fromJsonString(PilotFindings));
@@ -43,6 +46,7 @@ describe("Pilot contracts", () => {
 
 const decodeStatus = Schema.decodeUnknownOption(PilotStatus);
 const decodeChat = Schema.decodeUnknownOption(Schema.fromJsonString(PilotChat));
+const decodeSettings = Schema.decodeUnknownOption(Schema.fromJsonString(PilotSettings));
 
 describe("Pilot chat contracts", () => {
   const decode = <A, I>(schema: Schema.Codec<A, I>, text: string) =>
@@ -54,12 +58,28 @@ describe("Pilot chat contracts", () => {
     expect(chat.messages[0]).toMatchObject({ id: 41, kind: "nudge", nudgeKind: "rule" });
 
     const answer = decode(PilotAnswer, ASK_STDOUT);
-    expect(answer.question.role).toBe("you");
+    expect(answer.question).toMatchObject({ role: "you", engine: null });
+    expect(answer.answer.engine).toBe("codex");
     expect(answer.answer.evidence[0]).toMatchObject({ source: "session", found: false });
 
     expect(decode(PilotNudgeResult, NUDGE_STDOUT).message?.state).toBe("sent");
     // Marking every nudge seen may not name one.
     expect(decode(PilotNudgeResult, `{"api":1,"ok":true}`).message).toBeUndefined();
+  });
+
+  it("decodes the engine settings", () => {
+    expect(decode(PilotSettings, SETTINGS_STDOUT)).toEqual({
+      engine: "claude",
+      engines: {
+        claude: { available: true, note: null },
+        codex: { available: false, note: "Signed out of Codex", runsLeftToday: 40 },
+      },
+    });
+    expect(
+      Option.isNone(
+        decodeSettings(SETTINGS_STDOUT.replace('"engine":"claude"', '"engine":"gemini"')),
+      ),
+    ).toBe(true);
   });
 
   it("reads status from Pilot versions with and without chat", () => {
@@ -78,8 +98,10 @@ describe("Pilot chat contracts", () => {
     };
     expect(Option.getOrThrow(decodeStatus(base)).unread).toBeUndefined();
     expect(
-      Option.getOrThrow(decodeStatus({ ...base, unread: 2, sessions: 3, reviewWork: false })),
-    ).toMatchObject({ unread: 2, sessions: 3, reviewWork: false });
+      Option.getOrThrow(
+        decodeStatus({ ...base, unread: 2, sessions: 3, reviewWork: false, engine: "codex" }),
+      ),
+    ).toMatchObject({ unread: 2, sessions: 3, reviewWork: false, engine: "codex" });
   });
 
   it("reads Pilot's messages under their old role name too", () => {
@@ -117,6 +139,12 @@ describe("Pilot chat contracts", () => {
       { action: "seen" },
     ])
       expect(valid(PilotNudgeInput, input)).toBe(false);
+
+    expect(valid(PilotAskInput, { text: "what's waiting on me?", engine: "codex" })).toBe(true);
+    expect(valid(PilotAskInput, { text: "what's waiting on me?", engine: "gpt" })).toBe(false);
+    expect(valid(PilotSettingsInput, {})).toBe(true);
+    expect(valid(PilotSettingsInput, { engine: "claude" })).toBe(true);
+    expect(valid(PilotSettingsInput, { engine: "" })).toBe(false);
 
     expect(valid(PilotChatInput, { since: 40, limit: 200 })).toBe(true);
     expect(valid(PilotChatInput, { since: -1 })).toBe(false);

@@ -8,6 +8,8 @@ import {
   PilotChatResponse,
   PilotNudgeInput,
   PilotNudgeResponse,
+  PilotSettingsInput,
+  PilotSettingsResponse,
   PilotDecideInput,
   PilotDecisionResponse,
   PilotFindingsInput,
@@ -30,7 +32,7 @@ class PilotSenderError extends Schema.TaggedError<PilotSenderError>()("PilotSend
 }
 
 // Findings quote source code, the chat quotes the person's own prompts and
-// rules, and decide/pause/ask/nudge change Pilot's state or spend its budget,
+// rules, and decide/pause/ask/nudge/settings change Pilot's state or spend its budget,
 // so every method is limited to the app's own window.
 const authorized = Effect.fn("desktop.pilot.authorize")(function* (
   event?: DesktopIpc.DesktopIpcInvokeEvent,
@@ -136,5 +138,15 @@ export const nudge = DesktopIpc.makeIpcMethod({
   handler: (input, event) =>
     Effect.gen(function* () {
       return yield* (yield* authorized(event)).nudge(input);
+    }),
+});
+
+export const settings = DesktopIpc.makeIpcMethod({
+  channel: PILOT_CHANNELS.settings,
+  payload: PilotSettingsInput,
+  result: PilotSettingsResponse,
+  handler: (input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorized(event)).settings(input);
     }),
 });

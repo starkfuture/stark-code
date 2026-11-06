@@ -2,10 +2,12 @@ import {
   PILOT_ASK_MAX_LENGTH,
   type PilotActivity,
   type PilotBridge,
+  type PilotEngine,
   type PilotMessage,
   type PilotNudgeAction,
   type PilotRepo,
   type PilotResponse,
+  type PilotSettings,
   type PilotStatus,
   type TimestampFormat,
 } from "@starkfuture/contracts";
@@ -43,6 +45,7 @@ import {
 } from "../ui/menu";
 import { Textarea } from "../ui/textarea";
 import { PilotActivityView, PilotRepoList } from "./PilotActivity";
+import { PilotEngineMenuGroup, PilotEngineSwitch } from "./PilotEngine";
 import { PilotThread, type PilotPendingQuestion } from "./PilotThread";
 import {
   WATCH_STATE_LABELS,
@@ -67,6 +70,8 @@ import {
 
 /** The thread refreshes this often while the panel is open; the status as often as the top bar's. */
 export const PILOT_CHAT_POLL_MS = 5000;
+/** Engine availability changes rarely: on open, after a change, then this often. */
+const SETTINGS_POLL_MS = 60_000;
 /** How many messages the panel loads when it opens. */
 const THREAD_LIMIT = 200;
 const UNREACHABLE = "Could not reach Pilot. Try again.";
@@ -240,12 +245,15 @@ function Composer({
   draft,
   disabled,
   asking,
+  engine,
   onDraftChange,
   onSend,
 }: {
   draft: string;
   disabled: boolean;
   asking: boolean;
+  /** The engine switch, when Pilot reports its engines. */
+  engine: ReactNode;
   onDraftChange: (value: string) => void;
   onSend: () => void;
 }) {
@@ -272,7 +280,8 @@ function Composer({
           if (canSend) onSend();
         }}
       />
-      <div className="flex justify-end">
+      <div className="flex items-start justify-end gap-2">
+        {engine}
         <Button type="submit" size="xs" variant="outline" disabled={!canSend}>
           Send
         </Button>
@@ -316,6 +325,9 @@ export function PilotContent({
   const [pendingRepo, setPendingRepo] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [settings, setSettings] = useState<PilotSettings | null>(null);
+  // The engine for the next question when it differs from the default; null follows the default.
+  const [nextEngine, setNextEngine] = useState<PilotEngine | null>(null);
   const [pending, setPending] = useState<PilotPendingQuestion | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
   const askToken = useRef(0);
@@ -337,6 +349,40 @@ export function PilotContent({
   });
 
   const statusOk = status?.installed === true && status.ok;
+  const refreshSettings = usePoll(
+    async (isCurrent) => {
+      try {
+        const next = await bridge.settings({});
+        // A Pilot without engine settings shows no switch.
+        if (isCurrent()) setSettings(next.installed && next.ok ? next.value : null);
+      } catch {
+        if (isCurrent()) setSettings(null);
+      }
+    },
+    SETTINGS_POLL_MS,
+    active && chat.canChat,
+  );
+  const defaultEngine = settings?.engine ?? null;
+  const chosenEngine = nextEngine ?? defaultEngine;
+  const chooseNextEngine = (engine: PilotEngine) =>
+    setNextEngine(engine === defaultEngine ? null : engine);
+  const setDefaultEngine = async (engine: PilotEngine) => {
+    setActionError(null);
+    try {
+      const result = await bridge.settings({ engine });
+      if (!result.installed) setActionError("Pilot is no longer installed.");
+      else if (!result.ok) setActionError(result.error);
+      else {
+        setSettings(result.value);
+        setNextEngine(null);
+      }
+    } catch {
+      setActionError(UNREACHABLE);
+    } finally {
+      refreshStatus();
+      refreshSettings();
+    }
+  };
   usePoll(
     async (isCurrent) => {
       try {
@@ -428,12 +474,17 @@ export function PilotContent({
     const text = draft.trim();
     if (!text || pending) return;
     const token = ++askToken.current;
+    const engine = nextEngine;
     setDraft("");
+    setNextEngine(null);
     setAskError(null);
-    setPending({ text, afterId: newestMessageId(messages) });
-    const restore = () => setDraft((current) => (current.trim() ? current : text));
+    setPending({ text, afterId: newestMessageId(messages), engine });
+    const restore = () => {
+      setDraft((current) => (current.trim() ? current : text));
+      setNextEngine((current) => current ?? engine);
+    };
     try {
-      const result = await bridge.ask({ text });
+      const result = await bridge.ask(engine ? { text, engine } : { text });
       if (askToken.current !== token) return;
       if (!result.installed) {
         setAskError("Pilot is no longer installed.");
@@ -466,7 +517,10 @@ export function PilotContent({
     // Pilot may already have kept the question in the thread; otherwise it goes back to the composer.
     const kept = !pendingQuestionShown(messages, pending);
     setPending(null);
-    if (!kept) setDraft((current) => (current.trim() ? current : text));
+    if (!kept) {
+      setDraft((current) => (current.trim() ? current : text));
+      setNextEngine((current) => current ?? pending.engine ?? null);
+    }
     void bridge.cancelAsk().catch(() => undefined);
     refreshThread();
   };
@@ -507,6 +561,15 @@ export function PilotContent({
                 <ActivityIcon aria-hidden />
                 Activity
               </MenuItem>
+              {settings ? (
+                <>
+                  <MenuSeparator />
+                  <PilotEngineMenuGroup
+                    settings={settings}
+                    onChoose={(engine) => void setDefaultEngine(engine)}
+                  />
+                </>
+              ) : null}
               <MenuSeparator />
               <MenuGroup>
                 <MenuGroupLabel>Budget: {budgetLabel(state.budget)}</MenuGroupLabel>
@@ -654,6 +717,15 @@ export function PilotContent({
           draft={draft}
           disabled={false}
           asking={pending !== null}
+          engine={
+            settings && chosenEngine ? (
+              <PilotEngineSwitch
+                settings={settings}
+                chosen={chosenEngine}
+                onChoose={chooseNextEngine}
+              />
+            ) : null
+          }
           onDraftChange={setDraft}
           onSend={() => void send()}
         />

@@ -306,12 +306,18 @@ it.layer(NodeServices.layer)("Pilot", (it) => {
       yield* within(service.chat({ since: 40, limit: 200 }));
       yield* within(service.chat({}));
       yield* within(service.ask({ text: "--all\nwhat did I ask yesterday?" }));
+      yield* within(service.ask({ text: "and with Codex?", engine: "codex" }));
+      yield* within(service.settings({}));
+      yield* within(service.settings({ engine: "codex" }));
       yield* within(service.nudge({ id: 41, action: "not_useful" }));
       yield* within(service.nudge({ all: true, action: "seen" }));
       expect(fake.calls.map((call) => call.args)).toEqual([
         ["api", "chat", "--since=40", "--limit=200"],
         ["api", "chat"],
         ["api", "ask", "--text=--all\nwhat did I ask yesterday?"],
+        ["api", "ask", "--text=and with Codex?", "--engine=codex"],
+        ["api", "settings"],
+        ["api", "settings", "--engine=codex"],
         ["api", "nudge", "--id=41", "--action=not_useful"],
         ["api", "nudge", "--all", "--action=seen"],
       ]);

@@ -30,7 +30,9 @@ You need Claude Code 2.1.275+, Node ≥ 22.18 and git. Codex CLI is optional.
 3. runs `claude plugin install pilot --marketplace ~/.pilot/plugin/<version> --scope user`;
 4. asks a running daemon to stop, so the next Claude Code session starts the new copy.
 
-A newer Stark Code offers **Update** the same way. The installed copy has no `.env`: settings such as `claude_bin` and `mode` belong in `~/.pilot/config.json`. If the Pilot being replaced reads settings from its folder's `.env`, the panel names them and installs only after they are in `config.json`.
+A newer Stark Code offers **Update** the same way. The installed copy has no `.env`: settings such as `claude_bin` and `mode` belong in `~/.pilot/config.json`. If the Pilot being replaced uses a `claude_bin` or `mode` the copy would not see (typically from its folder's `.env`), Stark Code asks that Pilot for its effective settings (`pilot config`) and adds them to `config.json`, keeping every key already there. It waits only when it cannot read them.
+
+**Uninstall** is in the panel's **…** menu. It removes Pilot (and Lookout) from Claude Code, removes Pilot's own marketplace and stops the daemon. `~/.pilot`, with the chat, settings and installed copies, stays.
 
 **From a checkout (development):**
 

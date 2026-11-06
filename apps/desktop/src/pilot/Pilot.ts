@@ -9,6 +9,7 @@ import {
   PilotNudgeResult,
   PilotPauseState,
   PilotSettings,
+  type PilotSelfTestResult,
   PilotStatus,
   type PilotActivityInput,
   type PilotAskInput,
@@ -47,6 +48,8 @@ const API_VERSION = 1;
 const TIMEOUT_SECONDS = 10;
 /** Pilot answers a question within 60 seconds or reports its own timeout; allow for its start-up. */
 const ASK_TIMEOUT_SECONDS = 70;
+/** The self-test is one real model run; Pilot documents about a minute. */
+const SELFTEST_TIMEOUT_SECONDS = 240;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_ERROR_LENGTH = 500;
 /** Matches Pilot's `<repo>#<id>` handle; the repository part is a name, key or path. */
@@ -174,6 +177,8 @@ export class Pilot extends Context.Service<
     readonly nudge: (input: PilotNudgeInput) => Effect.Effect<PilotResponse<PilotNudgeResult>>;
     /** Reads the engines; with `engine`, makes it the default first. */
     readonly settings: (input: PilotSettingsInput) => Effect.Effect<PilotResponse<PilotSettings>>;
+    /** Runs Pilot's isolation self-test, one at a time; Pilot stays on hold until it passes. */
+    readonly selftest: () => Effect.Effect<PilotResponse<PilotSelfTestResult>>;
   }
 >()("@starkfuture/desktop/pilot/Pilot") {}
 
@@ -184,6 +189,7 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   // Decisions and pauses write Pilot's databases; send them one at a time.
   const mutations = yield* Semaphore.make(1);
+  const selftests = yield* Semaphore.make(1);
   const reads = new Map<string, Deferred.Deferred<PilotResponse<unknown>>>();
   // Completing it stops the question in flight; its process is killed as the run's scope closes.
   let stopCurrentAsk: Deferred.Deferred<void> | null = null;
@@ -206,12 +212,11 @@ export const make = Effect.gen(function* () {
       },
     ).pipe(Effect.map(({ chunks }) => Buffer.concat(chunks).toString("utf8")));
 
-  const run = <A>(
-    method: string,
-    flags: Flags,
-    decode: (value: unknown) => Option.Option<A>,
-    timeoutSeconds = TIMEOUT_SECONDS,
-  ): Effect.Effect<PilotResponse<A>> =>
+  /** Runs the launcher with `args`; its output, or why it did not run or finish. */
+  const launch = (
+    args: ReadonlyArray<string>,
+    timeoutSeconds: number,
+  ): Effect.Effect<PilotResponse<Outcome>> =>
     Effect.gen(function* () {
       const environment = yield* HostProcess.Environment;
       const homeDirectory = yield* HostProcess.HomeDirectory;
@@ -224,7 +229,7 @@ export const make = Effect.gen(function* () {
           // No shell: the kernel runs the launcher's `#!/bin/sh` line itself.
           const handle = yield* spawner
             .spawn(
-              ChildProcess.make(launcher, pilotArgs(method, flags), {
+              ChildProcess.make(launcher, [...args], {
                 cwd: homeDirectory,
                 env: { ...environment, PILOT_HOME: home, NO_COLOR: "1" },
                 stdin: "ignore",
@@ -261,9 +266,23 @@ export const make = Effect.gen(function* () {
       }
       if (Option.isNone(outcome.success))
         return fail("timeout", `Pilot did not answer within ${timeoutSeconds} seconds.`);
-      const { stdout, exitCode } = outcome.success.value;
-      return interpretPilotOutput(decode, stdout, exitCode);
-    }).pipe(Effect.withSpan("Pilot.run", { attributes: { method } }));
+      return { installed: true, ok: true, value: outcome.success.value } as const;
+    });
+
+  const run = <A>(
+    method: string,
+    flags: Flags,
+    decode: (value: unknown) => Option.Option<A>,
+    timeoutSeconds = TIMEOUT_SECONDS,
+  ): Effect.Effect<PilotResponse<A>> =>
+    launch(pilotArgs(method, flags), timeoutSeconds).pipe(
+      Effect.map((launched) =>
+        launched.installed && launched.ok
+          ? interpretPilotOutput(decode, launched.value.stdout, launched.value.exitCode)
+          : launched,
+      ),
+      Effect.withSpan("Pilot.run", { attributes: { method } }),
+    );
 
   /** Identical reads in flight share one process. */
   const read = <A>(method: string, flags: Flags, decode: (value: unknown) => Option.Option<A>) =>
@@ -363,6 +382,24 @@ export const make = Effect.gen(function* () {
       input.engine === undefined
         ? read("settings", {}, decodeSettings)
         : mutations.withPermit(run("settings", { engine: input.engine }, decodeSettings)),
+    // `pilot selftest` prints a report for people and exits 0 when isolation is verified, 1 when not.
+    selftest: () =>
+      selftests.withPermit(
+        launch(["selftest"], SELFTEST_TIMEOUT_SECONDS).pipe(
+          Effect.map((launched): PilotResponse<PilotSelfTestResult> => {
+            if (!launched.installed || !launched.ok) return launched;
+            const { exitCode } = launched.value;
+            if (exitCode === 127)
+              return fail(
+                "unavailable",
+                "Pilot could not start. Check that Node.js 22.18 or newer is on your PATH.",
+              );
+            if (exitCode > 1) return fail("failed", `Pilot stopped with exit code ${exitCode}.`);
+            return { installed: true, ok: true, value: { passed: exitCode === 0 } };
+          }),
+          Effect.withSpan("Pilot.selftest"),
+        ),
+      ),
   });
 });
 

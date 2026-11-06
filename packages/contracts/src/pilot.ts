@@ -247,6 +247,10 @@ export const PilotNudgeResult = Schema.Struct({
 });
 export type PilotNudgeResult = typeof PilotNudgeResult.Type;
 
+/** Whether Pilot's isolation self-test passed; Pilot stays on hold until it does. */
+export const PilotSelfTestResult = Schema.Struct({ passed: Schema.Boolean });
+export type PilotSelfTestResult = typeof PilotSelfTestResult.Type;
+
 /** Whether a question was still waiting for Pilot's answer when it was cancelled. */
 export const PilotCancelAskResult = Schema.Struct({ cancelled: Schema.Boolean });
 export type PilotCancelAskResult = typeof PilotCancelAskResult.Type;
@@ -396,6 +400,7 @@ export const PilotChatResponse = pilotResponse(PilotChat);
 export const PilotAnswerResponse = pilotResponse(PilotAnswer);
 export const PilotNudgeResponse = pilotResponse(PilotNudgeResult);
 export const PilotSettingsResponse = pilotResponse(PilotSettings);
+export const PilotSelfTestResponse = pilotResponse(PilotSelfTestResult);
 
 export type PilotResponse<T> =
   | typeof PilotNotInstalled.Type
@@ -448,11 +453,16 @@ export const PilotInstallStatus = Schema.Struct({
   /** The Claude command Pilot thinks with (`claude_bin`); null means `claude` from PATH. */
   claudeBin: Schema.NullOr(Schema.String),
   /**
-   * Settings a replaced Pilot read from its folder's `.env` that Pilot's
-   * config file lacks. The fixed copy has no `.env`, so installing waits
-   * until they are in the config file.
+   * Settings the replaced Pilot uses that the fixed copy would not see, such
+   * as `claude_bin` from its folder's `.env`. Installing writes their values,
+   * read from that Pilot's own `pilot config`, into the config file.
    */
-  envOnlySettings: Schema.Array(Schema.String),
+  carriedSettings: Schema.Array(Schema.String),
+  /**
+   * Settings the replaced Pilot may keep in its `.env` but whose values could
+   * not be read. Installing waits until they are in the config file.
+   */
+  missingSettings: Schema.Array(Schema.String),
   configFile: Schema.String,
   /** Why Pilot cannot be installed here, in plain words; set only when unsupported. */
   note: Schema.NullOr(Schema.String),
@@ -485,4 +495,8 @@ export interface PilotBridge {
   installStatus?(): Promise<PilotInstallResponse>;
   /** Installs or updates the fixed copy this app ships and removes older ones; resolves with the new status. */
   install?(): Promise<PilotInstallResponse>;
+  /** Removes Pilot from Claude Code and stops it; Pilot's own data stays. Resolves with the new status. */
+  uninstall?(): Promise<PilotInstallResponse>;
+  /** Runs Pilot's isolation self-test (about a minute, one model run). */
+  selftest?(): Promise<PilotResponse<PilotSelfTestResult>>;
 }

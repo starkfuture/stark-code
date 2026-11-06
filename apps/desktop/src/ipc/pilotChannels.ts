@@ -12,4 +12,6 @@ export const PILOT_CHANNELS = {
   settings: "desktop:pilot:settings",
   installStatus: "desktop:pilot:install-status",
   install: "desktop:pilot:install",
+  uninstall: "desktop:pilot:uninstall",
+  selftest: "desktop:pilot:selftest",
 } as const;

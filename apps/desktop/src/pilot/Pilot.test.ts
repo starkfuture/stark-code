@@ -403,4 +403,37 @@ it.layer(NodeServices.layer)("Pilot", (it) => {
       expect(yield* Fiber.join(call)).toMatchObject({ ok: false, reason: "timeout" });
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
+
+  it.effect("runs the self-test and reads its verdict from the exit code", () =>
+    Effect.gen(function* () {
+      for (const [exitCode, expected] of [
+        [0, { installed: true, ok: true, value: { passed: true } }],
+        [1, { installed: true, ok: true, value: { passed: false } }],
+        [127, { ok: false, reason: "unavailable" }],
+        [3, { ok: false, reason: "failed" }],
+      ] as const) {
+        const fake = fakePilot({ stdout: "PASS  [isolation] no tools\n", exitCode });
+        const { service, within, launcher } = yield* setup(fake);
+        expect(yield* within(service.selftest())).toMatchObject(expected);
+        expect(fake.calls.map((call) => [call.command, ...call.args])).toEqual([
+          [launcher, "selftest"],
+        ]);
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("waits up to four minutes for the self-test", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const fake = fakePilot({ stdout: "" }, gate);
+      const { service, within } = yield* setup(fake);
+      const call = yield* within(service.selftest()).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* Deferred.await(fake.spawned);
+      yield* TestClock.adjust("200 seconds");
+      yield* Deferred.succeed(gate, undefined);
+      expect(yield* Fiber.join(call)).toMatchObject({ ok: true, value: { passed: true } });
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
 });

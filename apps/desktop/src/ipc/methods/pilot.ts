@@ -8,6 +8,7 @@ import {
   PilotChatResponse,
   PilotNudgeInput,
   PilotNudgeResponse,
+  PilotSelfTestResponse,
   PilotSettingsInput,
   PilotSettingsResponse,
   PilotDecideInput,
@@ -183,5 +184,25 @@ export const install = DesktopIpc.makeIpcMethod({
   handler: (_input, event) =>
     Effect.gen(function* () {
       return yield* (yield* authorizedInstaller(event)).install();
+    }),
+});
+
+export const uninstall = DesktopIpc.makeIpcMethod({
+  channel: PILOT_CHANNELS.uninstall,
+  payload: Schema.Void,
+  result: PilotInstallResponse,
+  handler: (_input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorizedInstaller(event)).uninstall();
+    }),
+});
+
+export const selftest = DesktopIpc.makeIpcMethod({
+  channel: PILOT_CHANNELS.selftest,
+  payload: Schema.Void,
+  result: PilotSelfTestResponse,
+  handler: (_input, event) =>
+    Effect.gen(function* () {
+      return yield* (yield* authorized(event)).selftest();
     }),
 });

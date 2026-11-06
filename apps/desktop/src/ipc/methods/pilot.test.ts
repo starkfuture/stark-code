@@ -17,8 +17,10 @@ import {
   installStatus,
   nudge,
   pause,
+  selftest,
   settings,
   status,
+  uninstall,
 } from "./pilot.ts";
 
 // These tests provide the Electron services; importing the package must not download a runtime.
@@ -249,7 +251,14 @@ describe("Pilot install IPC", () => {
       Effect.provideService(PilotInstaller.PilotInstaller, {
         status: () => Effect.sync(() => (calls.push("status"), answer)),
         install: () => Effect.sync(() => (calls.push("install"), answer)),
+        uninstall: () => Effect.sync(() => (calls.push("uninstall"), answer)),
       }),
+      Effect.provideService(Pilot.Pilot, {
+        selftest: () =>
+          Effect.sync(
+            () => (calls.push("selftest"), { installed: true, ok: true, value: { passed: true } }),
+          ),
+      } as never),
     );
 
   it.effect("changes Claude Code's plugins only for the app's own window", () =>
@@ -257,19 +266,24 @@ describe("Pilot install IPC", () => {
       const trusted = { sender: { id: 5 }, senderFrame: mainFrame };
       expect(yield* run(installStatus.handler(undefined, trusted as never))).toEqual(answer);
       expect(yield* run(install.handler(undefined, trusted as never))).toEqual(answer);
+      expect(yield* run(uninstall.handler(undefined, trusted as never))).toEqual(answer);
+      expect(yield* run(selftest.handler(undefined, trusted as never))).toMatchObject({
+        ok: true,
+        value: { passed: true },
+      });
       for (const event of [
         undefined,
         { sender: { id: 6 }, senderFrame: mainFrame },
         { sender: { id: 5 }, senderFrame: { url: "https://example.com/" } },
       ]) {
-        expect(
-          Exit.isFailure(yield* Effect.exit(run(install.handler(undefined, event as never)))),
-        ).toBe(true);
-        expect(
-          Exit.isFailure(yield* Effect.exit(run(installStatus.handler(undefined, event as never)))),
-        ).toBe(true);
+        const refused = (exit: Exit.Exit<unknown, unknown>) =>
+          expect(Exit.isFailure(exit)).toBe(true);
+        refused(yield* Effect.exit(run(install.handler(undefined, event as never))));
+        refused(yield* Effect.exit(run(installStatus.handler(undefined, event as never))));
+        refused(yield* Effect.exit(run(uninstall.handler(undefined, event as never))));
+        refused(yield* Effect.exit(run(selftest.handler(undefined, event as never))));
       }
-      expect(calls).toEqual(["status", "install"]);
+      expect(calls).toEqual(["status", "install", "uninstall", "selftest"]);
     }),
   );
 });

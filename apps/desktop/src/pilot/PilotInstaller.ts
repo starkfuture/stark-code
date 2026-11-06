@@ -176,30 +176,81 @@ export const claudePluginArgs = {
   ],
 } as const;
 
+/** Removes every user-scope Pilot and Lookout plugin, and Pilot's own marketplaces. */
+export const planPilotUninstall = (input: {
+  readonly plugins: ReadonlyArray<InstalledPlugin>;
+  readonly marketplaces: ReadonlyArray<KnownMarketplace>;
+}) => ({
+  uninstall: input.plugins
+    .filter((plugin) => plugin.scope === "user" && PILOT_NAMES.has(pluginName(plugin.id)))
+    .map((plugin) => plugin.id),
+  removeMarketplaces: input.marketplaces
+    .map((marketplace) => marketplace.name)
+    .filter((name) => PILOT_NAMES.has(name)),
+});
+
 /**
- * Pilot setting names (lower_snake) that a `.env` file sets as `PILOT_*` or
- * `LOOKOUT_*`. Only names are read; values never leave the file. `HOME` is
- * left out because it cannot live in the config file it locates.
+ * Settings a checkout may keep in its own `.env`, which the fixed copy does
+ * not have, with the value Pilot uses when nothing sets them.
  */
-export const envFileSettings = (text: string): string[] => {
-  const names = new Set<string>();
-  for (const line of text.split(/\r?\n/)) {
-    const name = /^\s*(?:export\s+)?(?:PILOT|LOOKOUT)_([A-Z0-9_]+)\s*=/.exec(line)?.[1];
-    if (name !== undefined && name !== "HOME") names.add(name.toLowerCase());
+const CARRIED_DEFAULTS: Readonly<Record<string, string>> = { claude_bin: "claude", mode: "local" };
+
+const fromEnvironment = (name: string, environment: NodeJS.ProcessEnv) =>
+  [`PILOT_${name.toUpperCase()}`, `LOOKOUT_${name.toUpperCase()}`]
+    .map((key) => environment[key]?.trim())
+    .find((value) => value !== undefined && value !== "");
+
+const isSet = (name: string, config: Readonly<Record<string, unknown>>) =>
+  config[name] !== undefined && config[name] !== null;
+
+/**
+ * The settings the fixed copy would lose: values the replaced Pilot uses (its
+ * own `pilot config` output) that differ from what the fixed copy would read
+ * from the config file, the environment or its defaults. A setting already in
+ * the config file is never replaced.
+ */
+export const settingsToCarry = (input: {
+  readonly replaced: Readonly<Record<string, unknown>>;
+  readonly config: Readonly<Record<string, unknown>>;
+  readonly environment: NodeJS.ProcessEnv;
+}): Record<string, string> => {
+  const carry: Record<string, string> = {};
+  for (const [name, fallback] of Object.entries(CARRIED_DEFAULTS)) {
+    const used = input.replaced[name];
+    if (typeof used !== "string" || used.trim() === "" || isSet(name, input.config)) continue;
+    if (used !== (fromEnvironment(name, input.environment) ?? fallback)) carry[name] = used;
   }
-  return [...names].sort();
+  return carry;
 };
 
-/** Whether Pilot reads `name` from somewhere other than a `.env` file: its config file or the environment. */
-const settingIsSet = (
-  name: string,
+/** Settings that may be lost but whose values could not be read: set neither in the config file nor the environment. */
+export const unreadSettings = (
   config: Readonly<Record<string, unknown>>,
   environment: NodeJS.ProcessEnv,
 ) =>
-  (config[name] !== undefined && config[name] !== null) ||
-  [`PILOT_${name.toUpperCase()}`, `LOOKOUT_${name.toUpperCase()}`].some(
-    (key) => (environment[key] ?? "") !== "",
+  Object.keys(CARRIED_DEFAULTS).filter(
+    (name) => !isSet(name, config) && fromEnvironment(name, environment) === undefined,
   );
+
+/** The config file with `carry` added after what it holds; keys it already has keep their values. */
+export const mergeConfig = (
+  existing: Readonly<Record<string, unknown>>,
+  carry: Readonly<Record<string, string>>,
+) =>
+  `${JSON.stringify(
+    {
+      ...existing,
+      ...Object.fromEntries(Object.entries(carry).filter(([name]) => !isSet(name, existing))),
+    },
+    null,
+    2,
+  )}\n`;
+
+/** The Node binary a Pilot launcher runs (`exec '<node>' '<boot.mjs>' "$@"`, written by Pilot's hooks), or null. */
+export const launcherNode = (text: string): string | null => {
+  const quoted = /^exec '((?:[^']|'\\'')*)' /m.exec(text)?.[1];
+  return quoted === undefined ? null : quoted.replaceAll(`'\\''`, "'");
+};
 
 /** A path with the home folder shown as `~`. */
 export const tildePath = (file: string, homeDirectory: string) =>
@@ -267,6 +318,8 @@ export class PilotInstaller extends Context.Service<
     readonly status: () => Effect.Effect<PilotInstallResponse>;
     /** Copies the bundled Pilot to its fixed folder, replaces older plugins and installs it. */
     readonly install: () => Effect.Effect<PilotInstallResponse>;
+    /** Removes Pilot (and Lookout) from Claude Code and stops the daemon; Pilot's own data stays. */
+    readonly uninstall: () => Effect.Effect<PilotInstallResponse>;
   }
 >()("@starkfuture/desktop/pilot/PilotInstaller") {}
 
@@ -342,6 +395,60 @@ export const make = (options: { readonly bundledRoot: string }) =>
     const runClaude = (args: ReadonlyArray<string>, cwd: string) =>
       Effect.flatMap(claudeCommand, (command) => run(command, args, cwd));
 
+    /** Claude Code's plugins and marketplaces, or why they could not be read. */
+    const listPlugins = (cwd: string) =>
+      Effect.gen(function* () {
+        const listed = yield* runClaude(claudePluginArgs.list(), cwd);
+        if (Result.isFailure(listed))
+          return Result.fail(
+            listed.failure === "unavailable"
+              ? failure(
+                  "unavailable",
+                  "Claude Code's `claude` command was not found. Install Claude Code, then try again.",
+                )
+              : failure("failed", "Claude Code did not list its plugins."),
+          );
+        const plugins = decodePlugins(listed.success.stdout);
+        const marketplacesRun = yield* runClaude(claudePluginArgs.marketplaces(), cwd);
+        const marketplaces = Result.isSuccess(marketplacesRun)
+          ? decodeMarketplaces(marketplacesRun.success.stdout)
+          : Option.none();
+        if (Option.isNone(plugins) || Option.isNone(marketplaces))
+          return Result.fail(
+            failure(
+              "incompatible",
+              "This version of Claude Code lists plugins in a way Stark Code does not understand.",
+            ),
+          );
+        return Result.succeed({
+          plugins: plugins.value.map((entry): InstalledPlugin => ({
+            id: entry.id,
+            version: entry.version ?? null,
+            scope: entry.scope ?? "user",
+            folder: entry.readFromFolder ?? null,
+          })),
+          marketplaces: marketplaces.value.map((entry): KnownMarketplace => ({
+            name: entry.name,
+            path: entry.path ?? null,
+          })),
+        });
+      });
+
+    /**
+     * The settings a replaced Pilot uses, from its own `pilot config`, run with
+     * the Node its launcher names. Null when it cannot say. Its `.env` is
+     * never opened here.
+     */
+    const replacedSettings = (folder: string, home: string, cwd: string) =>
+      Effect.gen(function* () {
+        const boot = path.join(folder, "src", "boot.mjs");
+        if (!(yield* fs.exists(boot).pipe(Effect.orElseSucceed(() => false)))) return null;
+        const node = launcherNode((yield* readText(path.join(home, "bin", PILOT))) ?? "") ?? "node";
+        const ran = yield* run(node, [boot, "config"], cwd, { PILOT_HOME: home });
+        if (Result.isFailure(ran) || ran.success.exitCode !== 0) return null;
+        return Option.getOrNull(decodeConfig(ran.success.stdout));
+      });
+
     /** Everything a status or an install needs to know, or why it cannot be known. */
     const inspect = Effect.gen(function* () {
       const environment = yield* HostProcess.Environment;
@@ -354,12 +461,11 @@ export const make = (options: { readonly bundledRoot: string }) =>
         decodeConfig((yield* readText(configFile)) ?? "{}"),
         (): Readonly<Record<string, unknown>> => ({}),
       );
-      const configuredBin = typeof config.claude_bin === "string" ? config.claude_bin.trim() : "";
-      const claudeBin =
-        environment.PILOT_CLAUDE_BIN?.trim() ||
-        environment.LOOKOUT_CLAUDE_BIN?.trim() ||
-        configuredBin ||
-        null;
+      const configuredBin =
+        fromEnvironment("claude_bin", environment) ??
+        (typeof config.claude_bin === "string" && config.claude_bin.trim()
+          ? config.claude_bin.trim()
+          : null);
       const profile = tildePath(
         environment.CLAUDE_CONFIG_DIR?.trim() || path.join(homeDirectory, ".claude"),
         homeDirectory,
@@ -371,8 +477,9 @@ export const make = (options: { readonly bundledRoot: string }) =>
         target: null,
         replaces: [],
         installsCopy: false,
-        claudeBin,
-        envOnlySettings: [],
+        claudeBin: configuredBin,
+        carriedSettings: [],
+        missingSettings: [],
         configFile: tildePath(configFile, homeDirectory),
       } satisfies Omit<PilotInstallStatus, "state" | "note">;
       const unsupported = (note: string) =>
@@ -390,52 +497,38 @@ export const make = (options: { readonly bundledRoot: string }) =>
       const bundledVersion = plugin.value.version;
       const target = path.join(pluginRoot, bundledVersion);
 
-      const listed = yield* runClaude(claudePluginArgs.list(), homeDirectory);
-      if (Result.isFailure(listed))
-        return listed.failure === "unavailable"
-          ? failure(
-              "unavailable",
-              "Claude Code's `claude` command was not found. Install Claude Code, then try again.",
-            )
-          : failure("failed", "Claude Code did not list its plugins.");
-      const plugins = decodePlugins(listed.success.stdout);
-      const marketplacesRun = yield* runClaude(claudePluginArgs.marketplaces(), homeDirectory);
-      const marketplaces = Result.isSuccess(marketplacesRun)
-        ? decodeMarketplaces(marketplacesRun.success.stdout)
-        : Option.none();
-      if (Option.isNone(plugins) || Option.isNone(marketplaces))
-        return failure(
-          "incompatible",
-          "This version of Claude Code lists plugins in a way Stark Code does not understand.",
-        );
-
+      const listed = yield* listPlugins(homeDirectory);
+      if (Result.isFailure(listed)) return listed.failure;
       const pluginRoots = [pluginRoot];
       const realRoot = yield* fs.realPath(pluginRoot).pipe(Effect.option);
       if (Option.isSome(realRoot) && realRoot.value !== pluginRoot)
         pluginRoots.push(realRoot.value);
-      const plan = planPilotInstall({
-        plugins: plugins.value.map((entry) => ({
-          id: entry.id,
-          version: entry.version ?? null,
-          scope: entry.scope ?? "user",
-          folder: entry.readFromFolder ?? null,
-        })),
-        marketplaces: marketplaces.value.map((entry) => ({
-          name: entry.name,
-          path: entry.path ?? null,
-        })),
-        bundledVersion,
-        pluginRoots,
-        target,
-      });
+      const plan = planPilotInstall({ ...listed.success, bundledVersion, pluginRoots, target });
 
-      // A replaced checkout may read settings from its own .env, which the fixed copy does not have.
-      const envOnlySettings = new Set<string>();
+      // A replaced checkout may take settings from its own .env, which the fixed copy does not
+      // have: ask that Pilot what it uses and carry over what the fixed copy would lose.
+      const carry: Record<string, string> = {};
+      const missing = new Set<string>();
+      const cwd = (yield* fs.exists(home).pipe(Effect.orElseSucceed(() => false)))
+        ? home
+        : homeDirectory;
       for (const replaced of plan.replaces) {
         if (replaced.source === null) continue;
-        const text = yield* readText(path.join(replaced.source, ".env"));
-        for (const name of envFileSettings(text ?? ""))
-          if (!settingIsSet(name, config, environment)) envOnlySettings.add(name);
+        const used = yield* replacedSettings(replaced.source, home, cwd);
+        if (used === null) {
+          // It cannot say what it uses; only a .env there could hold settings the copy would lose.
+          if (
+            yield* fs
+              .exists(path.join(replaced.source, ".env"))
+              .pipe(Effect.orElseSucceed(() => false))
+          )
+            for (const name of unreadSettings(config, environment)) missing.add(name);
+          continue;
+        }
+        for (const [name, value] of Object.entries(
+          settingsToCarry({ replaced: used, config, environment }),
+        ))
+          carry[name] ??= value;
       }
 
       const value: PilotInstallStatus = {
@@ -450,16 +543,20 @@ export const make = (options: { readonly bundledRoot: string }) =>
           source: replaced.source === null ? null : tildePath(replaced.source, homeDirectory),
         })),
         installsCopy: plan.installCopy,
-        envOnlySettings: [...envOnlySettings].sort(),
+        claudeBin: configuredBin ?? carry.claude_bin ?? null,
+        carriedSettings: Object.keys(carry).sort(),
+        missingSettings: [...missing].filter((name) => carry[name] === undefined).sort(),
         note: null,
       };
       return {
         ok: true,
         value,
         plan,
+        carry,
         files: manifest.value.files,
         home,
         pluginRoot,
+        configFile,
         target,
       } as const;
     });
@@ -493,6 +590,23 @@ export const make = (options: { readonly bundledRoot: string }) =>
         );
       }).pipe(Effect.mapError(() => "Stark Code could not copy Pilot to its folder."));
 
+    /** Adds `carry` to Pilot's config file, keeping every key it has; written whole, then moved into place. */
+    const writeSettings = (configFile: string, carry: Readonly<Record<string, string>>) =>
+      Effect.gen(function* () {
+        const text = yield* readText(configFile);
+        const existing = text === undefined ? Option.some({}) : decodeConfig(text);
+        if (Option.isNone(existing))
+          return yield* Effect.fail(
+            `${path.basename(configFile)} is not valid JSON. Fix it, then install again.`,
+          );
+        const next = `${configFile}.stark-code.tmp`;
+        yield* Effect.gen(function* () {
+          yield* fs.makeDirectory(path.dirname(configFile), { recursive: true, mode: 0o700 });
+          yield* fs.writeFileString(next, mergeConfig(existing.value, carry), { mode: 0o600 });
+          yield* fs.rename(next, configFile);
+        }).pipe(Effect.mapError(() => "Stark Code could not write Pilot's settings."));
+      });
+
     /** One plugin change; its error in plain words, or nothing. */
     const change = (args: ReadonlyArray<string>, cwd: string, what: string) =>
       Effect.gen(function* () {
@@ -504,29 +618,42 @@ export const make = (options: { readonly bundledRoot: string }) =>
         return `Claude Code could not ${what}${message ? `: ${message}` : "."}`;
       });
 
+    /** Asks a running daemon to finish its work and stop; the next Claude Code session starts the installed copy. */
+    const stopDaemon = (home: string) =>
+      Effect.gen(function* () {
+        const launcher = path.join(home, "bin", PILOT);
+        if (yield* fs.exists(launcher).pipe(Effect.orElseSucceed(() => false)))
+          yield* run(launcher, ["stop"], home, { PILOT_HOME: home });
+      });
+
+    const settled = (seen: Effect.Success<typeof inspect>): PilotInstallResponse =>
+      seen.ok ? { ok: true, value: seen.value } : seen;
+
     const install = Effect.gen(function* () {
       const seen = yield* inspect;
-      if (!seen.ok || !("plan" in seen)) return seen;
-      const { value, plan, files, home, pluginRoot, target } = seen;
-      if (value.state === "installed") return { ok: true, value } as const;
-      if (value.envOnlySettings.length > 0) {
-        const names = value.envOnlySettings;
+      if (!seen.ok || !("plan" in seen)) return settled(seen);
+      const { value, plan, carry, files, home, pluginRoot, configFile, target } = seen;
+      if (value.state === "installed") return settled(seen);
+      if (value.missingSettings.length > 0) {
+        const names = value.missingSettings;
         const list =
           names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
         return failure(
           "invalid",
-          `First add ${list} to ${value.configFile}: the Pilot being replaced reads ${names.length === 1 ? "it" : "them"} from its folder's .env, which the fixed copy does not have.`,
+          `First add ${list} to ${value.configFile}: Stark Code could not read ${names.length === 1 ? "it" : "them"} from the Pilot being replaced.`,
         );
       }
 
-      const copied = yield* (
-        plan.installCopy
-          ? writeCopy(files, pluginRoot, target)
-          : fs
-              .makeDirectory(pluginRoot, { recursive: true, mode: 0o700 })
-              .pipe(Effect.mapError(() => "Stark Code could not create Pilot's plugin folder."))
-      ).pipe(Effect.result);
-      if (Result.isFailure(copied)) return failure("failed", copied.failure);
+      const prepared = yield* Effect.gen(function* () {
+        if (plan.installCopy) yield* writeCopy(files, pluginRoot, target);
+        else
+          yield* fs
+            .makeDirectory(pluginRoot, { recursive: true, mode: 0o700 })
+            .pipe(Effect.mapError(() => "Stark Code could not create Pilot's plugin folder."));
+        if (Object.keys(carry).length > 0) yield* writeSettings(configFile, carry);
+      }).pipe(Effect.result);
+      if (Result.isFailure(prepared)) return failure("failed", prepared.failure);
+
       const removed = plan.uninstall.length > 0 || plan.removeMarketplaces.length > 0;
       for (const id of plan.uninstall) {
         const error = yield* change(claudePluginArgs.uninstall(id), pluginRoot, `remove ${id}`);
@@ -547,34 +674,49 @@ export const make = (options: { readonly bundledRoot: string }) =>
             "failed",
             removed ? `${error} The older Pilot was already removed; install again.` : error,
           );
-        // A running daemon keeps the old code until it exits: ask it to finish its work and stop,
-        // so the next Claude Code session starts the installed copy.
-        const launcher = path.join(home, "bin", PILOT);
-        if (yield* fs.exists(launcher).pipe(Effect.orElseSucceed(() => false)))
-          yield* run(launcher, ["stop"], home, { PILOT_HOME: home });
+        yield* stopDaemon(home);
       }
 
       const after = yield* inspect;
       if (after.ok && after.value.state !== "installed")
         return failure("failed", "Claude Code did not report the installed Pilot. Try again.");
-      return after.ok ? ({ ok: true, value: after.value } as const) : after;
+      return settled(after);
+    });
+
+    const uninstall = Effect.gen(function* () {
+      const environment = yield* HostProcess.Environment;
+      const homeDirectory = yield* HostProcess.HomeDirectory;
+      const home = pilotHome(environment.PILOT_HOME, homeDirectory, path);
+      // Run from Pilot's home, so no project's Claude Code settings are in reach.
+      const ready = yield* fs
+        .makeDirectory(home, { recursive: true, mode: 0o700 })
+        .pipe(Effect.result);
+      if (Result.isFailure(ready))
+        return failure("failed", "Stark Code could not reach Pilot's folder.");
+      const listed = yield* listPlugins(home);
+      if (Result.isFailure(listed)) return listed.failure;
+      const removal = planPilotUninstall(listed.success);
+      for (const id of removal.uninstall) {
+        const error = yield* change(claudePluginArgs.uninstall(id), home, `remove ${id}`);
+        if (error) return failure("failed", error);
+      }
+      for (const name of removal.removeMarketplaces) {
+        const error = yield* change(
+          claudePluginArgs.removeMarketplace(name),
+          home,
+          `remove the ${name} marketplace`,
+        );
+        if (error) return failure("failed", error);
+      }
+      yield* stopDaemon(home);
+      return settled(yield* inspect);
     });
 
     return PilotInstaller.of({
-      status: () =>
-        inspect.pipe(
-          Effect.map((seen): PilotInstallResponse =>
-            seen.ok ? { ok: true, value: seen.value } : seen,
-          ),
-          Effect.withSpan("PilotInstaller.status"),
-        ),
-      install: () =>
-        installs.withPermit(install).pipe(
-          Effect.map((done): PilotInstallResponse =>
-            done.ok ? { ok: true, value: done.value } : done,
-          ),
-          Effect.withSpan("PilotInstaller.install"),
-        ),
+      status: () => inspect.pipe(Effect.map(settled), Effect.withSpan("PilotInstaller.status")),
+      install: () => installs.withPermit(install).pipe(Effect.withSpan("PilotInstaller.install")),
+      uninstall: () =>
+        installs.withPermit(uninstall).pipe(Effect.withSpan("PilotInstaller.uninstall")),
     });
   });
 

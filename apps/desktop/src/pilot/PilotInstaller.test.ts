@@ -12,9 +12,13 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import {
   claudePluginArgs,
   compareVersions,
-  envFileSettings,
+  launcherNode,
   make,
+  mergeConfig,
   planPilotInstall,
+  planPilotUninstall,
+  settingsToCarry,
+  unreadSettings,
   type InstalledPlugin,
   type KnownMarketplace,
 } from "./PilotInstaller.ts";
@@ -194,29 +198,95 @@ describe("claudePluginArgs", () => {
   });
 });
 
-describe("envFileSettings", () => {
-  it("names the Pilot settings a .env sets, never their values", () => {
-    const text = [
-      "# local settings",
-      "LOOKOUT_CLAUDE_BIN=/opt/claude-wrapper",
-      "export PILOT_MODE=local",
-      "PILOT_HOME=/elsewhere",
-      "ANTHROPIC_API_KEY=sk-test",
-      "  PILOT_CODEX_BIN = codex",
-      "PILOT_mode=ignored",
-    ].join("\n");
-    expect(envFileSettings(text)).toEqual(["claude_bin", "codex_bin", "mode"]);
-    expect(envFileSettings("")).toEqual([]);
+describe("planPilotUninstall", () => {
+  it("removes every user-scope Pilot and Lookout, and only Pilot's own marketplaces", () => {
+    expect(
+      planPilotUninstall({
+        plugins: [
+          plugin("pilot@pilot", TARGET),
+          plugin("lookout@lookout", null),
+          plugin("pilot@pilot", "/repo", "0.3.0", "project"),
+          plugin("codex@openai-codex", null),
+        ],
+        marketplaces: [
+          { name: "pilot", path: TARGET },
+          { name: "lookout", path: null },
+          { name: "team-skills", path: null },
+        ],
+      }),
+    ).toEqual({
+      uninstall: ["pilot@pilot", "lookout@lookout"],
+      removeMarketplaces: ["pilot", "lookout"],
+    });
+  });
+});
+
+describe("carrying settings", () => {
+  it("carries what the replaced Pilot uses and the fixed copy would not, never over the config file", () => {
+    const replaced = { claude_bin: "/opt/claude-wrapper", mode: "local", engine: "codex" };
+    expect(settingsToCarry({ replaced, config: {}, environment: {} })).toEqual({
+      claude_bin: "/opt/claude-wrapper",
+    });
+    expect(
+      settingsToCarry({ replaced: { ...replaced, mode: "offline" }, config: {}, environment: {} }),
+    ).toEqual({
+      claude_bin: "/opt/claude-wrapper",
+      mode: "offline",
+    });
+    // Already in the config file, or already what the environment gives the fixed copy.
+    expect(
+      settingsToCarry({ replaced, config: { claude_bin: "claude-personal" }, environment: {} }),
+    ).toEqual({});
+    expect(
+      settingsToCarry({
+        replaced,
+        config: {},
+        environment: { LOOKOUT_CLAUDE_BIN: "/opt/claude-wrapper" },
+      }),
+    ).toEqual({});
+    expect(
+      settingsToCarry({
+        replaced: { claude_bin: "claude", mode: "local" },
+        config: {},
+        environment: {},
+      }),
+    ).toEqual({});
+  });
+
+  it("names the settings it cannot read unless something else sets them", () => {
+    expect(unreadSettings({}, {})).toEqual(["claude_bin", "mode"]);
+    expect(unreadSettings({ mode: "local" }, { PILOT_CLAUDE_BIN: "c" })).toEqual([]);
+  });
+
+  it("adds carried settings after the config file's own and keeps its values", () => {
+    expect(
+      mergeConfig(
+        { nudge_to_session: "all", mode: "offline" },
+        { claude_bin: "/opt/w", mode: "local" },
+      ),
+    ).toBe('{\n  "nudge_to_session": "all",\n  "mode": "offline",\n  "claude_bin": "/opt/w"\n}\n');
+  });
+
+  it("reads the Node a launcher runs, quotes included", () => {
+    expect(
+      launcherNode(
+        "#!/bin/sh\n# Written by Pilot\nexec '/opt/node 22/bin/node' '/x/src/boot.mjs' \"$@\"\n",
+      ),
+    ).toBe("/opt/node 22/bin/node");
+    expect(launcherNode(`exec '/it'\\''s/node' '/x/boot.mjs' "$@"`)).toBe("/it's/node");
+    expect(launcherNode("#!/bin/sh\nexit 0\n")).toBeNull();
   });
 });
 
 /**
  * A `claude` that keeps a plugin list and changes it like Claude Code does,
- * recording every run. `pilot stop` runs are recorded too.
+ * and a replaced Pilot whose `pilot config` prints `replacedConfig`.
+ * Every run is recorded.
  */
 const fakeClaude = (initial: {
   plugins: Array<Record<string, unknown>>;
   marketplaces: Array<Record<string, unknown>>;
+  replacedConfig?: string;
 }) => {
   const state = structuredClone(initial);
   const calls: Array<{
@@ -263,7 +333,8 @@ const fakeClaude = (initial: {
         ...(typeof options.cwd === "string" ? { cwd: options.cwd } : {}),
         env: (options.env ?? {}) as Record<string, string | undefined>,
       });
-      const stdout = file === "claude" ? reply(args) : "";
+      const stdout =
+        file === "claude" ? reply(args) : args[1] === "config" ? (state.replacedConfig ?? "") : "";
       return ChildProcessSpawner.makeHandle({
         pid: ChildProcessSpawner.ProcessId(1),
         exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
@@ -282,7 +353,12 @@ const fakeClaude = (initial: {
   return { state, calls, spawner };
 };
 
-/** A home folder with a bundled Pilot 0.4.0 and the installer reading them. */
+const NODE = "/opt/hooks node/bin/node";
+
+/**
+ * A home folder with a bundled Pilot 0.4.0, a checkout of an older Pilot with
+ * a `.env`, a launcher that names the hooks' Node, and the installer reading them.
+ */
 const setup = (fake: ReturnType<typeof fakeClaude>, configJson?: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -312,10 +388,10 @@ const setup = (fake: ReturnType<typeof fakeClaude>, configJson?: string) =>
     const pilotHome = path.join(homeDirectory, ".pilot");
     if (configJson !== undefined) yield* write(path.join(pilotHome, "config.json"), configJson);
     const checkout = path.join(homeDirectory, "work", "dev-copilot");
-    yield* write(
-      path.join(checkout, ".env"),
-      "LOOKOUT_CLAUDE_BIN=/opt/wrapper\nLOOKOUT_MODE=local\n",
-    );
+    yield* write(path.join(checkout, "src", "boot.mjs"), "// the older Pilot\n");
+    yield* write(path.join(checkout, ".env"), "# settings the test never reads\n");
+    const launcher = path.join(pilotHome, "bin", "pilot");
+    yield* write(launcher, `#!/bin/sh\nexec '${NODE}' '${checkout}/src/boot.mjs' "$@"\n`);
 
     const installer = yield* make({ bundledRoot: bundle }).pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, fake.spawner),
@@ -329,127 +405,144 @@ const setup = (fake: ReturnType<typeof fakeClaude>, configJson?: string) =>
         Effect.provideService(HostProcess.HomeDirectory, homeDirectory),
         Effect.provideService(HostProcess.Platform, "darwin"),
       );
-    return { installer, within, homeDirectory, pilotHome, checkout, fs, path };
+    return { installer, within, homeDirectory, pilotHome, checkout, launcher, fs, path };
   });
 
-it.layer(NodeServices.layer)("PilotInstaller", (it) => {
-  it.effect("reports a checkout install, the settings only its .env holds, and the profile", () =>
-    Effect.gen(function* () {
-      const fake = fakeClaude({ plugins: [], marketplaces: [] });
-      const { installer, within, checkout } = yield* setup(fake);
-      fake.state.plugins.push({
-        id: "pilot@pilot",
-        version: "0.3.0",
-        scope: "user",
-        readFromFolder: checkout,
-      });
-      fake.state.marketplaces.push({ name: "pilot", source: "directory", path: checkout });
+const fromCheckout = (checkout: string) => ({
+  id: "pilot@pilot",
+  version: "0.3.0",
+  scope: "user",
+  readFromFolder: checkout,
+});
+const WRAPPER_CONFIG = JSON.stringify({ claude_bin: "/opt/claude-wrapper", mode: "local" });
 
-      const response = yield* within(installer.status());
-      expect(response).toEqual({
-        ok: true,
-        value: {
-          state: "legacy",
-          bundledVersion: "0.4.0",
-          installedVersion: null,
-          profile: "~/claude-profile",
-          target: "~/.pilot/plugin/0.4.0",
-          replaces: [{ id: "pilot@pilot", version: "0.3.0", source: "~/work/dev-copilot" }],
-          installsCopy: true,
-          claudeBin: null,
-          envOnlySettings: ["claude_bin", "mode"],
-          configFile: "~/.pilot/config.json",
-          note: null,
-        },
-      });
-      // Reading the status changes nothing.
-      expect(fake.calls.map((call) => call.args.slice(0, 3))).toEqual([
-        ["plugin", "list", "--json"],
-        ["plugin", "marketplace", "list"],
-      ]);
-      expect(fake.calls[0]?.env.CLAUDE_CONFIG_DIR).toMatch(/claude-profile$/);
-    }).pipe(Effect.scoped),
+it.layer(NodeServices.layer)("PilotInstaller", (it) => {
+  it.effect(
+    "reports a checkout install and the settings it would carry, read from its own config",
+    () =>
+      Effect.gen(function* () {
+        const fake = fakeClaude({ plugins: [], marketplaces: [], replacedConfig: WRAPPER_CONFIG });
+        const { installer, within, checkout, pilotHome } = yield* setup(fake);
+        fake.state.plugins.push(fromCheckout(checkout));
+        fake.state.marketplaces.push({ name: "pilot", source: "directory", path: checkout });
+
+        expect(yield* within(installer.status())).toEqual({
+          ok: true,
+          value: {
+            state: "legacy",
+            bundledVersion: "0.4.0",
+            installedVersion: null,
+            profile: "~/claude-profile",
+            target: "~/.pilot/plugin/0.4.0",
+            replaces: [{ id: "pilot@pilot", version: "0.3.0", source: "~/work/dev-copilot" }],
+            installsCopy: true,
+            claudeBin: "/opt/claude-wrapper",
+            carriedSettings: ["claude_bin"],
+            missingSettings: [],
+            configFile: "~/.pilot/config.json",
+            note: null,
+          },
+        });
+        // Reading the status changes nothing; the older Pilot is asked with its hooks' Node.
+        expect(fake.calls.map((call) => [call.command, ...call.args.slice(0, 3)])).toEqual([
+          ["claude", "plugin", "list", "--json"],
+          ["claude", "plugin", "marketplace", "list"],
+          [NODE, `${checkout}/src/boot.mjs`, "config"],
+        ]);
+        expect(fake.calls[2]?.env.PILOT_HOME).toBe(pilotHome);
+        expect(fake.calls[0]?.env.CLAUDE_CONFIG_DIR).toMatch(/claude-profile$/);
+      }).pipe(Effect.scoped),
   );
 
-  it.effect("refuses to install while a replaced checkout's settings live only in its .env", () =>
+  it.effect("waits when the older Pilot cannot say what it uses and keeps a .env", () =>
     Effect.gen(function* () {
-      const fake = fakeClaude({ plugins: [], marketplaces: [] });
+      const fake = fakeClaude({ plugins: [], marketplaces: [], replacedConfig: "Error: boom" });
       const { installer, within, checkout, fs, pilotHome } = yield* setup(fake);
-      fake.state.plugins.push({
-        id: "pilot@pilot",
-        version: "0.3.0",
-        scope: "user",
-        readFromFolder: checkout,
-      });
+      fake.state.plugins.push(fromCheckout(checkout));
 
+      expect(yield* within(installer.status())).toMatchObject({
+        ok: true,
+        value: { carriedSettings: [], missingSettings: ["claude_bin", "mode"], claudeBin: null },
+      });
       expect(yield* within(installer.install())).toMatchObject({
         ok: false,
         reason: "invalid",
         error: expect.stringContaining("First add claude_bin and mode to ~/.pilot/config.json:"),
       });
-      expect(fake.calls.every((call) => call.args.includes("list"))).toBe(true);
+      expect(
+        fake.calls
+          .filter((call) => call.command === "claude")
+          .every((call) => call.args.includes("list")),
+      ).toBe(true);
       expect(yield* fs.exists(`${pilotHome}/plugin`)).toBe(false);
+      expect(yield* fs.exists(`${pilotHome}/config.json`)).toBe(false);
     }).pipe(Effect.scoped),
   );
 
-  it.effect("copies only the shipped files, replaces the checkout and Lookout, then installs", () =>
-    Effect.gen(function* () {
-      const fake = fakeClaude({ plugins: [], marketplaces: [] });
-      const { installer, within, checkout, fs, path, pilotHome } = yield* setup(
-        fake,
-        JSON.stringify({ claude_bin: "/opt/wrapper", mode: "local" }),
-      );
-      fake.state.plugins.push(
-        { id: "lookout@lookout", version: "0.2.0", scope: "user", readFromFolder: null },
-        { id: "pilot@pilot", version: "0.3.0", scope: "user", readFromFolder: checkout },
-      );
-      fake.state.marketplaces.push(
-        { name: "lookout", source: "directory", path: "/elsewhere/lookout" },
-        { name: "pilot", source: "directory", path: checkout },
-      );
-      yield* fs.makeDirectory(path.join(pilotHome, "bin"), { recursive: true });
-      yield* fs.writeFileString(path.join(pilotHome, "bin", "pilot"), "#!/bin/sh\n");
+  it.effect(
+    "copies the shipped files, carries settings, replaces the checkout and Lookout, then installs",
+    () =>
+      Effect.gen(function* () {
+        const fake = fakeClaude({ plugins: [], marketplaces: [], replacedConfig: WRAPPER_CONFIG });
+        const { installer, within, checkout, fs, path, pilotHome, launcher } = yield* setup(
+          fake,
+          JSON.stringify({ nudge_to_session: "all" }),
+        );
+        fake.state.plugins.push(
+          { id: "lookout@lookout", version: "0.2.0", scope: "user", readFromFolder: null },
+          fromCheckout(checkout),
+        );
+        fake.state.marketplaces.push(
+          { name: "lookout", source: "directory", path: "/elsewhere/lookout" },
+          { name: "pilot", source: "directory", path: checkout },
+        );
 
-      const response = yield* within(installer.install());
-      expect(response).toMatchObject({
-        ok: true,
-        value: {
-          state: "installed",
-          installedVersion: "0.4.0",
-          replaces: [],
-          claudeBin: "/opt/wrapper",
-        },
-      });
+        expect(yield* within(installer.install())).toMatchObject({
+          ok: true,
+          value: {
+            state: "installed",
+            installedVersion: "0.4.0",
+            replaces: [],
+            claudeBin: "/opt/claude-wrapper",
+            carriedSettings: [],
+          },
+        });
 
-      const target = path.join(pilotHome, "plugin", "0.4.0");
-      const changes = fake.calls.filter((call) => !call.args.includes("list"));
-      expect(changes.map((call) => [call.command, ...call.args])).toEqual([
-        ["claude", ...claudePluginArgs.uninstall("lookout@lookout")],
-        ["claude", ...claudePluginArgs.uninstall("pilot@pilot")],
-        ["claude", ...claudePluginArgs.removeMarketplace("lookout")],
-        ["claude", ...claudePluginArgs.removeMarketplace("pilot")],
-        ["claude", ...claudePluginArgs.install(target)],
-        [path.join(pilotHome, "bin", "pilot"), "stop"],
-      ]);
-      expect(
-        changes.every(
-          (call) => call.cwd === path.join(pilotHome, "plugin") || call.args[0] === "stop",
-        ),
-      ).toBe(true);
+        // Settings are added to the config file, which keeps what it had.
+        expect(JSON.parse(yield* fs.readFileString(path.join(pilotHome, "config.json")))).toEqual({
+          nudge_to_session: "all",
+          claude_bin: "/opt/claude-wrapper",
+        });
+        const target = path.join(pilotHome, "plugin", "0.4.0");
+        const changes = fake.calls.filter(
+          (call) => !call.args.includes("list") && !call.args.includes("config"),
+        );
+        expect(changes.map((call) => [call.command, ...call.args])).toEqual([
+          ["claude", ...claudePluginArgs.uninstall("lookout@lookout")],
+          ["claude", ...claudePluginArgs.uninstall("pilot@pilot")],
+          ["claude", ...claudePluginArgs.removeMarketplace("lookout")],
+          ["claude", ...claudePluginArgs.removeMarketplace("pilot")],
+          ["claude", ...claudePluginArgs.install(target)],
+          [launcher, "stop"],
+        ]);
+        expect(
+          changes.every(
+            (call) => call.cwd === path.join(pilotHome, "plugin") || call.args[0] === "stop",
+          ),
+        ).toBe(true);
 
-      const copied = (yield* fs.readDirectory(target, { recursive: true })).sort();
-      expect(copied).toEqual([
-        ".claude-plugin",
-        ".claude-plugin/plugin.json",
-        "hooks",
-        "hooks/hooks.json",
-        "package.json",
-        "src",
-        "src/boot.mjs",
-      ]);
-      // No half-written folders are left beside it.
-      expect(yield* fs.readDirectory(path.join(pilotHome, "plugin"))).toEqual(["0.4.0"]);
-    }).pipe(Effect.scoped),
+        expect((yield* fs.readDirectory(target, { recursive: true })).sort()).toEqual([
+          ".claude-plugin",
+          ".claude-plugin/plugin.json",
+          "hooks",
+          "hooks/hooks.json",
+          "package.json",
+          "src",
+          "src/boot.mjs",
+        ]);
+        // No half-written folders are left beside it.
+        expect(yield* fs.readDirectory(path.join(pilotHome, "plugin"))).toEqual(["0.4.0"]);
+      }).pipe(Effect.scoped),
   );
 
   it.effect("does nothing when the current fixed copy is installed", () =>
@@ -470,6 +563,42 @@ it.layer(NodeServices.layer)("PilotInstaller", (it) => {
         value: { state: "installed" },
       });
       expect(fake.calls.every((call) => call.args.includes("list"))).toBe(true);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("uninstalls Pilot and Lookout, stops the daemon and keeps Pilot's data", () =>
+    Effect.gen(function* () {
+      const fake = fakeClaude({ plugins: [], marketplaces: [] });
+      const { installer, within, pilotHome, path, fs, launcher } = yield* setup(
+        fake,
+        JSON.stringify({ claude_bin: "claude-personal" }),
+      );
+      const target = path.join(pilotHome, "plugin", "0.4.0");
+      yield* fs.makeDirectory(target, { recursive: true });
+      fake.state.plugins.push(
+        { id: "pilot@pilot", version: "0.4.0", scope: "user", readFromFolder: target },
+        { id: "lookout@lookout", version: "0.2.0", scope: "user", readFromFolder: null },
+      );
+      fake.state.marketplaces.push(
+        { name: "pilot", source: "directory", path: target },
+        { name: "team-skills", source: "github", path: null },
+      );
+
+      expect(yield* within(installer.uninstall())).toMatchObject({
+        ok: true,
+        value: { state: "not-installed", installedVersion: null },
+      });
+      const changes = fake.calls.filter((call) => !call.args.includes("list"));
+      expect(changes.map((call) => [call.command, ...call.args])).toEqual([
+        ["claude", ...claudePluginArgs.uninstall("pilot@pilot")],
+        ["claude", ...claudePluginArgs.uninstall("lookout@lookout")],
+        ["claude", ...claudePluginArgs.removeMarketplace("pilot")],
+        [launcher, "stop"],
+      ]);
+      expect(changes.every((call) => call.cwd === pilotHome)).toBe(true);
+      expect(fake.state.marketplaces.map((entry) => entry.name)).toEqual(["team-skills"]);
+      for (const kept of ["config.json", "bin/pilot", "plugin/0.4.0"])
+        expect(yield* fs.exists(path.join(pilotHome, kept))).toBe(true);
     }).pipe(Effect.scoped),
   );
 

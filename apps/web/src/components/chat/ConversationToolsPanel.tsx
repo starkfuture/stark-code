@@ -11,7 +11,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 /**
  * The docked tool frame beside the chat. Keep drafts and selected answers
  * mounted when another tool occupies the panel. Other tools reuse it with their
- * own `title`, the `name` its button labels use, and a width key.
+ * own `title`, the `name` its button labels use, a width key, and optional
+ * `heading` controls shown after the title.
  */
 export function ConversationToolsPanel({
   active,
@@ -22,6 +23,7 @@ export function ConversationToolsPanel({
   title = "Conversation tools",
   name = "conversation tools",
   widthStorageKey = "starkcode:conversation-tools-panel-width",
+  heading,
 }: {
   readonly active: boolean;
   readonly inline: boolean;
@@ -31,6 +33,7 @@ export function ConversationToolsPanel({
   readonly title?: string;
   readonly name?: string;
   readonly widthStorageKey?: string;
+  readonly heading?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [portalHost, setPortalHost] = useState<HTMLDivElement | null>(null);
@@ -116,7 +119,14 @@ export function ConversationToolsPanel({
                   "drag-region min-h-(--workspace-topbar-height) pl-(--workspace-controls-left) wco:pr-(--workspace-native-controls-inset)",
               )}
             >
-              <h2 className="min-w-0 truncate pl-1 text-sm font-medium">{title}</h2>
+              {heading ? (
+                <div className="flex min-w-0 items-center gap-2">
+                  <h2 className="shrink-0 pl-1 text-sm font-medium">{title}</h2>
+                  {heading}
+                </div>
+              ) : (
+                <h2 className="min-w-0 truncate pl-1 text-sm font-medium">{title}</h2>
+              )}
               <div className="flex shrink-0 items-center gap-1">
                 {tools}
                 <Tooltip>

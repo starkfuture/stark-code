@@ -1,14 +1,25 @@
-import type {
-  LookoutActivity,
-  LookoutBridge,
-  LookoutFindings,
-  LookoutRepo,
-  LookoutResponse,
-  LookoutStatus,
-  TimestampFormat,
+import {
+  LOOKOUT_ASK_MAX_LENGTH,
+  type LookoutActivity,
+  type LookoutBridge,
+  type LookoutMessage,
+  type LookoutNudgeAction,
+  type LookoutRepo,
+  type LookoutResponse,
+  type LookoutStatus,
+  type TimestampFormat,
 } from "@starkfuture/contracts";
-import { ChevronDownIcon, PauseIcon, PlayIcon, ScanEyeIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  ActivityIcon,
+  ChevronLeftIcon,
+  FolderGit2Icon,
+  InfoIcon,
+  MoreHorizontalIcon,
+  PauseIcon,
+  PlayIcon,
+  ScanEyeIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "~/lib/utils";
 import { ConversationToolsPanel } from "../chat/ConversationToolsPanel";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
@@ -23,41 +34,44 @@ import {
 } from "../ui/empty";
 import {
   Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
   MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuRadioItemIndicator,
+  MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
-import { ScrollArea } from "../ui/scroll-area";
-import { Spinner } from "../ui/spinner";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Textarea } from "../ui/textarea";
 import { LookoutActivityView, LookoutRepoList } from "./LookoutActivity";
-import { LookoutFindingList, type LookoutDecide } from "./LookoutFindings";
+import { LookoutThread, type LookoutPendingQuestion } from "./LookoutThread";
 import {
   WATCH_STATE_LABELS,
   budgetLabel,
+  chatSupported,
+  emptyThreadText,
   lookoutWatchState,
-  orderFindings,
+  mergeMessages,
+  newestMessageId,
+  nudgeErrorText,
+  pendingQuestionShown,
   repoForPath,
-  repositoriesLabel,
   type LookoutWatchState,
 } from "./lookout.logic";
+import {
+  LOOKOUT_STATUS_POLL_MS,
+  noteLookoutSeen,
+  noteLookoutStatus,
+  noteLookoutUnread,
+  usePoll,
+} from "./lookoutStore";
 
-/** Lookout state changes slowly; poll only while the panel is open and visible. */
-export const LOOKOUT_POLL_INTERVAL_MS = 5000;
-const VIEW_KEY = "starkcode:lookout-view";
-type LookoutView = "findings" | "activity" | "repos";
+/** The thread refreshes this often while the panel is open; the status as often as the top bar's. */
+export const LOOKOUT_CHAT_POLL_MS = 5000;
+/** How many messages the panel loads when it opens. */
+const THREAD_LIMIT = 200;
+const UNREACHABLE = "Could not reach Lookout. Try again.";
 
-function initialView(): LookoutView {
-  try {
-    const stored = window.localStorage.getItem(VIEW_KEY);
-    return stored === "activity" || stored === "repos" ? stored : "findings";
-  } catch {
-    return "findings";
-  }
-}
+type LookoutView = "chat" | "activity" | "repos";
 
 const DOT_CLASS: Record<LookoutWatchState, string> = {
   watching: "bg-success",
@@ -67,74 +81,85 @@ const DOT_CLASS: Record<LookoutWatchState, string> = {
   unknown: "bg-muted-foreground/50",
 };
 
-const UNREACHABLE = "Could not reach Lookout. Try again.";
-
-type Response<T> = LookoutResponse<T> | null;
-
-/** Status, findings and (on its tab) activity, refreshed on open, on a timer and after actions. */
-function useLookoutData(
-  bridge: LookoutBridge,
-  active: boolean,
-  view: LookoutView,
-  showClosed: boolean,
-) {
-  const [status, setStatus] = useState<Response<LookoutStatus>>(null);
-  const [findings, setFindings] = useState<Response<LookoutFindings>>(null);
-  const [activity, setActivity] = useState<Response<LookoutActivity>>(null);
+/** Lookout's status and thread while the panel is open, with every way to act on them. */
+function useLookoutChat(bridge: LookoutBridge, active: boolean) {
+  const [status, setStatus] = useState<LookoutResponse<LookoutStatus> | null>(null);
   const [unreachable, setUnreachable] = useState(false);
-  const generation = useRef(0);
-  const inFlight = useRef(false);
+  const [messages, setMessages] = useState<readonly LookoutMessage[]>([]);
+  const [threadError, setThreadError] = useState<string | null>(null);
+  // The newest message the last thread check returned. Answers and nudge replies never move it,
+  // so a nudge stored between two checks is still fetched.
+  const since = useRef<number | null>(null);
 
-  const refresh = useCallback(async () => {
-    const current = ++generation.current;
-    inFlight.current = true;
-    try {
-      const nextStatus = await bridge.status();
-      if (current !== generation.current) return;
-      setStatus(nextStatus);
-      setUnreachable(false);
-      // Not installed or failing: the status already says why; ask nothing else.
-      if (!nextStatus.installed || !nextStatus.ok) return;
-      const [nextFindings, nextActivity] = await Promise.all([
-        bridge.findings(showClosed ? { all: true } : {}),
-        view === "activity" ? bridge.activity({ limit: 50 }) : null,
-      ]);
-      if (current !== generation.current) return;
-      setFindings(nextFindings);
-      if (nextActivity) setActivity(nextActivity);
-    } catch {
-      if (current === generation.current) setUnreachable(true);
-    } finally {
-      if (current === generation.current) inFlight.current = false;
-    }
-  }, [bridge, showClosed, view]);
+  const refreshStatus = usePoll(
+    async (isCurrent) => {
+      try {
+        const next = await bridge.status();
+        if (!isCurrent()) return;
+        setStatus(next);
+        setUnreachable(false);
+        noteLookoutStatus(next);
+      } catch {
+        if (isCurrent()) setUnreachable(true);
+      }
+    },
+    LOOKOUT_STATUS_POLL_MS,
+    active,
+  );
 
+  const canChat = status?.installed === true && status.ok && chatSupported(status.value);
+  const chatEnabled = active && canChat;
   useEffect(() => {
-    if (!active) return;
-    void refresh();
-    // Closing the panel (or changing what it shows) abandons a refresh in flight, so it starts no more Lookout processes.
-    return () => {
-      generation.current++;
-      inFlight.current = false;
-    };
-  }, [active, refresh]);
+    // Reopening reloads the whole thread, so changes made elsewhere show up.
+    if (!chatEnabled) since.current = null;
+  }, [chatEnabled]);
 
-  const installed = status?.installed ?? null;
-  useEffect(() => {
-    // Without Lookout installed, the check on open is all; "Check again" asks once more.
-    if (!active || installed === false) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && !inFlight.current) void refresh();
-    }, LOOKOUT_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [active, installed, refresh]);
+  const refreshThread = usePoll(
+    async (isCurrent) => {
+      const after = since.current;
+      try {
+        const next = await bridge.chat(after === null ? { limit: THREAD_LIMIT } : { since: after });
+        if (!isCurrent()) return;
+        if (!next.installed) {
+          setThreadError("Lookout is no longer installed.");
+          return;
+        }
+        if (!next.ok) {
+          setThreadError(next.error);
+          return;
+        }
+        setThreadError(null);
+        setMessages((current) => mergeMessages(after === null ? [] : current, next.value.messages));
+        const newest = Math.max(after ?? 0, ...next.value.messages.map((message) => message.id));
+        since.current = newest;
+        noteLookoutUnread(next.value.unread);
+      } catch {
+        if (isCurrent()) setThreadError(UNREACHABLE);
+      }
+    },
+    LOOKOUT_CHAT_POLL_MS,
+    chatEnabled,
+  );
 
-  return { status, findings, activity, unreachable, refresh };
+  const applyMessages = useCallback((incoming: readonly LookoutMessage[]) => {
+    setMessages((current) => mergeMessages(current, incoming));
+  }, []);
+
+  return {
+    status,
+    unreachable,
+    messages,
+    threadError,
+    canChat,
+    refreshStatus,
+    refreshThread,
+    applyMessages,
+  };
 }
 
-function StatusDot({ state }: { state: LookoutWatchState }) {
+function StatusWord({ state }: { state: LookoutWatchState }) {
   return (
-    <span className="flex items-center gap-1.5 text-sm font-medium">
+    <span className="flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
       <span aria-hidden className={cn("size-2 shrink-0 rounded-full", DOT_CLASS[state])} />
       {WATCH_STATE_LABELS[state]}
     </span>
@@ -155,21 +180,47 @@ function NotInstalled({ launcher, onCheck }: { launcher: string; onCheck: () => 
           </EmptyMedia>
           <EmptyTitle>Lookout isn't installed</EmptyTitle>
           <EmptyDescription>
-            Lookout watches your Claude Code sessions and speaks up only when it has evidence.
-            Install it once from a Lookout checkout:
+            Lookout reads what you ask your Claude Code sessions and speaks up when you're about to
+            forget something. Install it once from a Lookout checkout:
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
-          <code className="w-full rounded-md bg-muted px-2 py-1.5 text-left font-mono text-xs break-all select-all">
-            &lt;path-to-lookout-checkout&gt;/scripts/lookout install
+          <code className="w-full rounded-md bg-muted px-2 py-1.5 text-left font-mono text-xs break-words select-all">
+            &lt;path-to-lookout-checkout&gt;
+            <wbr />
+            /scripts/lookout install
           </code>
-          <p className="text-xs text-muted-foreground break-all">Stark Code looks for {launcher}</p>
+          <p className="text-xs break-all text-muted-foreground">Stark Code looks for {launcher}</p>
           <Button size="xs" variant="outline" onClick={onCheck}>
             Check again
           </Button>
         </EmptyContent>
       </Empty>
     </CenteredState>
+  );
+}
+
+/** One quiet line above the thread: why Lookout may stay silent, or what just failed. */
+function ThreadNotice({
+  tone = "muted",
+  children,
+}: {
+  tone?: "muted" | "warning" | "error";
+  children: ReactNode;
+}) {
+  return (
+    <p
+      role={tone === "error" ? "alert" : "status"}
+      className={cn(
+        "flex items-start gap-1.5 px-3 py-2 text-xs break-words",
+        tone === "muted" && "text-muted-foreground",
+        tone === "warning" && "text-warning-foreground",
+        tone === "error" && "text-destructive-foreground",
+      )}
+    >
+      <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+      <span className="min-w-0">{children}</span>
+    </p>
   );
 }
 
@@ -184,266 +235,445 @@ function Notice({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** The panel's body: what Lookout is doing, what it found, and the way to act on it. */
+/** Enter sends, Shift+Enter adds a line; the field stays editable while Lookout answers. */
+function Composer({
+  draft,
+  disabled,
+  asking,
+  onDraftChange,
+  onSend,
+}: {
+  draft: string;
+  disabled: boolean;
+  asking: boolean;
+  onDraftChange: (value: string) => void;
+  onSend: () => void;
+}) {
+  const canSend = !disabled && !asking && draft.trim().length > 0;
+  return (
+    <form
+      className="flex shrink-0 flex-col gap-1.5 border-t border-border p-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (canSend) onSend();
+      }}
+    >
+      <Textarea
+        size="sm"
+        aria-label="Ask Lookout"
+        placeholder="Ask Lookout…"
+        value={draft}
+        maxLength={LOOKOUT_ASK_MAX_LENGTH}
+        disabled={disabled}
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          if (canSend) onSend();
+        }}
+      />
+      <div className="flex justify-end">
+        <Button type="submit" size="xs" variant="outline" disabled={!canSend}>
+          Send
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Heading controls above the body, for use outside the docked frame. */
+const stacked = (heading: ReactNode, body: ReactNode) => (
+  <>
+    <div className="flex items-center gap-2 p-2">{heading}</div>
+    {body}
+  </>
+);
+
+/**
+ * Lookout as a chat: its nudges and answers, newest at the bottom, a composer
+ * to ask about your own sessions, and the watched repositories and activity
+ * behind the "…" menu. `frame` places the heading controls and the body; by
+ * default they render one after the other.
+ */
 export function LookoutContent({
   bridge,
   active,
   projectRoot,
   timestampFormat,
-  onQuote,
+  frame = stacked,
 }: {
   bridge: LookoutBridge;
   active: boolean;
-  /** The conversation's folder; its repository's findings come first. */
+  /** The conversation's folder; its repository is marked in Watched repos. */
   projectRoot: string | null;
   timestampFormat: TimestampFormat;
-  onQuote?: ((text: string, label: string) => boolean) | undefined;
+  frame?: (heading: ReactNode, body: ReactNode) => ReactNode;
 }) {
-  const [view, setView] = useState(initialView);
-  const [showClosed, setShowClosed] = useState(false);
-  const { status, findings, activity, unreachable, refresh } = useLookoutData(
-    bridge,
-    active,
-    view,
-    showClosed,
-  );
-  const [pending, setPending] = useState<string | null>(null);
+  const chat = useLookoutChat(bridge, active);
+  const { status, messages, refreshStatus, refreshThread, applyMessages } = chat;
+  const [view, setView] = useState<LookoutView>("chat");
+  const [activity, setActivity] = useState<LookoutResponse<LookoutActivity> | null>(null);
+  const [pendingRepo, setPendingRepo] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  const chooseView = (next: string | undefined) => {
-    if (next !== "findings" && next !== "activity" && next !== "repos") return;
-    setView(next);
-    try {
-      window.localStorage.setItem(VIEW_KEY, next);
-    } catch {
-      /* Remembering the tab is optional. */
-    }
+  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState<LookoutPendingQuestion | null>(null);
+  const [askError, setAskError] = useState<string | null>(null);
+  const askToken = useRef(0);
+  const [busy, setBusy] = useState<ReadonlyMap<number, LookoutNudgeAction>>(new Map());
+  const [nudgeErrors, setNudgeErrors] = useState<ReadonlyMap<number, string>>(new Map());
+  const seenAsked = useRef(new Set<number>());
+  const seenQueue = useRef<number[]>([]);
+  const seenRunning = useRef(false);
+  // Nudges already taken off the top bar's count, so seeing and acting on one counts once.
+  const counted = useRef(new Set<number>());
+  const countSeen = (message: Pick<LookoutMessage, "id" | "state">) => {
+    if (message.state !== "new" || counted.current.has(message.id)) return;
+    counted.current.add(message.id);
+    noteLookoutSeen(1);
   };
+  const latestMessages = useRef(messages);
+  useLayoutEffect(() => {
+    latestMessages.current = messages;
+  });
 
-  /** Runs one change, shows Lookout's own error if it refused, then refreshes. */
-  const act = async (key: string, call: () => Promise<LookoutResponse<unknown>>) => {
-    setPending(key);
+  const statusOk = status?.installed === true && status.ok;
+  usePoll(
+    async (isCurrent) => {
+      try {
+        const next = await bridge.activity({ limit: 50 });
+        if (isCurrent()) setActivity(next);
+      } catch {
+        if (isCurrent())
+          setActivity({ installed: true, ok: false, reason: "failed", error: UNREACHABLE });
+      }
+    },
+    LOOKOUT_STATUS_POLL_MS,
+    active && statusOk && view === "activity",
+  );
+
+  /** Runs one change to Lookout, shows its refusal, then refreshes the status. */
+  const change = async (key: string, call: () => Promise<LookoutResponse<unknown>>) => {
+    setPendingRepo(key);
     setActionError(null);
-    let done = false;
     try {
       const result = await call();
       if (!result.installed) setActionError("Lookout is no longer installed.");
       else if (!result.ok) setActionError(result.error);
-      else done = true;
     } catch {
       setActionError(UNREACHABLE);
     } finally {
-      setPending(null);
-      void refresh();
+      setPendingRepo(null);
+      refreshStatus();
     }
-    return done;
   };
-  const decide: LookoutDecide = (input) => act(input.ref, () => bridge.decide(input));
-  const setRepoPaused = (repo: LookoutRepo, paused: boolean) =>
-    void act(repo.key, () => (paused ? bridge.pause : bridge.resume)({ repo: repo.key }));
 
-  if (status === null) {
-    return (
-      <CenteredState>
-        {unreachable ? (
-          <Notice title="Lookout did not answer">{UNREACHABLE}</Notice>
-        ) : (
-          <Notice title="Checking Lookout">One moment.</Notice>
-        )}
-      </CenteredState>
-    );
-  }
-  if (!status.installed)
-    return <NotInstalled launcher={status.launcher} onCheck={() => void refresh()} />;
-  if (!status.ok) {
-    return (
-      <div className="p-3">
-        <Alert variant="error">
-          <AlertTitle>Lookout did not answer</AlertTitle>
-          <AlertDescription>{status.error}</AlertDescription>
-          <AlertAction>
-            <Button size="xs" variant="outline" onClick={() => void refresh()}>
-              Try again
-            </Button>
-          </AlertAction>
-        </Alert>
-      </div>
-    );
-  }
+  const withEntry = <T,>(map: ReadonlyMap<number, T>, id: number, value: T | undefined) => {
+    const next = new Map(map);
+    if (value === undefined) next.delete(id);
+    else next.set(id, value);
+    return next;
+  };
 
-  const state = status.value;
+  const actOnNudge = async (message: LookoutMessage, action: LookoutNudgeAction) => {
+    setBusy((current) => withEntry(current, message.id, action));
+    setNudgeErrors((current) => withEntry(current, message.id, undefined));
+    try {
+      const result = await bridge.nudge({ id: message.id, action });
+      if (!result.installed) throw new Error("Lookout is no longer installed.");
+      if (!result.ok) throw new Error(nudgeErrorText(result.error));
+      applyMessages([result.value.message ?? { ...message, state: stateAfter(action) }]);
+      countSeen(message);
+    } catch (error) {
+      const text = error instanceof Error && error.message ? error.message : UNREACHABLE;
+      setNudgeErrors((current) => withEntry(current, message.id, text));
+    } finally {
+      setBusy((current) => withEntry(current, message.id, undefined));
+    }
+  };
+
+  /** Marks nudges seen one at a time, in the order they came on screen. */
+  const markSeen = (ids: readonly number[]) => {
+    for (const id of ids) {
+      if (seenAsked.current.has(id)) continue;
+      seenAsked.current.add(id);
+      seenQueue.current.push(id);
+    }
+    if (seenRunning.current) return;
+    seenRunning.current = true;
+    void (async () => {
+      try {
+        while (seenQueue.current.length > 0) {
+          const id = seenQueue.current.shift()!;
+          try {
+            const result = await bridge.nudge({ id, action: "seen" });
+            if (result.installed && result.ok) {
+              const shown = latestMessages.current.find((message) => message.id === id);
+              if (result.value.message) applyMessages([result.value.message]);
+              else if (shown) applyMessages([{ ...shown, state: "seen" }]);
+              if (shown) countSeen(shown);
+            } else {
+              seenAsked.current.delete(id);
+            }
+          } catch {
+            seenAsked.current.delete(id);
+          }
+        }
+      } finally {
+        seenRunning.current = false;
+      }
+    })();
+  };
+
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || pending) return;
+    const token = ++askToken.current;
+    setDraft("");
+    setAskError(null);
+    setPending({ text, afterId: newestMessageId(messages) });
+    const restore = () => setDraft((current) => (current.trim() ? current : text));
+    try {
+      const result = await bridge.ask({ text });
+      if (askToken.current !== token) return;
+      if (!result.installed) {
+        setAskError("Lookout is no longer installed.");
+        restore();
+      } else if (!result.ok) {
+        if (result.reason !== "cancelled") {
+          setAskError(`Lookout did not answer: ${result.error}`);
+          restore();
+        }
+      } else {
+        applyMessages([result.value.question, result.value.answer]);
+      }
+    } catch {
+      if (askToken.current === token) {
+        setAskError(UNREACHABLE);
+        restore();
+      }
+    } finally {
+      if (askToken.current === token) {
+        setPending(null);
+        refreshThread();
+      }
+    }
+  };
+
+  const cancelAsk = () => {
+    if (!pending) return;
+    askToken.current++;
+    const { text } = pending;
+    // Lookout may already have kept the question in the thread; otherwise it goes back to the composer.
+    const kept = !pendingQuestionShown(messages, pending);
+    setPending(null);
+    if (!kept) setDraft((current) => (current.trim() ? current : text));
+    void bridge.cancelAsk().catch(() => undefined);
+    refreshThread();
+  };
+
   const watch = lookoutWatchState(status);
-  const preferredRepoKey = repoForPath(state.repos, projectRoot);
-  const findingList =
-    findings?.installed && findings.ok
-      ? orderFindings(findings.value.findings, preferredRepoKey)
-      : [];
-  const findingsError = findings?.installed && !findings.ok ? findings.error : null;
-  const activityValue = activity?.installed && activity.ok ? activity.value : null;
-  const activityError = activity?.installed && !activity.ok ? activity.error : null;
-  const openCount = state.repos.reduce((total, repo) => total + repo.openFindings, 0);
-  const pausing = pending === "all";
+  const state = statusOk ? status.value : null;
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-col gap-1 border-b border-border px-3 py-2">
-        <div className="flex items-center gap-2">
-          <StatusDot state={watch} />
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {repositoriesLabel(state.repos.length)} · {budgetLabel(state.budget)}
-          </span>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  disabled={pausing}
-                  aria-label={state.paused ? "Resume Lookout" : "Pause Lookout"}
-                  onClick={() =>
-                    void act("all", () => (state.paused ? bridge.resume({}) : bridge.pause({})))
-                  }
-                >
-                  {pausing ? (
-                    <Spinner aria-hidden />
-                  ) : state.paused ? (
-                    <PlayIcon aria-hidden />
-                  ) : (
-                    <PauseIcon aria-hidden />
-                  )}
-                  {state.paused ? "Resume" : "Pause"}
-                </Button>
-              }
-            />
-            <TooltipPopup side="bottom" positionMethod="fixed">
-              {state.paused
-                ? "Resume reviews in every repository"
-                : "Pause reviews in every repository. Events are still recorded."}
-            </TooltipPopup>
-          </Tooltip>
-        </div>
-        {watch === "not-running" ? (
-          <p className="text-xs text-muted-foreground">
-            Lookout starts again with your next Claude Code session.
-          </p>
-        ) : null}
-      </div>
-      {!state.selftest.ok || state.budget.availableCents <= 0 || actionError || unreachable ? (
-        <div className="flex shrink-0 flex-col gap-2 px-3 pt-2">
-          {!state.selftest.ok ? (
-            <Alert variant="warning">
-              <AlertTitle>Reviews are on hold</AlertTitle>
-              <AlertDescription>
-                Lookout's isolation self-test failed: {state.selftest.reason}
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {state.budget.availableCents <= 0 ? (
-            <Alert variant="info">
-              <AlertTitle>Review budget used up</AlertTitle>
-              <AlertDescription>
-                Reviews continue when the {state.budget.windowHours} h window frees budget.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {actionError || unreachable ? (
-            <Alert variant="error">
-              <AlertDescription>{actionError ?? UNREACHABLE}</AlertDescription>
-            </Alert>
-          ) : null}
-        </div>
+  const heading = (
+    <>
+      {status === null && !chat.unreachable ? (
+        <StatusWord state="unknown" />
+      ) : watch !== "unknown" ? (
+        <StatusWord state={watch} />
       ) : null}
-      <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
-        <ToggleGroup
-          aria-label="Lookout view"
-          variant="segmented"
-          value={[view]}
-          onValueChange={(next) => chooseView(next[0])}
-        >
-          <Toggle value="findings">Findings{openCount > 0 ? ` ${openCount}` : ""}</Toggle>
-          <Toggle value="activity">Activity</Toggle>
-          <Toggle value="repos">Repos</Toggle>
-        </ToggleGroup>
-        {view === "findings" ? (
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button size="xs" variant="ghost" aria-label="Choose which findings to show" />
-              }
-            >
-              {showClosed ? "All" : "Open"}
-              <ChevronDownIcon aria-hidden />
-            </MenuTrigger>
-            <MenuPopup align="end" positionMethod="fixed">
-              <MenuRadioGroup
-                value={showClosed ? "all" : "open"}
-                onValueChange={(value) => setShowClosed(value === "all")}
+      {state ? (
+        <Menu>
+          <MenuTrigger
+            render={<Button size="icon-sm" variant="ghost" aria-label="Lookout options" />}
+          >
+            <MoreHorizontalIcon aria-hidden />
+          </MenuTrigger>
+          <MenuPopup align="start" positionMethod="fixed">
+            <div className="w-56 max-w-[calc(100vw-3rem)]">
+              <MenuItem
+                disabled={pendingRepo === "all"}
+                onClick={() =>
+                  void change("all", () => (state.paused ? bridge.resume({}) : bridge.pause({})))
+                }
               >
-                <MenuRadioItem closeOnClick value="open">
-                  Open findings
-                  <MenuRadioItemIndicator />
-                </MenuRadioItem>
-                <MenuRadioItem closeOnClick value="all">
-                  All findings, including closed
-                  <MenuRadioItemIndicator />
-                </MenuRadioItem>
-              </MenuRadioGroup>
-            </MenuPopup>
-          </Menu>
-        ) : null}
-      </div>
-      <ScrollArea className="min-h-0 flex-1" scrollbarGutter>
-        <div className="flex flex-col px-1 pb-3">
-          {view === "findings" ? (
-            state.repos.length === 0 ? (
-              <Notice title="No repositories yet">
-                Lookout starts watching a repository the first time a Claude Code session changes
-                code in it.
-              </Notice>
-            ) : findingsError ? (
-              <Alert variant="error">
-                <AlertDescription>{findingsError}</AlertDescription>
-              </Alert>
-            ) : findings === null ? null : findingList.length === 0 ? (
-              <Notice title={showClosed ? "No findings yet" : "Nothing to report"}>
-                Watching {repositoriesLabel(state.repos.length)}. Nothing needs your attention.
-              </Notice>
-            ) : (
-              <LookoutFindingList
-                findings={findingList}
-                preferredRepoKey={preferredRepoKey}
-                timestampFormat={timestampFormat}
-                pendingRef={pending}
-                onDecide={decide}
-                onQuote={onQuote}
-              />
-            )
-          ) : view === "activity" ? (
-            activityError ? (
-              <Alert variant="error">
-                <AlertDescription>{activityError}</AlertDescription>
-              </Alert>
-            ) : (
-              <LookoutActivityView activity={activityValue} />
-            )
-          ) : state.repos.length === 0 ? (
-            <Notice title="No repositories yet">
-              Lookout starts watching a repository the first time a Claude Code session changes code
-              in it.
-            </Notice>
-          ) : (
-            <LookoutRepoList
-              repos={state.repos}
-              preferredRepoKey={preferredRepoKey}
-              pendingRepo={pending}
-              onSetPaused={setRepoPaused}
-            />
-          )}
-        </div>
-      </ScrollArea>
-    </div>
+                {state.paused ? <PlayIcon aria-hidden /> : <PauseIcon aria-hidden />}
+                {state.paused ? "Resume Lookout" : "Pause Lookout"}
+              </MenuItem>
+              <MenuItem onClick={() => setView("repos")}>
+                <FolderGit2Icon aria-hidden />
+                Watched repos
+              </MenuItem>
+              <MenuItem onClick={() => setView("activity")}>
+                <ActivityIcon aria-hidden />
+                Activity
+              </MenuItem>
+              <MenuSeparator />
+              <MenuGroup>
+                <MenuGroupLabel>Budget: {budgetLabel(state.budget)}</MenuGroupLabel>
+              </MenuGroup>
+            </div>
+          </MenuPopup>
+        </Menu>
+      ) : null}
+    </>
   );
+
+  const body = (() => {
+    if (status === null) {
+      return (
+        <CenteredState>
+          {chat.unreachable ? (
+            <Notice title="Lookout did not answer">{UNREACHABLE}</Notice>
+          ) : (
+            <Notice title="Checking Lookout">One moment.</Notice>
+          )}
+        </CenteredState>
+      );
+    }
+    if (!status.installed)
+      return <NotInstalled launcher={status.launcher} onCheck={() => refreshStatus()} />;
+    if (!status.ok) {
+      return (
+        <div className="p-3">
+          <Alert variant="error">
+            <AlertTitle>Lookout did not answer</AlertTitle>
+            <AlertDescription>{status.error}</AlertDescription>
+            <AlertAction>
+              <Button size="xs" variant="outline" onClick={() => refreshStatus()}>
+                Try again
+              </Button>
+            </AlertAction>
+          </Alert>
+        </div>
+      );
+    }
+    const value = status.value;
+    if (view !== "chat") {
+      const activityValue = activity?.installed && activity.ok ? activity.value : null;
+      const activityError = activity?.installed && !activity.ok ? activity.error : null;
+      return (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
+            <Button size="xs" variant="ghost" onClick={() => setView("chat")}>
+              <ChevronLeftIcon aria-hidden />
+              Chat
+            </Button>
+            <h3 className="text-sm font-medium">
+              {view === "activity" ? "Activity" : "Watched repos"}
+            </h3>
+          </div>
+          {actionError ? (
+            <div className="shrink-0 px-3 pt-2">
+              <Alert variant="error">
+                <AlertDescription>{actionError}</AlertDescription>
+              </Alert>
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            {view === "activity" ? (
+              activityError ? (
+                <div className="p-3">
+                  <Alert variant="error">
+                    <AlertDescription>{activityError}</AlertDescription>
+                  </Alert>
+                </div>
+              ) : (
+                <LookoutActivityView activity={activityValue} />
+              )
+            ) : (
+              <LookoutRepoList
+                repos={value.repos}
+                preferredRepoKey={repoForPath(value.repos, projectRoot)}
+                pendingRepo={pendingRepo}
+                onSetPaused={(repo: LookoutRepo, paused) =>
+                  void change(repo.key, () =>
+                    (paused ? bridge.pause : bridge.resume)({ repo: repo.key }),
+                  )
+                }
+              />
+            )}
+          </div>
+        </div>
+      );
+    }
+    if (!chat.canChat) {
+      return (
+        <CenteredState>
+          <Notice title="Update Lookout to chat">
+            This version of Lookout has no chat. Run its install command again from an updated
+            Lookout checkout.
+          </Notice>
+        </CenteredState>
+      );
+    }
+    const notices = [
+      watch === "not-running" ? (
+        <ThreadNotice key="not-running">
+          Lookout isn't running. It starts with your next Claude Code session.
+        </ThreadNotice>
+      ) : null,
+      !value.selftest.ok ? (
+        <ThreadNotice key="selftest" tone="warning">
+          Lookout is on hold: its safety check failed ({value.selftest.reason}).
+        </ThreadNotice>
+      ) : null,
+      value.budget.availableCents <= 0 ? (
+        <ThreadNotice key="budget">
+          Today's budget is used up. Lookout speaks up again when budget frees.
+        </ThreadNotice>
+      ) : null,
+      actionError || chat.unreachable || chat.threadError ? (
+        <ThreadNotice key="error" tone="error">
+          {actionError ?? chat.threadError ?? UNREACHABLE}
+        </ThreadNotice>
+      ) : null,
+    ].filter(Boolean);
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        {notices.length > 0 ? (
+          <div className="flex shrink-0 flex-col border-b border-border">{notices}</div>
+        ) : null}
+        <LookoutThread
+          messages={messages}
+          pending={pending}
+          askError={askError}
+          active={active}
+          timestampFormat={timestampFormat}
+          busy={busy}
+          errors={nudgeErrors}
+          empty={
+            <Notice title="Nothing to remind you of">
+              {emptyThreadText(watch, value.sessions)}
+            </Notice>
+          }
+          onAct={(message, action) => void actOnNudge(message, action)}
+          onCancelAsk={cancelAsk}
+          onSeen={markSeen}
+        />
+        <Composer
+          draft={draft}
+          disabled={false}
+          asking={pending !== null}
+          onDraftChange={setDraft}
+          onSend={() => void send()}
+        />
+      </div>
+    );
+  })();
+
+  return frame(heading, body);
 }
+
+const stateAfter = (action: LookoutNudgeAction): LookoutMessage["state"] =>
+  action === "send"
+    ? "sent"
+    : action === "dismiss"
+      ? "dismissed"
+      : action === "useful"
+        ? "useful"
+        : action === "not_useful"
+          ? "not_useful"
+          : "seen";
 
 /** Lookout in the docked tool frame beside the chat, like Pages and Conversation tools. */
 export function LookoutPanel({
@@ -459,10 +689,9 @@ export function LookoutPanel({
   readonly tools?: ReactNode;
   readonly projectRoot: string | null;
   readonly timestampFormat: TimestampFormat;
-  readonly onQuote?: ((text: string, label: string) => boolean) | undefined;
 }) {
   const bridge = window.desktopBridge?.lookout;
-  return (
+  const panel = (heading: ReactNode, body: ReactNode) => (
     <ConversationToolsPanel
       active={active}
       inline={inline}
@@ -471,8 +700,14 @@ export function LookoutPanel({
       title="Lookout"
       name="Lookout"
       widthStorageKey="starkcode:lookout-panel-width"
+      heading={heading}
     >
-      {bridge ? <LookoutContent bridge={bridge} active={active} {...content} /> : null}
+      {body}
     </ConversationToolsPanel>
+  );
+  return bridge ? (
+    <LookoutContent bridge={bridge} active={active} frame={panel} {...content} />
+  ) : (
+    panel(null, null)
   );
 }

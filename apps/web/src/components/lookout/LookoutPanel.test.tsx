@@ -4,29 +4,16 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import type {
   LookoutBridge,
-  LookoutFinding,
+  LookoutMessage,
   LookoutResponse,
   LookoutStatus,
 } from "@starkfuture/contracts";
-import { LOOKOUT_POLL_INTERVAL_MS, LookoutContent } from "./LookoutPanel";
-
-const repo = (key: string, root: string, openFindings: number) => ({
-  key,
-  name: key,
-  root,
-  lastEventAt: "2026-11-05T16:00:00.000Z",
-  paused: false,
-  excluded: false,
-  pendingEvents: 0,
-  openFindings,
-  toldSession: 0,
-  activeJob: null,
-  lastRun: null,
-});
+import { LOOKOUT_CHAT_POLL_MS, LookoutContent } from "./LookoutPanel";
+import { useLookoutIndicator } from "./lookoutStore";
 
 const STATUS: LookoutStatus = {
-  generatedAt: "2026-11-05T16:00:00.000Z",
-  daemon: { running: true, pid: 4, heartbeatAt: "2026-11-05T16:00:00.000Z" },
+  generatedAt: "2026-11-06T09:00:00.000Z",
+  daemon: { running: true, pid: 4, heartbeatAt: "2026-11-06T09:00:00.000Z" },
   paused: false,
   profiles: ["/Users/me/.claude"],
   home: "/Users/me/.lookout",
@@ -34,54 +21,85 @@ const STATUS: LookoutStatus = {
   claudeBin: "claude",
   delivery: "session",
   selftest: { ok: true, reason: "passed" },
-  budget: { windowHours: 24, capCents: 1000, spentCents: 37, availableCents: 963 },
-  repos: [repo("billing", "/work/billing", 1), repo("orders", "/work/orders", 1)],
+  budget: { windowHours: 24, capCents: 1000, spentCents: 120, availableCents: 880 },
+  repos: [],
+  unread: 2,
+  sessions: 3,
+  reviewWork: false,
 };
 
-const finding = (overrides: Partial<LookoutFinding>): LookoutFinding => ({
-  ref: "billing#1",
+const message = (id: number, overrides: Partial<LookoutMessage> = {}): LookoutMessage => ({
+  id,
+  at: "2026-11-06T08:00:00.000Z",
+  role: "lookout",
+  kind: "nudge",
+  nudgeKind: "rule",
+  text: `Nudge ${id}`,
+  evidence: [],
+  session: "5f0c2a9e-1b7d",
+  sessionLabel: "billing · fix the invoice rounding",
   repo: "billing",
-  repoKey: "billing",
-  id: 1,
-  title: "Invoice totals round per line",
-  severity: "high",
-  issueType: "defect",
-  attribution: "introduced",
-  proof: "traced",
-  awareness: "unaware",
-  riskAreas: ["money"],
-  status: "open",
-  statement: "Each line is rounded before summing.",
-  failureCase: "100 lines of 0.005 drift by 50 cents.",
-  whyItMatters: "Customers are overcharged.",
-  nextAction: "Round once after summing.",
-  handoffPrompt: null,
-  evidence: [
-    {
-      type: "file",
-      path: "src/invoice.ts",
-      lineStart: 12,
-      quote: "round(line)",
-      check: "verified",
-    },
-  ],
-  speech: { action: "inbox", why: "low confidence", toldSession: false },
-  deliveredAt: null,
-  revision: "a1b2c3d",
-  createdAt: "2026-11-05T15:00:00.000Z",
-  updatedAt: "2026-11-05T15:00:00.000Z",
-  decisionNote: null,
+  state: "new",
   ...overrides,
 });
 
+const THREAD = [
+  message(1, {
+    text: "Your rule says to merge only on merge #N.",
+    evidence: [
+      {
+        source: "rule",
+        where: "/Users/me/.claude/CLAUDE.md:12",
+        quote: "Never merge a PR unless the user writes 'merge #<n>'",
+        found: true,
+      },
+    ],
+    state: "seen",
+  }),
+  message(2, { role: "you", kind: "message", nudgeKind: null, text: "what's waiting on me?" }),
+  message(3, {
+    kind: "answer",
+    nudgeKind: null,
+    text: "A session asked which sandbox to use.",
+    evidence: [
+      {
+        source: "session",
+        where: "orders · deploy · 2026-11-06T07:00:00.000Z",
+        quote: "Should I use kciam or the w02283 sandbox?",
+        found: false,
+      },
+    ],
+    state: "seen",
+  }),
+  message(4, { nudgeKind: "risky", text: "This sends a PR comment; you asked for drafts first." }),
+  message(5, { nudgeKind: "pending", text: "A session is still waiting on your answer." }),
+];
+
 const ok = <T,>(value: T): LookoutResponse<T> => ({ installed: true, ok: true, value });
+
+/** Reports every observed element as on screen, like an open panel would. */
+class VisibleObserver {
+  constructor(private readonly callback: IntersectionObserverCallback) {}
+  observe(target: Element) {
+    this.callback(
+      [{ target, isIntersecting: true, intersectionRatio: 1 } as IntersectionObserverEntry],
+      this as unknown as IntersectionObserver,
+    );
+  }
+  disconnect() {}
+  unobserve() {}
+}
 
 let root: Root;
 let container: HTMLDivElement;
 let bridge: { [K in keyof LookoutBridge]: ReturnType<typeof vi.fn> };
 
-const render = (active = true) =>
-  act(async () =>
+const settle = () =>
+  act(async () => {
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+  });
+const render = async (active = true) => {
+  await act(async () =>
     root.render(
       <LookoutContent
         bridge={bridge as unknown as LookoutBridge}
@@ -91,6 +109,8 @@ const render = (active = true) =>
       />,
     ),
   );
+  await settle();
+};
 const button = (label: string) => {
   const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
     (item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label,
@@ -98,33 +118,59 @@ const button = (label: string) => {
   if (!found) throw new Error(`Missing button: ${label}`);
   return found;
 };
-const click = (label: string) => act(async () => button(label).click());
-const tick = () => act(async () => vi.advanceTimersByTime(LOOKOUT_POLL_INTERVAL_MS));
+const click = async (label: string) => {
+  await act(async () => button(label).click());
+  await settle();
+};
+const card = (text: string) =>
+  [...container.querySelectorAll("article")].find((item) => item.textContent?.includes(text))!;
+const typeQuestion = async (text: string) => {
+  const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Lookout"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, text);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => {
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  return field;
+};
+const advance = async (ms: number) => {
+  await act(async () => vi.advanceTimersByTime(ms));
+  await settle();
+};
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-06T09:00:00.000Z"));
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("IntersectionObserver", VisibleObserver);
+  // Spinners pause with reduced motion.
+  vi.stubGlobal("matchMedia", () => ({
+    matches: false,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+  useLookoutIndicator.setState({ installed: null, unread: 0 });
   bridge = {
     status: vi.fn(async () => ok(STATUS)),
-    findings: vi.fn(async () =>
+    chat: vi.fn(async (input: { since?: number }) =>
+      ok({ messages: input.since === undefined ? THREAD : [], unread: 2 }),
+    ),
+    nudge: vi.fn(async (input: { id: number; action: string }) =>
       ok({
-        findings: [
-          finding({}),
-          finding({
-            ref: "orders#2",
-            repo: "orders",
-            repoKey: "orders",
-            id: 2,
-            title: "Retry charges twice",
-            severity: "medium",
-            deliveredAt: "2026-11-05T14:32:00.000Z",
-            speech: { action: "speak", why: "risky", toldSession: true },
-          }),
-        ],
+        ok: true,
+        message: {
+          ...THREAD.find((item) => item.id === input.id)!,
+          state: input.action === "useful" ? "useful" : "seen",
+        },
       }),
     ),
+    ask: vi.fn(),
+    cancelAsk: vi.fn(async () => ({ cancelled: true })),
+    findings: vi.fn(),
     activity: vi.fn(async () => ok({ events: [], runs: [] })),
-    decide: vi.fn(async () => ok({ ok: true, finding: finding({ status: "dismissed" }) })),
+    decide: vi.fn(),
     pause: vi.fn(async () => ok({ ok: true, paused: true, scope: "all" })),
     resume: vi.fn(async () => ok({ ok: true, paused: false, scope: "all" })),
   };
@@ -139,76 +185,199 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("shows the install command and checks only on open when Lookout is missing", async () => {
-  bridge.status.mockResolvedValue({ installed: false, launcher: "/Users/me/.lookout/bin/lookout" });
+it("shows nudges, answers and your messages with their quotes", async () => {
   await render();
-  expect(container.textContent).toContain("Lookout isn't installed");
-  expect(container.textContent).toContain("<path-to-lookout-checkout>/scripts/lookout install");
-  await tick();
-  await tick();
+  const text = container.textContent ?? "";
+  expect(text).toContain("Watching");
+  expect(text).toContain("Your rule");
+  expect(text).toContain("Hard to undo");
+  expect(text).toContain("Waiting on you");
+  expect(text).toContain("CLAUDE.md:12");
+  expect(text).toContain("Quote found");
+  expect(text).toContain("The session said, in orders · deploy ·\u00a02h\u00a0ago");
+  expect(text).toContain("Not found");
+  expect(text).toContain("what's waiting on me?");
+  expect(text).not.toContain("Verified");
+  // Only a nudge for a known session can go to that session.
+  expect(card("merge only").textContent).toContain("Send to session");
+});
+
+it("polls the thread every five seconds for new messages, and only while open", async () => {
+  await render();
+  expect(bridge.chat).toHaveBeenCalledWith({ limit: 200 });
+  await advance(LOOKOUT_CHAT_POLL_MS);
+  expect(bridge.chat).toHaveBeenLastCalledWith({ since: 5 });
   expect(bridge.status).toHaveBeenCalledTimes(1);
-  expect(bridge.findings).not.toHaveBeenCalled();
-  await click("Check again");
+  await advance(15_000);
   expect(bridge.status).toHaveBeenCalledTimes(2);
-});
 
-it("lists this folder's findings first and polls only while open", async () => {
-  await render();
-  const rows = [
-    ...container.querySelectorAll('[aria-label="Findings"] [data-slot="collapsible-trigger"]'),
-  ];
-  expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
-    "Medium: Retry charges twice",
-    "High: Invoice totals round per line",
-  ]);
-  expect(container.textContent).toContain("Told the session at");
-  expect(container.textContent).toContain("Kept quiet: low confidence");
-  expect(container.textContent).toContain("Watching");
-  expect(container.textContent).toContain("$0.37 of $10.00 used in 24 h");
-
-  await tick();
-  expect(bridge.status).toHaveBeenCalledTimes(2);
+  const chats = bridge.chat.mock.calls.length;
   await render(false);
-  await tick();
-  await tick();
-  expect(bridge.status).toHaveBeenCalledTimes(2);
+  await advance(30_000);
+  expect(bridge.chat.mock.calls.length).toBe(chats);
+  // Opening again reloads the whole thread.
+  await render(true);
+  expect(bridge.chat).toHaveBeenLastCalledWith({ limit: 200 });
 });
 
-it("asks for a reason before dismissing, then sends it and refreshes", async () => {
+it("never polls twice at once", async () => {
+  let answer: (value: unknown) => void = () => {};
   await render();
-  await click("High: Invoice totals round per line");
-  await click("Dismiss");
-  const submit = [...container.querySelectorAll<HTMLButtonElement>('button[type="submit"]')][0]!;
-  expect(submit.disabled).toBe(true);
-  const reason = container.querySelector<HTMLTextAreaElement>(
-    'textarea[aria-label="Reason to dismiss"]',
-  )!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
-      reason,
-      "  we round server-side ",
-    );
-    reason.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  expect(submit.disabled).toBe(false);
-  const before = bridge.status.mock.calls.length;
-  await act(async () => submit.click());
-  expect(bridge.decide).toHaveBeenCalledWith({
-    ref: "billing#1",
-    action: "dismiss",
-    note: "we round server-side",
-  });
-  expect(bridge.status.mock.calls.length).toBe(before + 1);
+  bridge.chat.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+  await advance(LOOKOUT_CHAT_POLL_MS);
+  const calls = bridge.chat.mock.calls.length;
+  await advance(LOOKOUT_CHAT_POLL_MS * 3);
+  expect(bridge.chat.mock.calls.length).toBe(calls);
+  await act(async () => answer(ok({ messages: [], unread: 0 })));
+  await advance(LOOKOUT_CHAT_POLL_MS);
+  expect(bridge.chat.mock.calls.length).toBe(calls + 1);
 });
 
-it("shows Lookout's refusal instead of hiding it", async () => {
-  bridge.pause.mockResolvedValue({
+it("marks nudges seen once they are on screen, each once, and clears the dot", async () => {
+  await render();
+  expect(bridge.nudge.mock.calls.map(([input]) => input)).toEqual([
+    { id: 4, action: "seen" },
+    { id: 5, action: "seen" },
+  ]);
+  expect(useLookoutIndicator.getState().unread).toBe(0);
+  await advance(LOOKOUT_CHAT_POLL_MS);
+  expect(bridge.nudge).toHaveBeenCalledTimes(2);
+});
+
+it("records Got it, and explains a session that ended", async () => {
+  await render();
+  await act(async () => {
+    [...card("merge only").querySelectorAll("button")]
+      .find((item) => item.textContent === "Got it")!
+      .click();
+  });
+  await settle();
+  expect(bridge.nudge).toHaveBeenLastCalledWith({ id: 1, action: "useful" });
+  expect(card("merge only").textContent).toContain("Got it");
+  expect(card("merge only").textContent).not.toContain("Not useful");
+
+  bridge.nudge.mockResolvedValue({
     installed: true,
     ok: false,
     reason: "failed",
-    error: "registry is locked",
+    error: "session ended",
   });
+  await act(async () => {
+    [...card("drafts first").querySelectorAll("button")]
+      .find((item) => item.textContent === "Send to session")!
+      .click();
+  });
+  await settle();
+  expect(card("drafts first").textContent).toContain("That session has ended");
+  expect(card("drafts first").textContent).toContain("Send to session");
+});
+
+it("asks with Enter, shows Lookout thinking, then the answer", async () => {
+  let answer: (value: unknown) => void = () => {};
+  bridge.ask.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
   await render();
-  await click("Pause Lookout");
-  expect(container.textContent).toContain("registry is locked");
+  const field = await typeQuestion("what did I ask yesterday?");
+  expect(bridge.ask).toHaveBeenCalledWith({ text: "what did I ask yesterday?" });
+  expect(field.value).toBe("");
+  expect(container.textContent).toContain("Lookout is thinking…");
+  await act(async () =>
+    answer(
+      ok({
+        question: message(6, {
+          role: "you",
+          kind: "message",
+          nudgeKind: null,
+          text: "what did I ask yesterday?",
+          state: "seen",
+        }),
+        answer: message(7, {
+          kind: "answer",
+          nudgeKind: null,
+          text: "You asked to keep the /v1 endpoints.",
+          state: "seen",
+        }),
+      }),
+    ),
+  );
+  await settle();
+  expect(container.textContent).not.toContain("Lookout is thinking…");
+  expect(container.textContent).toContain("You asked to keep the /v1 endpoints.");
+  expect(container.textContent?.match(/what did I ask yesterday\?/g)).toHaveLength(1);
+});
+
+it("cancels a question without leaving it waiting", async () => {
+  bridge.ask.mockImplementation(() => new Promise(() => {}));
+  await render();
+  await typeQuestion("what's waiting on me?");
+  await click("Cancel");
+  expect(bridge.cancelAsk).toHaveBeenCalledTimes(1);
+  expect(container.textContent).not.toContain("Lookout is thinking…");
+  // The question comes back to the composer and can be sent again at once.
+  const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Lookout"]')!;
+  expect(field.value).toBe("what's waiting on me?");
+  expect(button("Send").disabled).toBe(false);
+  await typeQuestion("what's waiting on me?");
+  expect(bridge.ask).toHaveBeenCalledTimes(2);
+});
+
+it("leaves a cancelled question in the thread when Lookout already kept it", async () => {
+  bridge.ask.mockImplementation(() => new Promise(() => {}));
+  await render();
+  await typeQuestion("what's waiting on me now?");
+  bridge.chat.mockResolvedValue(
+    ok({
+      messages: [
+        message(6, {
+          role: "you",
+          kind: "message",
+          nudgeKind: null,
+          text: "what's waiting on me now?",
+        }),
+      ],
+      unread: 0,
+    }),
+  );
+  await advance(LOOKOUT_CHAT_POLL_MS);
+  await click("Cancel");
+  const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Lookout"]')!;
+  expect(field.value).toBe("");
+  expect(container.textContent?.match(/what's waiting on me now\?/g)).toHaveLength(1);
+});
+
+it("says plainly when Lookout is not running, without Watching", async () => {
+  bridge.status.mockResolvedValue(
+    ok({ ...STATUS, daemon: { running: false, pid: null, heartbeatAt: null } }),
+  );
+  bridge.chat.mockResolvedValue(ok({ messages: [], unread: 0 }));
+  await render();
+  expect(container.textContent).toContain("Not running");
+  expect(container.textContent).toContain("Lookout starts with your next Claude Code session.");
+  expect(container.textContent).not.toContain("Watching");
+});
+
+it("shows how many sessions it watches when nothing needs saying", async () => {
+  bridge.chat.mockResolvedValue(ok({ messages: [], unread: 0 }));
+  await render();
+  expect(container.textContent).toContain(
+    "Watching 3 sessions. Lookout speaks up when you're about to forget something.",
+  );
+});
+
+it("asks an older Lookout to update instead of calling chat", async () => {
+  const { unread: _unread, sessions: _sessions, reviewWork: _reviewWork, ...older } = STATUS;
+  bridge.status.mockResolvedValue(ok(older));
+  await render();
+  expect(container.textContent).toContain("Update Lookout to chat");
+  expect(bridge.chat).not.toHaveBeenCalled();
+});
+
+it("shows the install command when Lookout is missing", async () => {
+  bridge.status.mockResolvedValue({ installed: false, launcher: "/Users/me/.lookout/bin/lookout" });
+  await render();
+  expect(container.textContent).toContain("Lookout isn't installed");
+  expect(container.textContent).toContain("Not installed");
+  expect(container.textContent).toContain("<path-to-lookout-checkout>/scripts/lookout install");
+  expect(bridge.chat).not.toHaveBeenCalled();
+  await click("Check again");
+  expect(bridge.status).toHaveBeenCalledTimes(2);
 });

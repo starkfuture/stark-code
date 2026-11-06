@@ -1,53 +1,22 @@
 import type {
-  LookoutEvidence,
-  LookoutFinding,
-  LookoutFindingStatus,
+  LookoutActivityEvent,
+  LookoutActivityRun,
+  LookoutMessage,
+  LookoutMessageState,
+  LookoutNudgeKind,
+  LookoutQuote,
   LookoutRepo,
   LookoutResponse,
-  LookoutSeverity,
   LookoutStatus,
 } from "@starkfuture/contracts";
-
-type BadgeVariant = "error" | "warning" | "info" | "success" | "secondary" | "outline";
-
-/** The colour pairs with the severity word; never show one without the other. */
-export function severityBadge(severity: LookoutSeverity | null): {
-  readonly label: string;
-  readonly variant: BadgeVariant;
-} {
-  switch (severity) {
-    case "critical":
-      return { label: "Critical", variant: "error" };
-    case "high":
-      return { label: "High", variant: "warning" };
-    case "medium":
-      return { label: "Medium", variant: "info" };
-    case "low":
-      return { label: "Low", variant: "secondary" };
-    default:
-      return { label: "Unrated", variant: "outline" };
-  }
-}
-
-const STATUS_LABELS: Record<LookoutFindingStatus, string> = {
-  open: "Open",
-  stale: "Stale",
-  accepted: "Accepted",
-  dismissed: "Dismissed",
-  deferred: "Deferred",
-  resolved: "Resolved",
-  unverified: "Unverified",
-};
-
-export const findingStatusLabel = (status: LookoutFindingStatus) => STATUS_LABELS[status];
-
-/** Open and stale findings still need a decision; every other status can be reopened. */
-export const isFindingOpen = (finding: Pick<LookoutFinding, "status">) =>
-  finding.status === "open" || finding.status === "stale";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 
 export type LookoutWatchState = "watching" | "paused" | "not-running" | "not-installed" | "unknown";
 
-/** One word for the status dot: is Lookout watching right now? */
+/**
+ * One word for the status dot: is Lookout watching right now? A stopped
+ * daemon is "not running" even when paused, so "Watching" never shows beside it.
+ */
 export function lookoutWatchState(
   response: LookoutResponse<LookoutStatus> | null,
 ): LookoutWatchState {
@@ -66,21 +35,141 @@ export const WATCH_STATE_LABELS: Record<LookoutWatchState, string> = {
   unknown: "Checking",
 };
 
-/**
- * Whether Lookout told the coding session about a finding, or why it kept the
- * finding in its inbox. `formatTime` renders the delivery time.
- */
-export function speechLine(
-  finding: Pick<LookoutFinding, "speech" | "deliveredAt">,
-  formatTime: (iso: string) => string,
-): string | null {
-  if (finding.deliveredAt) {
-    const time = formatTime(finding.deliveredAt);
-    return time ? `Told the session at ${time}` : "Told the session";
+/** Lookout versions before the chat report no unread count and have no `chat` method. */
+export const chatSupported = (status: LookoutStatus) => status.unread !== undefined;
+
+/** Dollars with cents, or whole dollars when there are none: "$1.20", "$10". */
+export function formatDollars(cents: number): string {
+  const value = Math.max(0, cents) / 100;
+  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+}
+
+/** "$1.20 of $10 today" for Lookout's usual 24-hour window. */
+export function budgetLabel(budget: LookoutStatus["budget"]): string {
+  const window = budget.windowHours === 24 ? "today" : `in the last ${budget.windowHours} h`;
+  return `${formatDollars(budget.spentCents)} of ${formatDollars(budget.capCents)} ${window}`;
+}
+
+/** The empty thread's promise, which never says "Watching" unless Lookout is. */
+export function emptyThreadText(state: LookoutWatchState, sessions: number | undefined): string {
+  if (state === "not-running") return "Lookout starts with your next Claude Code session.";
+  if (state === "paused") return "Lookout is paused. Resume it to hear when you forget something.";
+  const watching =
+    sessions === undefined || sessions <= 0
+      ? "Watching your Claude Code sessions."
+      : `Watching ${sessions === 1 ? "1 session" : `${sessions} sessions`}.`;
+  return `${watching} Lookout speaks up when you're about to forget something.`;
+}
+
+export const NUDGE_KIND_LABELS: Record<LookoutNudgeKind, string> = {
+  rule: "Your rule",
+  earlier: "You said earlier",
+  pending: "Waiting on you",
+  missing: "Missing detail",
+  risky: "Hard to undo",
+};
+
+export const NUDGE_KIND_BADGES = {
+  rule: "info",
+  earlier: "secondary",
+  pending: "warning",
+  missing: "secondary",
+  risky: "error",
+} as const satisfies Record<LookoutNudgeKind, string>;
+
+/** What happened to a nudge after the person acted on it, or null while it still waits. */
+export function nudgeOutcome(state: LookoutMessageState): string | null {
+  switch (state) {
+    case "sent":
+      return "Sent to the session";
+    case "useful":
+      return "Got it";
+    case "not_useful":
+      return "Marked not useful";
+    case "dismissed":
+      return "Dismissed";
+    default:
+      return null;
   }
-  const why = finding.speech?.why.trim();
-  if (!finding.speech) return null;
-  return why ? `Kept quiet: ${why}` : "Kept quiet";
+}
+
+/** Lookout's words for a refused nudge action, in words for the person. */
+export function nudgeErrorText(error: string): string {
+  return /session ended/i.test(error)
+    ? "That session has ended, so this can't go into its next turn."
+    : error;
+}
+
+/** The thread in id order, with each message replaced by its newest copy. */
+export function mergeMessages(
+  current: readonly LookoutMessage[],
+  incoming: readonly LookoutMessage[],
+): LookoutMessage[] {
+  if (incoming.length === 0) return current as LookoutMessage[];
+  const byId = new Map(current.map((message) => [message.id, message]));
+  for (const message of incoming) byId.set(message.id, message);
+  return [...byId.values()].toSorted((a, b) => a.id - b.id);
+}
+
+export const newestMessageId = (messages: readonly LookoutMessage[]) =>
+  messages.length === 0 ? null : messages[messages.length - 1]!.id;
+
+/**
+ * Whether the question being answered still needs its own bubble: Lookout may
+ * store the question before it answers, and the next poll then shows it.
+ */
+export function pendingQuestionShown(
+  messages: readonly LookoutMessage[],
+  pending: { readonly text: string; readonly afterId: number | null },
+): boolean {
+  const text = pending.text.trim();
+  return !messages.some(
+    (message) =>
+      message.role === "you" &&
+      (pending.afterId === null || message.id > pending.afterId) &&
+      message.text.trim() === text,
+  );
+}
+
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+/** Splits `session label · time` into the label and a time, with an ISO time made relative. */
+function splitWhere(where: string): { label: string; time: string | null } {
+  const parts = where
+    .split(" · ")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const last = parts.at(-1);
+  if (last === undefined || !ISO_TIME.test(last)) return { label: parts.join(" · "), time: null };
+  return { label: parts.slice(0, -1).join(" · "), time: formatRelativeTimeLabel(last) || last };
+}
+
+/** `/Users/me/.claude/CLAUDE.md:12` reads as `CLAUDE.md:12`. */
+function fileLabel(where: string): string {
+  return where.split(/[\\/]/).findLast(Boolean) ?? where;
+}
+
+/** Where a quote comes from, in plain words: "CLAUDE.md:12", "You, in billing · fix rounding · 2h ago". */
+export function quoteSourceLabel(quote: Pick<LookoutQuote, "source" | "where">): string {
+  switch (quote.source) {
+    case "rule":
+    case "memory":
+      return fileLabel(quote.where);
+    case "prompt":
+    case "session":
+    case "nudge": {
+      const { label, time } = splitWhere(quote.where);
+      const who =
+        quote.source === "prompt"
+          ? "You"
+          : quote.source === "session"
+            ? "The session said"
+            : "Lookout said earlier";
+      const place = label ? `${who}, in ${label}` : who;
+      // The time ("2h ago") never breaks across lines.
+      return time ? `${place} ·\u00a0${time.replaceAll(" ", "\u00a0")}` : place;
+    }
+  }
 }
 
 const trimSeparators = (path: string) => path.replace(/[\\/]+$/, "");
@@ -107,56 +196,102 @@ export function repoForPath(
   return best?.key ?? null;
 }
 
+const RUN_KINDS: Record<string, string> = {
+  intent: "Checked a prompt",
+  prompt: "Checked a prompt",
+  "prompt-check": "Checked a prompt",
+  checkpoint: "Reviewed changes",
+  deep: "Looked deeper",
+  manual: "Review you asked for",
+  onboarding: "First look at the repository",
+  ask: "Answered your question",
+};
+
+const RUN_STATUSES: Record<string, string> = {
+  queued: "Waiting",
+  starting: "Starting",
+  running: "Running now",
+  done: "Done",
+  skipped: "Nothing new to check",
+  failed: "Failed",
+  timed_out: "Took too long",
+  budget_reached: "Stopped at the budget",
+  cancelled: "Cancelled",
+};
+
+const RUN_TRIGGERS: Record<string, string> = {
+  prompt: "after your prompt",
+  stop: "when a turn ended",
+  test: "after tests ran",
+  "edits-idle": "after edits went quiet",
+  "changed-outside-edits": "after files changed outside the session",
+  manual: "on request",
+  escalation: "to look closer",
+  onboard: "when Lookout started watching",
+};
+
 /**
- * Findings for the folder this conversation works in come first; otherwise
- * Lookout's own order (severity, then newest) is kept.
+ * A run summary without Lookout's internal markup: phase tags such as
+ * "[checkpoint]", "finding(s)", snapshot ids and pointers to the CLI.
  */
-export function orderFindings<T extends Pick<LookoutFinding, "repoKey">>(
-  findings: readonly T[],
-  preferredRepoKey: string | null,
-): T[] {
-  if (!preferredRepoKey) return [...findings];
-  return [
-    ...findings.filter((finding) => finding.repoKey === preferredRepoKey),
-    ...findings.filter((finding) => finding.repoKey !== preferredRepoKey),
-  ];
+export function plainRunSummary(summary: string): string {
+  const lines = summary
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^\s*(\[[^\]]*\]\s*)+/, "")
+        .replace(/\s*\[[A-Z][^\]]*\]/g, "")
+        .replace(/\s*\(details: lookout runs\)/gi, "")
+        .replace(/\b(\d+) finding\(s\)/g, (_, count: string) =>
+          count === "1" ? "1 finding" : `${count} findings`,
+        )
+        .replace(/^no change since last assessment\b.*$/i, "No change since the last check")
+        .trim(),
+    )
+    .filter(Boolean);
+  const text = lines.join(" ");
+  return text ? text[0]!.toUpperCase() + text.slice(1) : "";
 }
 
-export function formatCents(cents: number): string {
-  return `$${(Math.max(0, cents) / 100).toFixed(2)}`;
+/** One Lookout run in plain words; unknown kinds, statuses and triggers are left out, never shown raw. */
+export function describeRun(run: LookoutActivityRun): {
+  readonly title: string;
+  readonly detail: string;
+  readonly summary: string | null;
+} {
+  const kind = RUN_KINDS[run.kind] ?? "Lookout check";
+  const status = RUN_STATUSES[run.status];
+  const trigger = run.trigger
+    ?.split("+")
+    .map((part) => RUN_TRIGGERS[part])
+    .find(Boolean);
+  const finished = run.status === "done" || run.status === "skipped";
+  return {
+    title: `${kind} in ${run.repo}`,
+    detail: [status, trigger].filter(Boolean).join(", "),
+    // Other summaries carry the failure's internal reason; the status already says what happened.
+    summary: finished ? plainRunSummary(run.summary) || null : null,
+  };
 }
 
-export function budgetLabel(budget: LookoutStatus["budget"]): string {
-  return `${formatCents(budget.spentCents)} of ${formatCents(budget.capCents)} used in ${budget.windowHours} h`;
-}
-
-export function evidenceLocation(evidence: LookoutEvidence): string | null {
-  if (evidence.path) {
-    return evidence.lineStart === undefined
-      ? evidence.path
-      : `${evidence.path}:${evidence.lineStart}`;
+/** One session event in plain words. */
+export function describeEvent(event: LookoutActivityEvent): string {
+  const subagent = event.agentType ? " (subagent)" : "";
+  switch (event.kind) {
+    case "prompt":
+      return event.agentType ? "A subagent got a prompt" : "You sent a prompt";
+    case "edit":
+      return `Changed a file${subagent}`;
+    case "test":
+      return event.testStatus === "passed"
+        ? `Tests passed${subagent}`
+        : event.testStatus === "failed"
+          ? `Tests failed${subagent}`
+          : `Tests ran${subagent}`;
+    case "stop":
+      return `A turn ended${subagent}`;
   }
-  return evidence.command ?? null;
 }
-
-export const EVIDENCE_CHECK_LABELS = {
-  verified: "Verified",
-  failed: "Did not check out",
-  unverifiable: "Could not check",
-} as const;
-
-export function repositoriesLabel(count: number): string {
-  return count === 1 ? "1 repository" : `${count} repositories`;
-}
-
-/** The decision Lookout records for each finding action, with its button and prompt wording. */
-export const DECISION_COPY = {
-  accept: { label: "Accept", placeholder: "Why this is worth fixing" },
-  dismiss: { label: "Dismiss", placeholder: "Why this is not a problem" },
-  defer: { label: "Defer", placeholder: "Why this can wait" },
-} as const;
-
-export type LookoutReasonAction = keyof typeof DECISION_COPY;
 
 /** Pairs each item with a stable React key; repeats of the same base get a counter. */
 export function withKeys<T>(items: readonly T[], keyOf: (item: T) => string) {

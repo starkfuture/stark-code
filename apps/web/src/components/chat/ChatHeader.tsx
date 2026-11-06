@@ -50,6 +50,8 @@ interface ChatHeaderProps {
   parentThreadLink: { threadId: ThreadId; title: string } | null;
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
+  /** One more window-level control (Lookout) sits beside Tools, so keep clear of it. */
+  wideTitlebarControls?: boolean;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
   renderContent?: (actions: {
@@ -88,6 +90,7 @@ export const ChatHeader = memo(function ChatHeader({
   parentThreadLink,
   onOpenThread,
   rightPanelOpen,
+  wideTitlebarControls = false,
   onNewThreadInProject,
   onOpenProjectSettings,
   renderContent,
@@ -328,7 +331,7 @@ export const ChatHeader = memo(function ChatHeader({
       ref={breadcrumbContainerRef}
       className={cn(
         "flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
-        rightPanelOpen ? "pr-2" : "pr-24",
+        rightPanelOpen ? "pr-2" : wideTitlebarControls ? "pr-32" : "pr-24",
       )}
       onContextMenu={renderContent ? undefined : handleHeaderContextMenu}
     >

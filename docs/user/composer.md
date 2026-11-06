@@ -329,15 +329,20 @@ Claude or Codex program in the main conversation area. **Terminal below chat**
 controls the separate bottom drawer. Chat details, including branch and working
 folder controls, are also available in Tools.
 
-## Review with Lookout
+## Ask Lookout what you're forgetting
 
-Lookout is a separate reviewer that watches your Claude Code sessions on this
-Mac and speaks up only when it has evidence. In the desktop app, choose
-**Tools → Lookout** to see whether it is watching, its open findings (findings for
-the current folder come first), recent reviews and the repositories it watches.
-Accept, dismiss or defer a finding with a short reason; Lookout shows that reason
-to later reviews. Choose **All** to see closed findings and reopen one. **Pause**
-stops new reviews while events are still recorded.
+Lookout runs beside Claude Code on this Mac. It reads what you ask your
+sessions and speaks up only when it can quote what you're about to forget: a
+rule you wrote, something you said earlier, a question still waiting on you, or
+a fact that matters before something hard to undo. In the desktop app, choose
+the Lookout icon in the top bar, or **Tools → Lookout**. A dot on the icon means
+Lookout has said something you haven't seen.
+
+Each reminder quotes its source. **Send to session** adds it to that session's
+next turn, **Got it** files it, and **Not useful** tells Lookout to speak up less
+often about that kind of thing. You can also ask Lookout about your own sessions,
+such as "what's waiting on me?". The **…** menu pauses Lookout and shows the
+repositories it watches, what it has done recently, and today's budget.
 
 Lookout is installed separately. Until it is, the panel shows the install command.
 

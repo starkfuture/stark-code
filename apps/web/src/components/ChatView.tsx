@@ -10,6 +10,8 @@ import { requestConfirmDialog } from "../confirmDialog";
 import { NativeAgentShell, nativeAgentTerminalId } from "./NativeAgentShell";
 import { StarkPagesPanel } from "./StarkPagesPanel";
 import { LookoutPanel } from "./lookout/LookoutPanel";
+import { LookoutTopBarToggle } from "./lookout/LookoutTopBarToggle";
+import { useLookoutIndicator, useLookoutStatusWhileClosed } from "./lookout/lookoutStore";
 import { StarkPageTabContent } from "./StarkPageTabContent";
 import { ConversationPageTabs, conversationPageTabElementId } from "./ConversationPageTabs";
 import { selectStarkPageTabs, useStarkPageTabs, type StarkPageTarget } from "../starkPageTabs";
@@ -2798,10 +2800,19 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [hasPagesWorkspace, pagesTarget]);
   const pagesOpen = pagesAvailable && auxiliaryPanel === "pages";
-  // Lookout reviews Claude Code sessions on this computer, so it needs the desktop
-  // bridge. Its findings are sorted by folder only when the folder is local.
+  // Lookout watches Claude Code sessions on this computer, so it needs the desktop
+  // bridge. Watched repos mark this conversation's folder only when it is local.
   const lookoutAvailable = isElectron && window.desktopBridge?.lookout !== undefined;
   const lookoutOpen = lookoutAvailable && auxiliaryPanel === "lookout";
+  // The top bar's dot needs Lookout's unread count while its panel is closed.
+  useLookoutStatusWhileClosed(
+    lookoutAvailable ? window.desktopBridge?.lookout : undefined,
+    !lookoutOpen,
+  );
+  const lookoutToggleShown =
+    useLookoutIndicator((state) => state.installed === true || lookoutOpen) &&
+    lookoutAvailable &&
+    activeThreadRef !== null;
   const pageWorkspaceKey =
     activeThreadKey && activeProject
       ? JSON.stringify([activeThreadKey, activeThread?.worktreePath ?? activeProject.workspaceRoot])
@@ -12084,7 +12095,7 @@ export default function ChatView(props: ChatViewProps) {
       window.requestAnimationFrame(() => focusComposer());
     }
   };
-  const panelToggleControls = (
+  const workspaceToolsMenu = (
     <WorkspaceToolsMenu
       actions={[
         {
@@ -12114,7 +12125,7 @@ export default function ChatView(props: ChatViewProps) {
           label: "Lookout",
           disabled: !lookoutAvailable || !activeThreadRef,
           description: lookoutAvailable
-            ? "Your independent reviewer"
+            ? "Reminds you what you're about to forget"
             : "Lookout runs in the Stark Code desktop app",
           active: lookoutOpen,
           onSelect: () => {
@@ -12255,13 +12266,32 @@ export default function ChatView(props: ChatViewProps) {
               id: "connections",
               label: "Manage connections",
               onSelect: () => {
-                void navigate({ to: "/settings/mcp-servers", search: { machine: environmentId } });
+                void navigate({
+                  to: "/settings/mcp-servers",
+                  search: { machine: environmentId },
+                });
               },
             },
           ],
         },
       ]}
     />
+  );
+  // Window-level controls beside the chat or in a docked tool's header.
+  const panelToggleControls = (
+    <>
+      {lookoutToggleShown ? (
+        <LookoutTopBarToggle
+          open={lookoutOpen}
+          onToggle={() => {
+            if (lookoutOpen) closeAuxiliaryPanel();
+            else if (activeThreadRef)
+              useRightPanelStore.getState().openAuxiliary(activeThreadRef, "lookout");
+          }}
+        />
+      ) : null}
+      {workspaceToolsMenu}
+    </>
   );
   const closeToolsControl = (
     <Tooltip>
@@ -12374,6 +12404,7 @@ export default function ChatView(props: ChatViewProps) {
             parentThreadLink={parentThreadLink}
             onOpenThread={onOpenRelatedThread}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
+            wideTitlebarControls={lookoutToggleShown}
             onNewThreadInProject={handleNewThreadInActiveProject}
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
@@ -13204,7 +13235,6 @@ export default function ChatView(props: ChatViewProps) {
                   : null
               }
               timestampFormat={timestampFormat}
-              onQuote={quoteTextInChat}
               onClose={closeAuxiliaryPanel}
             />
           ) : null}
@@ -13239,7 +13269,7 @@ export default function ChatView(props: ChatViewProps) {
         >
           <RightPanelTabs
             mode="inline"
-            titlebarControlsWidth={148}
+            titlebarControlsWidth={lookoutToggleShown ? 180 : 148}
             open={rightPanelOpen}
             keybindings={keybindings}
             getShortcutContext={getShortcutContext}

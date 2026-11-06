@@ -104,3 +104,22 @@ it("dismisses with Escape and returns keyboard focus to Tools", async () => {
   expect(showPages).not.toHaveBeenCalled();
   expect(showConversation).not.toHaveBeenCalled();
 });
+
+it("is an icon named Tools, with a Tools tooltip", async () => {
+  await render();
+  expect(trigger().textContent).toBe("");
+  expect(trigger().querySelector("svg")).not.toBeNull();
+  await act(async () => {
+    trigger().dispatchEvent(
+      new PointerEvent("pointerenter", { bubbles: true, pointerType: "mouse" }),
+    );
+    trigger().dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    trigger().dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse" }),
+    );
+    trigger().dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 900));
+  });
+  const tooltip = [...document.querySelectorAll('[data-slot="tooltip-popup"], [role="tooltip"]')];
+  expect(tooltip.map((element) => element.textContent)).toContain("Tools");
+});

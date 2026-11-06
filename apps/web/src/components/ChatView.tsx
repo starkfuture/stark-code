@@ -13264,7 +13264,7 @@ export default function ChatView(props: ChatViewProps) {
         >
           <RightPanelTabs
             mode="inline"
-            titlebarControlsWidth={pilotToggleShown ? 180 : 148}
+            titlebarControlsWidth={pilotToggleShown ? 136 : 104}
             open={rightPanelOpen}
             keybindings={keybindings}
             getShortcutContext={getShortcutContext}

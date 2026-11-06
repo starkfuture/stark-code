@@ -1,11 +1,11 @@
 import {
   CheckIcon,
-  ChevronDownIcon,
   FileTextIcon,
   LayoutGridIcon,
   MessageCircleIcon,
   ScanEyeIcon,
   TerminalIcon,
+  ToolboxIcon,
 } from "lucide-react";
 import { Fragment } from "react";
 
@@ -22,6 +22,7 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface WorkspaceToolsMenuAction {
   id: string;
@@ -77,16 +78,37 @@ function ToolItem({
   );
 }
 
-/** Everyday tools stay one click away; less common tools are revealed on request. */
+/**
+ * Everyday tools stay one click away; less common tools are revealed on request.
+ * The trigger is an icon beside the window's other controls, named "Tools".
+ */
 export function WorkspaceToolsMenu({ actions, moreGroups }: WorkspaceToolsMenuProps) {
   const visibleGroups = moreGroups.filter((group) => group.actions.length > 0);
 
   return (
     <Menu>
-      <MenuTrigger render={<Button variant="ghost" size="sm" aria-label="Tools" />}>
-        Tools
-        <ChevronDownIcon aria-hidden />
-      </MenuTrigger>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <MenuTrigger
+              render={
+                <Button
+                  className="shrink-0 [-webkit-app-region:no-drag]"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Tools"
+                />
+              }
+            />
+          }
+        >
+          {/* Drawn like the Pilot eye beside it: the control's own color at 80%. */}
+          <ToolboxIcon aria-hidden className="size-4 text-current opacity-80" />
+        </TooltipTrigger>
+        <TooltipPopup side="bottom" positionMethod="fixed">
+          Tools
+        </TooltipPopup>
+      </Tooltip>
       <MenuPopup align="end" positionMethod="fixed">
         <div className="w-56 max-w-[calc(100vw-3rem)]">
           {actions.map((action) => (

@@ -6,8 +6,10 @@ import {
   describeRun,
   emptyThreadText,
   installAction,
-  installNote,
-  installPlanText,
+  installBlocker,
+  installDetails,
+  installHeadline,
+  pilotStatusLine,
   newestOpenNudgeId,
   quoteNamesSession,
   pilotWatchState,
@@ -346,70 +348,112 @@ describe("installing Pilot", () => {
     target: "~/.pilot/plugin/0.4.0",
     replaces: [],
     installsCopy: true,
-    claudeBin: "claude-personal",
-    envOnlySettings: [],
+    claudeBin: null,
+    carriedSettings: [],
+    missingSettings: [],
     configFile: "~/.pilot/config.json",
     note: null,
     ...overrides,
   });
+  const checkout = { id: "pilot@pilot", version: "0.3.0", source: "~/Desktop/work/dev-copilot" };
+  const lookout = { id: "lookout@lookout", version: "0.2.0", source: null };
 
-  it("offers Install, Update or nothing", () => {
+  it("offers Install, Update, Remove or nothing", () => {
     expect(installAction(null)).toBeNull();
     expect(installAction(plugin())).toBe("Install");
-    expect(installAction(plugin({ state: "legacy" }))).toBe("Install");
+    expect(installAction(plugin({ state: "legacy", replaces: [checkout] }))).toBe("Install");
+    expect(
+      installAction(plugin({ state: "legacy", replaces: [lookout], installsCopy: false })),
+    ).toBe("Remove");
     expect(installAction(plugin({ state: "update" }))).toBe("Update");
     expect(installAction(plugin({ state: "installed" }))).toBeNull();
     expect(installAction(plugin({ state: "unsupported" }))).toBeNull();
   });
 
-  it("says in one sentence what changes in Claude Code", () => {
-    expect(installPlanText(plugin())).toBe(
-      "Adds Pilot 0.4.0 to Claude Code (~/.claude) from a fixed copy in ~/.pilot/plugin/0.4.0.",
+  it("says what changes in one short line, without paths", () => {
+    expect(installHeadline(plugin())).toBe("Pilot isn't installed in Claude Code.");
+    expect(installHeadline(plugin({ state: "legacy", replaces: [lookout, checkout] }))).toBe(
+      "Replaces the Pilot running from dev-copilot.",
+    );
+    expect(installHeadline(plugin({ state: "legacy", replaces: [lookout] }))).toBe(
+      "Replaces Lookout.",
     );
     expect(
-      installPlanText(
-        plugin({
-          state: "legacy",
-          replaces: [{ id: "pilot@pilot", version: "0.3.0", source: "~/work/dev-copilot" }],
-        }),
-      ),
-    ).toBe(
-      "Replaces the Pilot that Claude Code (~/.claude) reads from ~/work/dev-copilot with a fixed copy of Pilot 0.4.0 in ~/.pilot/plugin/0.4.0.",
-    );
-    expect(
-      installPlanText(
-        plugin({
-          state: "legacy",
-          replaces: [{ id: "lookout@lookout", version: "0.2.0", source: null }],
-        }),
-      ),
-    ).toBe(
-      "Removes Lookout and adds Pilot 0.4.0 to Claude Code (~/.claude) from a fixed copy in ~/.pilot/plugin/0.4.0.",
-    );
-    expect(
-      installPlanText(
-        plugin({
-          state: "legacy",
-          installedVersion: "0.4.0",
-          installsCopy: false,
-          replaces: [{ id: "lookout@lookout", version: "0.2.0", source: null }],
-        }),
-      ),
-    ).toBe("Removes Lookout from Claude Code (~/.claude); Pilot 0.4.0 stays.");
-    expect(installPlanText(plugin({ state: "update", installedVersion: "0.3.0" }))).toBe(
-      "Updates Pilot 0.3.0 to 0.4.0 in Claude Code (~/.claude), from a fixed copy in ~/.pilot/plugin/0.4.0.",
+      installHeadline(plugin({ state: "legacy", replaces: [lookout], installsCopy: false })),
+    ).toBe("Lookout still runs beside Pilot.");
+    expect(installHeadline(plugin({ state: "update", installedVersion: "0.3.0" }))).toBe(
+      "Pilot 0.4.0 is available.",
     );
   });
 
-  it("waits for settings a replaced checkout kept in its .env, and names the default claude", () => {
-    expect(installNote(plugin({ envOnlySettings: ["claude_bin", "mode"] }))).toEqual({
-      blocks: true,
-      text: "First add claude_bin and mode to ~/.pilot/config.json: the Pilot being replaced reads them from its folder's .env, which the fixed copy does not have.",
+  it("keeps paths, the Claude command and carried settings in the details", () => {
+    expect(
+      installDetails(
+        plugin({
+          state: "legacy",
+          replaces: [checkout],
+          claudeBin: "/opt/claude-personal",
+          carriedSettings: ["claude_bin"],
+        }),
+      ),
+    ).toEqual([
+      { label: "Claude Code", value: "~/.claude" },
+      { label: "Copies to", value: "~/.pilot/plugin/0.4.0 (Pilot 0.4.0)" },
+      { label: "Replaces", value: "pilot@pilot from ~/Desktop/work/dev-copilot" },
+      { label: "Thinks with", value: "/opt/claude-personal" },
+      { label: "Settings", value: "Carries claude_bin into ~/.pilot/config.json" },
+    ]);
+    expect(installDetails(plugin()).at(-2)).toEqual({
+      label: "Thinks with",
+      value: "claude from your PATH",
     });
-    expect(installNote(plugin({ claudeBin: null }))).toEqual({
-      blocks: false,
-      text: "Pilot will use the claude command on your PATH; set claude_bin in ~/.pilot/config.json to use another.",
+  });
+
+  it("waits only for settings it could not read", () => {
+    expect(installBlocker(plugin())).toBeNull();
+    expect(installBlocker(plugin({ missingSettings: ["claude_bin", "mode"] }))).toBe(
+      "Add claude_bin and mode to ~/.pilot/config.json first.",
+    );
+  });
+});
+
+describe("pilotStatusLine", () => {
+  const ok = {
+    selftest: { ok: true, reason: "passed" },
+    budget: { windowHours: 24, capCents: 1000, spentCents: 0, availableCents: 1000 },
+  };
+  const held = {
+    ...ok,
+    selftest: { ok: false, reason: "no local self-test recorded: run `pilot selftest`" },
+  };
+  const line = (overrides: Partial<Parameters<typeof pilotStatusLine>[0]>) =>
+    pilotStatusLine({
+      error: null,
+      status: ok,
+      watch: "watching",
+      installedVersion: null,
+      selftest: "idle",
+      ...overrides,
     });
-    expect(installNote(plugin())).toBeNull();
+
+  it("shows one line, by priority, and never the raw self-test reason", () => {
+    expect(line({})).toBeNull();
+    expect(line({ watch: "not-running" })?.kind).toBe("not-running");
+    expect(line({ status: held, watch: "not-running" })).toEqual({
+      kind: "on-hold",
+      text: "Pilot is on hold until it passes a self-test.",
+    });
+    expect(
+      line({ status: held, watch: "not-running", error: "Could not reach Pilot." })?.kind,
+    ).toBe("error");
+    expect(line({ status: held, selftest: "failed" })?.text).toBe(
+      "The self-test did not pass, so Pilot stays on hold.",
+    );
+    expect(line({ watch: "not-running", installedVersion: "0.4.0" })?.text).toBe(
+      "Pilot 0.4.0 is installed. It starts with your next Claude Code session.",
+    );
+    expect(line({ status: { ...ok, budget: { ...ok.budget, availableCents: 0 } } })?.kind).toBe(
+      "budget",
+    );
   });
 });

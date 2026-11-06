@@ -475,7 +475,8 @@ const PLUGIN: PilotInstallStatus = {
   replaces: [],
   installsCopy: true,
   claudeBin: null,
-  envOnlySettings: [],
+  carriedSettings: [],
+  missingSettings: [],
   configFile: "~/.pilot/config.json",
   note: null,
 };
@@ -485,20 +486,21 @@ const INSTALLED: PilotInstallStatus = {
   installedVersion: "0.4.0",
   installsCopy: false,
 };
+const CHECKOUT = { id: "pilot@pilot", version: "0.3.0", source: "~/Desktop/work/dev-copilot" };
 
-it("installs Pilot from the panel after saying what it changes", async () => {
+it("installs Pilot with one line and a button, paths folded into Details", async () => {
   bridge.status.mockResolvedValue({ installed: false, launcher: "/Users/me/.pilot/bin/pilot" });
   bridge.installStatus = vi.fn(async () => ({ ok: true, value: PLUGIN }));
   bridge.install = vi.fn(async () => ({ ok: true, value: INSTALLED }));
   await render();
-  const text = container.textContent ?? "";
-  expect(text).toContain(
-    "Adds Pilot 0.4.0 to Claude Code (~/.claude) from a fixed copy in ~/.pilot/plugin/0.4.0.",
-  );
-  expect(text).toContain("Pilot will use the claude command on your PATH");
-  expect(text).not.toContain("scripts/pilot install");
+  expect(container.textContent).toContain("Pilot isn't installed");
+  expect(container.textContent).not.toContain("~/.pilot");
+  expect(container.textContent).not.toContain("scripts/pilot install");
+  await click("Details");
+  expect(container.textContent).toContain("~/.pilot/plugin/0.4.0");
+  expect(container.textContent).toContain("claude from your PATH");
   expect(bridge.install).not.toHaveBeenCalled();
-  await click("Install Pilot");
+  await click("Install");
   expect(bridge.install).toHaveBeenCalledTimes(1);
   expect(container.textContent).toContain("Pilot 0.4.0 is installed");
   expect(container.textContent).toContain("It starts with your next Claude Code session.");
@@ -507,37 +509,35 @@ it("installs Pilot from the panel after saying what it changes", async () => {
   expect(container.textContent).not.toContain("Not installed");
 });
 
-it("waits for settings a replaced checkout keeps in its .env", async () => {
+it("replaces a checkout from one quiet row, and waits only for settings it could not read", async () => {
   bridge.installStatus = vi.fn(async () => ({
     ok: true,
     value: {
       ...PLUGIN,
       state: "legacy",
-      replaces: [{ id: "pilot@pilot", version: "0.3.0", source: "~/work/dev-copilot" }],
-      envOnlySettings: ["claude_bin", "mode"],
+      replaces: [CHECKOUT],
+      missingSettings: ["claude_bin", "mode"],
     },
   }));
   bridge.install = vi.fn();
   await render();
-  const text = container.textContent ?? "";
-  expect(text).toContain(
-    "Replaces the Pilot that Claude Code (~/.claude) reads from ~/work/dev-copilot",
-  );
-  expect(text).toContain("First add claude_bin and mode to ~/.pilot/config.json");
+  expect(container.textContent).toContain("Replaces the Pilot running from dev-copilot.");
+  expect(container.textContent).not.toContain("~/Desktop/work/dev-copilot");
+  expect(container.textContent).toContain("Add claude_bin and mode to ~/.pilot/config.json first.");
   expect(button("Install").disabled).toBe(true);
   expect(bridge.install).not.toHaveBeenCalled();
 });
 
-it("updates an older fixed copy from a quiet row above the thread", async () => {
+it("updates an older fixed copy and confirms it in the one status line", async () => {
   bridge.installStatus = vi.fn(async () => ({
     ok: true,
     value: { ...PLUGIN, state: "update", installedVersion: "0.3.0", claudeBin: "claude" },
   }));
   bridge.install = vi.fn(async () => ({ ok: true, value: INSTALLED }));
   await render();
-  expect(container.textContent).toContain("Updates Pilot 0.3.0 to 0.4.0");
+  expect(container.textContent).toContain("Pilot 0.4.0 is available.");
   await click("Update");
-  expect(container.textContent).not.toContain("Updates Pilot 0.3.0 to 0.4.0");
+  expect(container.textContent).not.toContain("is available");
   expect(container.textContent).toContain(
     "Pilot 0.4.0 is installed. New Claude Code sessions use it.",
   );
@@ -574,8 +574,58 @@ it("shows why an install stopped and keeps the offer", async () => {
     error: "Claude Code could not install Pilot.",
   }));
   await render();
+  expect(container.textContent).toContain("Replaces Lookout.");
   await click("Install");
   expect(container.textContent).toContain("Claude Code could not install Pilot.");
+  expect(button("Install").disabled).toBe(false);
+});
+
+it("shows one status line, on hold first, and runs the self-test from it", async () => {
+  bridge.status.mockResolvedValue(
+    ok({
+      ...STATUS,
+      daemon: { running: false, pid: null, heartbeatAt: null },
+      selftest: { ok: false, reason: "no local self-test recorded: run `pilot selftest`" },
+    }),
+  );
+  bridge.selftest = vi.fn(async () => ok({ passed: false }));
+  await render();
+  const text = container.textContent ?? "";
+  expect(text).toContain("Pilot is on hold until it passes a self-test.");
+  expect(text).not.toContain("Pilot isn't running");
+  expect(text).not.toContain("no local self-test recorded");
+  await click("Run self-test");
+  expect(bridge.selftest).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toContain("The self-test did not pass, so Pilot stays on hold.");
+});
+
+it("uninstalls from the options menu after one confirming line, and offers Install again", async () => {
+  bridge.installStatus = vi.fn(async () => ({ ok: true, value: INSTALLED }));
+  bridge.install = vi.fn();
+  bridge.uninstall = vi.fn(async () => ({ ok: true, value: PLUGIN }));
+  await render();
+  await click("Pilot options");
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((candidate) =>
+    candidate.textContent?.includes("Uninstall Pilot"),
+  );
+  await act(async () => item!.click());
+  await settle();
+  expect(container.textContent).toContain(
+    "Remove Pilot from Claude Code? Its history and settings stay.",
+  );
+  expect(bridge.uninstall).not.toHaveBeenCalled();
+  await click("Cancel");
+  expect(container.textContent).not.toContain("Remove Pilot from Claude Code?");
+
+  await click("Pilot options");
+  const again = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((candidate) =>
+    candidate.textContent?.includes("Uninstall Pilot"),
+  );
+  await act(async () => again!.click());
+  await settle();
+  await click("Uninstall");
+  expect(bridge.uninstall).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toContain("Pilot isn't installed in Claude Code.");
   expect(button("Install").disabled).toBe(false);
 });
 

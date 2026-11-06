@@ -44,59 +44,107 @@ export function codexPlanLabel(codex: PilotSettings["engines"]["codex"]): string
   return `Uses your Codex plan · ${left === 1 ? "1 run" : `${left} runs`} left today`;
 }
 
-/** The button the panel offers for Claude Code's Pilot, or null when there is nothing to do. */
-export function installAction(status: PilotInstallStatus | null): "Install" | "Update" | null {
-  if (status === null) return null;
-  if (status.state === "update") return "Update";
-  return status.state === "not-installed" || status.state === "legacy" ? "Install" : null;
-}
-
 const isLookout = (id: string) => id.startsWith("lookout@");
 
-/** What pressing Install or Update changes in the person's Claude Code, in one sentence. */
-export function installPlanText(status: PilotInstallStatus): string {
-  const version = status.bundledVersion ?? "";
-  const claudeCode = `Claude Code (${status.profile})`;
-  const removesLookout = status.replaces.some((plugin) => isLookout(plugin.id));
-  const other = status.replaces.find((plugin) => !isLookout(plugin.id));
-  const copy = `a fixed copy`;
-  const change = !status.installsCopy
-    ? null
-    : other
-      ? `replaces the Pilot that ${claudeCode} ${other.source ? `reads from ${other.source}` : `installs as ${other.id}`} with ${copy} of Pilot ${version}`
-      : status.state === "update"
-        ? `updates Pilot ${status.installedVersion} to ${version} in ${claudeCode}, from ${copy}`
-        : `adds Pilot ${version} to ${claudeCode} from ${copy}`;
-  const where = change ? ` in ${status.target}` : "";
-  const sentence = removesLookout
-    ? change
-      ? `removes Lookout and ${change}`
-      : `removes Lookout from ${claudeCode}; Pilot ${status.installedVersion} stays`
-    : (change ?? "");
-  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}${where}.`;
+const listNames = (names: readonly string[]) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
+/** The button the panel offers for Claude Code's Pilot, or null when there is nothing to do. */
+export function installAction(
+  status: PilotInstallStatus | null,
+): "Install" | "Update" | "Remove" | null {
+  if (status === null) return null;
+  if (status.state === "update") return "Update";
+  if (status.state === "legacy") return status.installsCopy ? "Install" : "Remove";
+  return status.state === "not-installed" ? "Install" : null;
 }
 
-/**
- * What must happen first, or what the person should know: settings a replaced
- * checkout kept in its `.env`, or which Claude command Pilot will use.
- */
-export function installNote(status: PilotInstallStatus): {
-  readonly blocks: boolean;
+/** One short line on what Install, Update or Remove is about; paths stay in the details. */
+export function installHeadline(status: PilotInstallStatus): string {
+  if (status.state === "update") return `Pilot ${status.bundledVersion} is available.`;
+  if (status.state !== "legacy") return "Pilot isn't installed in Claude Code.";
+  const other = status.replaces.find((plugin) => !isLookout(plugin.id));
+  if (other)
+    return other.source
+      ? `Replaces the Pilot running from ${other.source.replace(/\/+$/, "").split("/").pop()}.`
+      : `Replaces the Pilot installed as ${other.id}.`;
+  return status.installsCopy ? "Replaces Lookout." : "Lookout still runs beside Pilot.";
+}
+
+/** What must happen before installing, in one line, or null. */
+export function installBlocker(status: PilotInstallStatus): string | null {
+  return status.missingSettings.length > 0
+    ? `Add ${listNames(status.missingSettings)} to ${status.configFile} first.`
+    : null;
+}
+
+/** Where things go and what changes, for the details under the headline. */
+export function installDetails(
+  status: PilotInstallStatus,
+): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+  return [
+    { label: "Claude Code", value: status.profile },
+    ...(status.installsCopy && status.target
+      ? [{ label: "Copies to", value: `${status.target} (Pilot ${status.bundledVersion})` }]
+      : []),
+    ...status.replaces.map((plugin) => ({
+      label: "Replaces",
+      value: plugin.source ? `${plugin.id} from ${plugin.source}` : plugin.id,
+    })),
+    { label: "Thinks with", value: status.claudeBin ?? "claude from your PATH" },
+    {
+      label: "Settings",
+      value:
+        status.carriedSettings.length > 0
+          ? `Carries ${listNames(status.carriedSettings)} into ${status.configFile}`
+          : status.missingSettings.length > 0
+            ? `Could not read ${listNames(status.missingSettings)} from the Pilot being replaced`
+            : status.configFile,
+    },
+  ];
+}
+
+export type PilotStatusLine = {
+  readonly kind: "error" | "on-hold" | "installed" | "not-running" | "budget";
   readonly text: string;
-} | null {
-  const names = status.envOnlySettings;
-  if (names.length > 0) {
-    const list =
-      names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+};
+
+/**
+ * The one status line above the thread, by priority: what just failed, a
+ * self-test hold, a fresh install, Pilot not running, then the budget.
+ */
+export function pilotStatusLine(input: {
+  readonly error: string | null;
+  readonly status: Pick<PilotStatus, "selftest" | "budget">;
+  readonly watch: PilotWatchState;
+  readonly installedVersion: string | null;
+  readonly selftest: "idle" | "running" | "failed";
+}): PilotStatusLine | null {
+  if (input.error) return { kind: "error", text: input.error };
+  if (!input.status.selftest.ok)
     return {
-      blocks: true,
-      text: `First add ${list} to ${status.configFile}: the Pilot being replaced reads ${names.length === 1 ? "it" : "them"} from its folder's .env, which the fixed copy does not have.`,
+      kind: "on-hold",
+      text:
+        input.selftest === "running"
+          ? "Running the self-test. It takes about a minute."
+          : input.selftest === "failed"
+            ? "The self-test did not pass, so Pilot stays on hold."
+            : "Pilot is on hold until it passes a self-test.",
     };
-  }
-  if (status.claudeBin === null)
+  if (input.installedVersion)
     return {
-      blocks: false,
-      text: `Pilot will use the claude command on your PATH; set claude_bin in ${status.configFile} to use another.`,
+      kind: "installed",
+      text: `Pilot ${input.installedVersion} is installed. ${input.watch === "not-running" ? "It starts with your next Claude Code session." : "New Claude Code sessions use it."}`,
+    };
+  if (input.watch === "not-running")
+    return {
+      kind: "not-running",
+      text: "Pilot isn't running. It starts with your next Claude Code session.",
+    };
+  if (input.status.budget.availableCents <= 0)
+    return {
+      kind: "budget",
+      text: "Today's budget is used up. Pilot speaks up again when budget frees.",
     };
   return null;
 }

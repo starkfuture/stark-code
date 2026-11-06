@@ -16,14 +16,24 @@ import {
   ActivityIcon,
   ArrowUpIcon,
   ChevronLeftIcon,
+  ChevronRightIcon,
   FolderGit2Icon,
   InfoIcon,
   MoreHorizontalIcon,
   PauseIcon,
   PlayIcon,
   ScanEyeIcon,
+  Trash2Icon,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { cn } from "~/lib/utils";
 import { ConversationToolsPanel } from "../chat/ConversationToolsPanel";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
@@ -56,8 +66,10 @@ import {
   chatSupported,
   emptyThreadText,
   installAction,
-  installNote,
-  installPlanText,
+  installBlocker,
+  installDetails,
+  installHeadline,
+  pilotStatusLine,
   pilotWatchState,
   mergeMessages,
   newestMessageId,
@@ -171,13 +183,13 @@ function usePilotChat(bridge: PilotBridge, active: boolean) {
   };
 }
 
-/** Claude Code's Pilot plugin: checked when the panel opens, and installed or updated on request. */
+/** Claude Code's Pilot plugin: checked when the panel opens, and installed, updated or removed on request. */
 function usePilotInstall(bridge: PilotBridge, active: boolean, onChanged: () => void) {
   const [status, setStatus] = useState<PilotInstallStatus | null>(null);
   const [checked, setChecked] = useState(false);
   /** Why Claude Code's plugins could not be read, such as a missing `claude` command. */
   const [checkError, setCheckError] = useState<string | null>(null);
-  const [installing, setInstalling] = useState(false);
+  const [busy, setBusy] = useState<"install" | "uninstall" | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The version just installed from this panel, for one quiet confirmation. */
   const [installed, setInstalled] = useState<string | null>(null);
@@ -202,74 +214,128 @@ function usePilotInstall(bridge: PilotBridge, active: boolean, onChanged: () => 
     if (active && Date.now() - lastCheck.current > INSTALL_RECHECK_MS) void check();
   }, [active, check]);
 
-  const install = async () => {
-    if (!bridge.install || installing) return;
-    setInstalling(true);
+  const change = async (kind: "install" | "uninstall") => {
+    const call = kind === "install" ? bridge.install : bridge.uninstall;
+    if (!call || busy) return;
+    setBusy(kind);
     setError(null);
     try {
-      const result = await bridge.install();
+      const result = await call();
       if (!result.ok) setError(result.error);
       else {
         setStatus(result.value);
-        if (result.value.state === "installed")
-          setInstalled(result.value.installedVersion ?? result.value.bundledVersion);
+        setInstalled(
+          kind === "install" && result.value.state === "installed"
+            ? (result.value.installedVersion ?? result.value.bundledVersion)
+            : null,
+        );
       }
     } catch {
-      setError("Stark Code could not install Pilot. Try again.");
+      setError(`Stark Code could not ${kind} Pilot. Try again.`);
     } finally {
-      setInstalling(false);
+      setBusy(null);
       onChanged();
     }
   };
 
   return {
     supported: bridge.installStatus !== undefined && bridge.install !== undefined,
+    canUninstall:
+      bridge.uninstall !== undefined &&
+      (status?.state === "installed" || status?.state === "update" || status?.state === "legacy"),
     checked,
     checkError,
     status,
-    installing,
+    busy,
     error,
     installed,
     check,
-    install,
+    install: () => change("install"),
+    uninstall: () => change("uninstall"),
   };
 }
 
 type PilotInstall = ReturnType<typeof usePilotInstall>;
 
-/** Install or Update, after one sentence on what it changes in Claude Code. */
 function InstallButton({ install, label }: { install: PilotInstall; label: string }) {
-  const note = install.status ? installNote(install.status) : null;
+  const blocked = install.status ? installBlocker(install.status) !== null : false;
   return (
     <Button
       size="xs"
       variant="outline"
-      disabled={install.installing || note?.blocks === true}
+      disabled={install.busy !== null || blocked}
       onClick={() => void install.install()}
     >
-      {install.installing ? (label.startsWith("Update") ? "Updating…" : "Installing…") : label}
+      {install.busy === "install" ? `${label === "Update" ? "Updating" : "Installing"}…` : label}
     </Button>
   );
 }
 
-/** A quiet row above the thread when Claude Code runs Lookout, a checkout or an older Pilot. */
+/** Where Pilot goes and what it replaces, folded away until asked for. */
+function InstallDetails({ status }: { status: PilotInstallStatus }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-1">
+      <Button size="micro" variant="quiet" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <ChevronRightIcon aria-hidden className={cn("transition-transform", open && "rotate-90")} />
+        Details
+      </Button>
+      {open ? (
+        <dl className="grid w-full grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-left text-xs text-muted-foreground">
+          {installDetails(status).map((row) => (
+            <Fragment key={`${row.label}:${row.value}`}>
+              <dt className="whitespace-nowrap">{row.label}</dt>
+              <dd className="break-all text-foreground/80">{row.value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : null}
+    </div>
+  );
+}
+
+/** One quiet row above the thread when Claude Code runs Lookout, a checkout, an older Pilot or none. */
 function InstallRow({ install }: { install: PilotInstall }) {
   const action = installAction(install.status);
   if (!install.status || !action) return null;
-  const note = installNote(install.status);
+  const blocker = installBlocker(install.status);
   return (
-    <div className="flex items-start gap-2 px-3 py-2 text-xs">
-      <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1 space-y-1 break-words">
-        <p className="text-muted-foreground">{installPlanText(install.status)}</p>
-        {note?.blocks ? <p className="text-warning-foreground">{note.text}</p> : null}
-        {install.error ? (
-          <p role="alert" className="text-destructive-foreground">
-            {install.error}
-          </p>
-        ) : null}
+    <div className="flex flex-col gap-1 px-3 py-2 text-xs">
+      <div className="flex items-center gap-2">
+        <p className="min-w-0 flex-1 break-words text-muted-foreground">
+          {installHeadline(install.status)}
+        </p>
+        <InstallButton install={install} label={action} />
       </div>
-      <InstallButton install={install} label={action} />
+      {blocker ? <p className="break-words text-warning-foreground">{blocker}</p> : null}
+      {install.error ? (
+        <p role="alert" className="break-words text-destructive-foreground">
+          {install.error}
+        </p>
+      ) : null}
+      <InstallDetails status={install.status} />
+    </div>
+  );
+}
+
+/** Asks once before removing Pilot from Claude Code; Pilot's own data stays. */
+function UninstallRow({ install, onDone }: { install: PilotInstall; onDone: () => void }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 text-xs">
+      <p className="min-w-0 flex-1 break-words text-muted-foreground">
+        Remove Pilot from Claude Code? Its history and settings stay.
+      </p>
+      <Button
+        size="xs"
+        variant="destructive-outline"
+        disabled={install.busy !== null}
+        onClick={() => void install.uninstall().then(onDone)}
+      >
+        {install.busy === "uninstall" ? "Uninstalling…" : "Uninstall"}
+      </Button>
+      <Button size="xs" variant="ghost" disabled={install.busy !== null} onClick={onDone}>
+        Cancel
+      </Button>
     </div>
   );
 }
@@ -298,9 +364,9 @@ function NotInstalled({
 }) {
   const plugin = install.status;
   const action = installAction(plugin);
-  const note = plugin ? installNote(plugin) : null;
+  const blocker = plugin ? installBlocker(plugin) : null;
   // The plugin is in Claude Code, but no session has started Pilot yet.
-  if (plugin?.state === "installed" && !install.installing)
+  if (plugin?.state === "installed" && install.busy === null)
     return (
       <CenteredState>
         <Empty size="compact">
@@ -326,32 +392,23 @@ function NotInstalled({
           <EmptyMedia variant="icon">
             <ScanEyeIcon aria-hidden />
           </EmptyMedia>
-          <EmptyTitle>Pilot isn't installed</EmptyTitle>
-          <EmptyDescription>
-            Pilot reads what you ask your Claude Code sessions and speaks up when you're about to
-            forget something.
-          </EmptyDescription>
+          <EmptyTitle>
+            {plugin && plugin.state !== "not-installed" && action
+              ? installHeadline(plugin)
+              : "Pilot isn't installed"}
+          </EmptyTitle>
+          {blocker ? <p className="text-sm text-warning-foreground">{blocker}</p> : null}
         </EmptyHeader>
         <EmptyContent>
           {plugin && action ? (
             <>
-              <p className="text-xs break-words text-muted-foreground">{installPlanText(plugin)}</p>
-              {note ? (
-                <p
-                  className={cn(
-                    "text-xs break-words",
-                    note.blocks ? "text-warning-foreground" : "text-muted-foreground",
-                  )}
-                >
-                  {note.text}
-                </p>
-              ) : null}
-              <InstallButton install={install} label={`${action} Pilot`} />
+              <InstallButton install={install} label={action} />
               {install.error ? (
                 <p role="alert" className="text-xs break-words text-destructive-foreground">
                   {install.error}
                 </p>
               ) : null}
+              <InstallDetails status={plugin} />
             </>
           ) : install.supported && !install.checked ? (
             <p className="text-xs text-muted-foreground">Checking Claude Code's plugins…</p>
@@ -385,24 +442,28 @@ function NotInstalled({
 /** One quiet line above the thread: why Pilot may stay silent, or what just failed. */
 function ThreadNotice({
   tone = "muted",
+  action,
   children,
 }: {
   tone?: "muted" | "warning" | "error";
+  /** One button for the one thing to do about it. */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <p
+    <div
       role={tone === "error" ? "alert" : "status"}
       className={cn(
-        "flex items-start gap-1.5 px-3 py-2 text-xs break-words",
+        "flex items-center gap-1.5 px-3 py-2 text-xs break-words",
         tone === "muted" && "text-muted-foreground",
         tone === "warning" && "text-warning-foreground",
         tone === "error" && "text-destructive-foreground",
       )}
     >
-      <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0" />
-      <span className="min-w-0">{children}</span>
-    </p>
+      <InfoIcon aria-hidden className="size-3.5 shrink-0" />
+      <span className="min-w-0 flex-1">{children}</span>
+      {action}
+    </div>
   );
 }
 
@@ -515,6 +576,26 @@ export function PilotContent({
   const chat = usePilotChat(bridge, active);
   const { status, messages, refreshStatus, refreshThread, applyMessages } = chat;
   const install = usePilotInstall(bridge, active, () => refreshStatus());
+  const [confirmUninstall, setConfirmUninstall] = useState(false);
+  const [selftestRun, setSelftestRun] = useState<"idle" | "running" | "failed">("idle");
+  /** Runs Pilot's self-test (one model run, about a minute), then rereads the status. */
+  const runSelftest = async () => {
+    if (!bridge.selftest || selftestRun === "running") return;
+    setSelftestRun("running");
+    setActionError(null);
+    let outcome: "idle" | "failed" = "idle";
+    try {
+      const result = await bridge.selftest();
+      if (!result.installed) setActionError("Pilot is no longer installed.");
+      else if (!result.ok) setActionError(result.error);
+      else if (!result.value.passed) outcome = "failed";
+    } catch {
+      setActionError(UNREACHABLE);
+    } finally {
+      setSelftestRun(outcome);
+      refreshStatus();
+    }
+  };
   const [view, setView] = useState<PilotView>("chat");
   const [activity, setActivity] = useState<PilotResponse<PilotActivity> | null>(null);
   const [pendingRepo, setPendingRepo] = useState<string | null>(null);
@@ -778,6 +859,21 @@ export function PilotContent({
               <MenuGroup>
                 <MenuGroupLabel>Budget: {budgetLabel(state.budget)}</MenuGroupLabel>
               </MenuGroup>
+              {install.canUninstall ? (
+                <>
+                  <MenuSeparator />
+                  <MenuItem
+                    disabled={install.busy !== null}
+                    onClick={() => {
+                      setView("chat");
+                      setConfirmUninstall(true);
+                    }}
+                  >
+                    <Trash2Icon aria-hidden />
+                    Uninstall Pilot…
+                  </MenuItem>
+                </>
+              ) : null}
             </div>
           </MenuPopup>
         </Menu>
@@ -882,31 +978,38 @@ export function PilotContent({
         </CenteredState>
       );
     }
+    // At most one action row and one status line, by priority.
+    const line = pilotStatusLine({
+      error: actionError ?? chat.threadError ?? (chat.unreachable ? UNREACHABLE : null),
+      status: value,
+      watch,
+      installedVersion: installAction(install.status) ? null : install.installed,
+      selftest: selftestRun,
+    });
     const notices = [
-      installAction(install.status) ? <InstallRow key="install" install={install} /> : null,
-      install.installed && !installAction(install.status) ? (
-        <ThreadNotice key="installed">
-          Pilot {install.installed} is installed. New Claude Code sessions use it.
-        </ThreadNotice>
+      confirmUninstall ? (
+        <UninstallRow key="uninstall" install={install} onDone={() => setConfirmUninstall(false)} />
+      ) : installAction(install.status) ? (
+        <InstallRow key="install" install={install} />
       ) : null,
-      watch === "not-running" ? (
-        <ThreadNotice key="not-running">
-          Pilot isn't running. It starts with your next Claude Code session.
-        </ThreadNotice>
-      ) : null,
-      !value.selftest.ok ? (
-        <ThreadNotice key="selftest" tone="warning">
-          Pilot is on hold: its safety check failed ({value.selftest.reason}).
-        </ThreadNotice>
-      ) : null,
-      value.budget.availableCents <= 0 ? (
-        <ThreadNotice key="budget">
-          Today's budget is used up. Pilot speaks up again when budget frees.
-        </ThreadNotice>
-      ) : null,
-      actionError || chat.unreachable || chat.threadError ? (
-        <ThreadNotice key="error" tone="error">
-          {actionError ?? chat.threadError ?? UNREACHABLE}
+      line ? (
+        <ThreadNotice
+          key="status"
+          tone={line.kind === "error" ? "error" : line.kind === "on-hold" ? "warning" : "muted"}
+          action={
+            line.kind === "on-hold" && bridge.selftest ? (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={selftestRun === "running"}
+                onClick={() => void runSelftest()}
+              >
+                {selftestRun === "running" ? "Running…" : "Run self-test"}
+              </Button>
+            ) : null
+          }
+        >
+          {line.text}
         </ThreadNotice>
       ) : null,
     ].filter(Boolean);

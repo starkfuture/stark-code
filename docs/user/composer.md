@@ -355,7 +355,8 @@ Claude Code; the panel first says what will change. Stark Code copies Pilot to
 Pilot installed from a checkout, so only one copy runs. Pilot's settings, such
 as `claude_bin`, live in `~/.pilot/config.json`. When a newer Stark Code ships
 a newer Pilot, the panel offers **Update**. New Claude Code sessions use the
-installed copy.
+installed copy. To remove Pilot, choose **Uninstall Pilot** in the panel's
+**…** menu; its history and settings stay.
 
 ## View Stark Pages
 

@@ -5,21 +5,22 @@ import type {
   PilotQuote,
   TimestampFormat,
 } from "@starkfuture/contracts";
-import { CheckIcon, CircleAlertIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, CircleAlertIcon, ThumbsDownIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { cn } from "~/lib/utils";
 import { observeResize } from "~/lib/observeResize";
 import { formatRelativeTimeLabel, formatShortTimestamp } from "../../timestampFormat";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   ENGINE_LABELS,
-  NUDGE_KIND_BADGES,
   NUDGE_KIND_LABELS,
+  newestOpenNudgeId,
   nudgeOutcome,
   pendingQuestionShown,
-  quoteSourceLabel,
+  quoteNamesSession,
+  quoteSource,
   withKeys,
 } from "./pilot.logic";
 
@@ -36,59 +37,25 @@ export type PilotNudgeAct = (message: PilotMessage, action: PilotNudgeAction) =>
 
 const NEAR_BOTTOM_PX = 48;
 
-/** A file source shows its full path on hover; session sources already read in full. */
-function SourceLabel({ quote }: { quote: PilotQuote }) {
-  const label = quoteSourceLabel(quote);
-  if ((quote.source !== "rule" && quote.source !== "memory") || label === quote.where)
-    return <span className="min-w-0 break-words">{label}</span>;
+const keyOf = (quote: PilotQuote) => `${quote.source}:${quote.where}:${quote.quote}`;
+
+/** A quiet "·" between parts of one meta line. */
+function Dot() {
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="min-w-0 break-words" />}>{label}</TooltipTrigger>
-      <TooltipPopup side="top" positionMethod="fixed">
-        {quote.where}
-      </TooltipPopup>
-    </Tooltip>
+    <span aria-hidden className="shrink-0">
+      ·
+    </span>
   );
 }
 
-function Quotes({ evidence }: { evidence: readonly PilotQuote[] }) {
-  if (evidence.length === 0) return null;
-  return (
-    <ul className="flex flex-col gap-2" aria-label="Quotes">
-      {withKeys(evidence, (quote) => `${quote.source}:${quote.where}`).map(({ key, item }) => (
-        <li key={key} className="flex min-w-0 flex-col gap-1">
-          <blockquote className="border-l-2 border-border pl-2 text-xs whitespace-pre-wrap break-words">
-            {item.quote}
-          </blockquote>
-          <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pl-2.5 text-xs text-muted-foreground">
-            <SourceLabel quote={item} />
-            {item.found ? (
-              <span className="inline-flex shrink-0 items-center gap-1 text-success-foreground">
-                <CheckIcon aria-hidden className="size-3" />
-                Quote found
-              </span>
-            ) : (
-              <span className="inline-flex shrink-0 items-center gap-1 text-warning-foreground">
-                <CircleAlertIcon aria-hidden className="size-3" />
-                Not found
-              </span>
-            )}
-          </p>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
+/** How long ago, on one line, with the exact time on hover. */
 function Time({ at, timestampFormat }: { at: string; timestampFormat: TimestampFormat }) {
   const label = formatRelativeTimeLabel(at);
   if (!label) return null;
   return (
     <Tooltip>
       <TooltipTrigger
-        render={
-          <time dateTime={at} className="shrink-0 text-xs tabular-nums text-muted-foreground" />
-        }
+        render={<time dateTime={at} className="shrink-0 whitespace-nowrap tabular-nums" />}
       >
         {label}
       </TooltipTrigger>
@@ -99,9 +66,120 @@ function Time({ at, timestampFormat }: { at: string; timestampFormat: TimestampF
   );
 }
 
+/**
+ * One quiet line under a quote: who said it, where (shortened, full text on
+ * hover) and how long ago. Only a quote Pilot could not find says so.
+ */
+function SourceLine({ quote }: { quote: PilotQuote }) {
+  const { who, place, time } = quoteSource(quote);
+  return (
+    <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+      {who ? (
+        <>
+          <span className="shrink-0">{who}</span>
+          {place ? <Dot /> : null}
+        </>
+      ) : null}
+      {place ? (
+        <Tooltip>
+          <TooltipTrigger render={<span className="min-w-0 truncate" />}>{place}</TooltipTrigger>
+          <TooltipPopup side="top" positionMethod="fixed">
+            {quote.where}
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
+      {time ? (
+        <>
+          <Dot />
+          <span className="shrink-0 whitespace-nowrap tabular-nums">{time}</span>
+        </>
+      ) : null}
+      {quote.found ? (
+        <span className="sr-only">, quote found</span>
+      ) : (
+        <span className="ml-1 inline-flex shrink-0 items-center gap-1 text-warning-foreground">
+          <CircleAlertIcon aria-hidden className="size-3" />
+          Not found
+        </span>
+      )}
+    </p>
+  );
+}
+
+function QuoteItem({ quote }: { quote: PilotQuote }) {
+  return (
+    <li className="flex min-w-0 flex-col gap-0.5">
+      <blockquote className="border-l-2 border-border pl-2 text-xs whitespace-pre-wrap break-words text-foreground/80">
+        {quote.quote}
+      </blockquote>
+      <div className="pl-2.5">
+        <SourceLine quote={quote} />
+      </div>
+    </li>
+  );
+}
+
+/** A toggle for sources kept out of sight, with how many could not be found. */
+function SourcesToggle({
+  open,
+  label,
+  missing,
+  onToggle,
+}: {
+  open: boolean;
+  label: string;
+  missing: number;
+  onToggle: () => void;
+}) {
+  return (
+    <Button size="micro" variant="quiet" aria-expanded={open} onClick={onToggle}>
+      <ChevronRightIcon aria-hidden className={cn("transition-transform", open && "rotate-90")} />
+      {label}
+      {missing > 0 ? <span className="text-warning-foreground">· {missing} not found</span> : null}
+    </Button>
+  );
+}
+
+/** A nudge's first quote, with any others behind "+N sources". */
+function NudgeQuotes({ evidence }: { evidence: readonly PilotQuote[] }) {
+  const [open, setOpen] = useState(false);
+  const [first, ...rest] = evidence;
+  if (!first) return null;
+  const missing = rest.filter((quote) => !quote.found).length;
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <ul className="flex flex-col gap-2" aria-label="Sources">
+        <QuoteItem quote={first} />
+        {open
+          ? withKeys(rest, keyOf).map(({ key, item }) => <QuoteItem key={key} quote={item} />)
+          : null}
+      </ul>
+      {rest.length > 0 ? (
+        <div>
+          <SourcesToggle
+            open={open}
+            label={
+              open ? "Fewer sources" : `+${rest.length} ${rest.length === 1 ? "source" : "sources"}`
+            }
+            missing={open ? 0 : missing}
+            onToggle={() => setOpen((value) => !value)}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The engine, only when it is not the one Pilot uses by default. */
+function engineTag(message: PilotMessage, defaultEngine: PilotEngine): string | null {
+  return message.engine && message.engine !== defaultEngine ? ENGINE_LABELS[message.engine] : null;
+}
+
 function NudgeCard({
   message,
   unseen,
+  pinned,
+  defaultEngine,
   busy,
   error,
   timestampFormat,
@@ -110,56 +188,119 @@ function NudgeCard({
   message: PilotMessage;
   /** Not seen by the person yet; marked seen once it is on screen. */
   unseen: boolean;
+  /** The newest open nudge keeps its actions in view; others show them on hover or focus. */
+  pinned: boolean;
+  defaultEngine: PilotEngine;
   busy: PilotNudgeAction | null;
   error: string | null;
   timestampFormat: TimestampFormat;
   onAct: PilotNudgeAct;
 }) {
   const kind = message.nudgeKind;
+  const risky = kind === "risky";
   const outcome = nudgeOutcome(message.state);
-  const action = (name: PilotNudgeAction, label: string, variant: "outline" | "ghost") => (
-    <Button
-      size="xs"
-      variant={variant}
-      disabled={busy !== null}
-      onClick={() => onAct(message, name)}
+  const engine = engineTag(message, defaultEngine);
+  const session = quoteNamesSession(message) ? null : message.sessionLabel;
+  const iconAction = (name: PilotNudgeAction, label: string, icon: ReactNode) => (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label={label}
+            disabled={busy !== null}
+            onClick={() => onAct(message, name)}
+          />
+        }
+      >
+        {busy === name ? <Spinner aria-hidden /> : icon}
+      </TooltipTrigger>
+      <TooltipPopup side="top" positionMethod="fixed">
+        {label}
+      </TooltipPopup>
+    </Tooltip>
+  );
+  const actions = outcome ? null : (
+    <div
+      data-pilot-actions={pinned ? "pinned" : "hover"}
+      className={cn(
+        "flex items-center gap-0.5",
+        !pinned &&
+          "pointer-events-none absolute top-1.5 right-1.5 rounded-md bg-background p-0.5 opacity-0 shadow-xs ring-1 ring-border group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100",
+      )}
     >
-      {busy === name ? <Spinner aria-hidden /> : null}
-      {label}
-    </Button>
+      {message.session ? (
+        <Button
+          size="xs"
+          variant={pinned ? "outline" : "ghost"}
+          disabled={busy !== null}
+          onClick={() => onAct(message, "send")}
+        >
+          {busy === "send" ? <Spinner aria-hidden /> : null}
+          Send to session
+        </Button>
+      ) : null}
+      {iconAction("useful", "Got it", <CheckIcon aria-hidden />)}
+      {iconAction("not_useful", "Not useful", <ThumbsDownIcon aria-hidden />)}
+    </div>
   );
   return (
     <article
       aria-label={kind ? NUDGE_KIND_LABELS[kind] : "Pilot"}
       data-unseen-nudge={unseen ? message.id : undefined}
-      className="flex min-w-0 flex-col gap-2 rounded-lg border border-border p-3"
+      className="group relative flex min-w-0 flex-col gap-2 rounded-lg bg-muted/40 px-3 py-2.5"
     >
-      <div className="flex min-w-0 items-center justify-between gap-2">
+      <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
         {kind ? (
-          <Badge size="sm" variant={NUDGE_KIND_BADGES[kind]}>
+          <span
+            className={cn(
+              "flex shrink-0 items-center gap-1.5",
+              risky && "font-medium text-destructive-foreground",
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "size-1.5 rounded-full",
+                risky ? "bg-destructive" : "bg-muted-foreground/60",
+              )}
+            />
             {NUDGE_KIND_LABELS[kind]}
-          </Badge>
-        ) : (
-          <span />
-        )}
-        <Byline message={message} timestampFormat={timestampFormat} />
-      </div>
+          </span>
+        ) : null}
+        {session ? (
+          <>
+            <Dot />
+            <Tooltip>
+              <TooltipTrigger render={<span className="min-w-0 truncate" />}>
+                {session}
+              </TooltipTrigger>
+              <TooltipPopup side="top" positionMethod="fixed">
+                {session}
+              </TooltipPopup>
+            </Tooltip>
+          </>
+        ) : null}
+        <span className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+          {engine ? (
+            <>
+              <span data-pilot-engine={message.engine}>{engine}</span>
+              <Dot />
+            </>
+          ) : null}
+          <Time at={message.at} timestampFormat={timestampFormat} />
+        </span>
+      </p>
       <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
-      <Quotes evidence={message.evidence} />
-      {message.sessionLabel ? (
-        <p className="text-xs break-words text-muted-foreground">In {message.sessionLabel}</p>
-      ) : null}
+      <NudgeQuotes evidence={message.evidence} />
       {outcome ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
           <CheckIcon aria-hidden className="size-3" />
           {outcome}
         </p>
       ) : (
-        <div className="flex flex-wrap items-center gap-1">
-          {message.session ? action("send", "Send to session", "outline") : null}
-          {action("useful", "Got it", "ghost")}
-          {action("not_useful", "Not useful", "ghost")}
-        </div>
+        actions
       )}
       {error ? (
         <p role="alert" className="text-xs break-words text-destructive-foreground">
@@ -170,51 +311,81 @@ function NudgeCard({
   );
 }
 
-/** The engine that wrote a Pilot message, then how long ago, both muted. */
-function Byline({
+/** Pilot's answer as plain prose, its sources folded under one toggle. */
+function Answer({
   message,
+  defaultEngine,
   timestampFormat,
 }: {
   message: PilotMessage;
+  defaultEngine: PilotEngine;
   timestampFormat: TimestampFormat;
 }) {
-  const engine = message.engine ? ENGINE_LABELS[message.engine] : null;
+  const [open, setOpen] = useState(false);
+  const engine = engineTag(message, defaultEngine);
+  const missing = message.evidence.filter((quote) => !quote.found).length;
   return (
-    <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-      {engine ? <span data-pilot-engine={message.engine}>{engine}</span> : null}
-      {engine && formatRelativeTimeLabel(message.at) ? <span aria-hidden>·</span> : null}
-      <Time at={message.at} timestampFormat={timestampFormat} />
-    </span>
+    <div className="flex min-w-0 flex-col gap-1">
+      <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+        {message.evidence.length > 0 ? (
+          <SourcesToggle
+            open={open}
+            label={`Sources (${message.evidence.length})`}
+            missing={missing}
+            onToggle={() => setOpen((value) => !value)}
+          />
+        ) : null}
+        <span className="flex shrink-0 items-center gap-1">
+          {message.evidence.length > 0 ? <Dot /> : null}
+          {engine ? (
+            <>
+              <span data-pilot-engine={message.engine}>{engine}</span>
+              <Dot />
+            </>
+          ) : null}
+          <Time at={message.at} timestampFormat={timestampFormat} />
+        </span>
+      </div>
+      {open ? (
+        <ul className="flex flex-col gap-2 pt-1" aria-label="Sources">
+          {withKeys(message.evidence, keyOf).map(({ key, item }) => (
+            <QuoteItem key={key} quote={item} />
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** The person's own message: a small bubble on the right. */
+function YourMessage({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end">
+      <p className="max-w-[85%] rounded-2xl bg-message px-3 py-1.5 text-sm whitespace-pre-wrap break-words text-message-foreground">
+        {text}
+      </p>
+    </div>
   );
 }
 
 function MessageRow({
   message,
+  defaultEngine,
   timestampFormat,
 }: {
   message: PilotMessage;
+  defaultEngine: PilotEngine;
   timestampFormat: TimestampFormat;
 }) {
-  if (message.role === "you") {
-    return (
-      <div className="flex justify-end">
-        <p className="max-w-[85%] rounded-xl bg-message px-3 py-2 text-sm whitespace-pre-wrap break-words text-message-foreground">
-          {message.text}
-        </p>
-      </div>
-    );
-  }
+  if (message.role === "you") return <YourMessage text={message.text} />;
   if (message.kind === "note") {
     return (
       <p className="px-2 text-center text-xs break-words text-muted-foreground">{message.text}</p>
     );
   }
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
-      <Quotes evidence={message.evidence} />
-      <Byline message={message} timestampFormat={timestampFormat} />
-    </div>
+    <Answer message={message} defaultEngine={defaultEngine} timestampFormat={timestampFormat} />
   );
 }
 
@@ -233,6 +404,7 @@ export function PilotThread({
   errors,
   empty,
   sentMayBeUnseen,
+  defaultEngine,
   onAct,
   onCancelAsk,
   onSeen,
@@ -251,6 +423,8 @@ export function PilotThread({
    * until the person sees them, but the message does not say whether they did.
    */
   sentMayBeUnseen: boolean;
+  /** Messages written by this engine carry no engine tag. */
+  defaultEngine: PilotEngine;
   onAct: PilotNudgeAct;
   onCancelAsk: () => void;
   onSeen: (ids: readonly number[]) => void;
@@ -275,6 +449,7 @@ export function PilotThread({
     if (pending) followBottom.current = true;
   }, [pending]);
 
+  const pinnedId = newestOpenNudgeId(messages);
   const isUnseen = (message: PilotMessage) =>
     message.kind === "nudge" &&
     (message.state === "new" || (sentMayBeUnseen && message.state === "sent"));
@@ -319,35 +494,39 @@ export function PilotThread({
         {messages.length === 0 && !pending ? (
           empty
         ) : (
-          <ol className="flex min-w-0 flex-col gap-3 p-3" aria-label="Pilot conversation">
+          <ol className="flex min-w-0 flex-col gap-4 p-3" aria-label="Pilot conversation">
             {messages.map((message) => (
               <li key={message.id} className="min-w-0">
                 {message.kind === "nudge" && message.role !== "you" ? (
                   <NudgeCard
                     message={message}
                     unseen={isUnseen(message)}
+                    pinned={message.id === pinnedId}
+                    defaultEngine={defaultEngine}
                     busy={busy.get(message.id) ?? null}
                     error={errors.get(message.id) ?? null}
                     timestampFormat={timestampFormat}
                     onAct={onAct}
                   />
                 ) : (
-                  <MessageRow message={message} timestampFormat={timestampFormat} />
+                  <MessageRow
+                    message={message}
+                    defaultEngine={defaultEngine}
+                    timestampFormat={timestampFormat}
+                  />
                 )}
               </li>
             ))}
             {pending && showPending ? (
-              <li className="flex justify-end">
-                <p className="max-w-[85%] rounded-xl bg-message px-3 py-2 text-sm whitespace-pre-wrap break-words text-message-foreground">
-                  {pending.text}
-                </p>
+              <li>
+                <YourMessage text={pending.text} />
               </li>
             ) : null}
             {pending ? (
               <li className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
                 <Spinner size="xs" aria-hidden />
                 <span>Pilot is thinking…</span>
-                <Button size="xs" variant="ghost" onClick={onCancelAsk}>
+                <Button size="micro" variant="quiet" onClick={onCancelAsk}>
                   Cancel
                 </Button>
               </li>

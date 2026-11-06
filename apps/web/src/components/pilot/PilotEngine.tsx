@@ -1,93 +1,64 @@
 import type { PilotEngine, PilotSettings } from "@starkfuture/contracts";
+import { ChevronDownIcon } from "lucide-react";
+import { Button } from "../ui/button";
 import {
+  Menu,
   MenuGroup,
   MenuGroupLabel,
+  MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
   MenuRadioItemIndicator,
+  MenuTrigger,
 } from "../ui/menu";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { ENGINE_LABELS, codexPlanLabel, engineHint } from "./pilot.logic";
+import { ENGINE_LABELS, codexPlanLabel } from "./pilot.logic";
 
 const ENGINES = ["claude", "codex"] as const satisfies readonly PilotEngine[];
 
 const isEngine = (value: unknown): value is PilotEngine => value === "claude" || value === "codex";
 
-/**
- * The composer's Claude / Codex switch. It picks the engine for the next
- * question only; the default stays in the "…" menu. An engine that cannot run
- * is disabled, and the line beside the switch says why.
- */
-export function PilotEngineSwitch({
-  settings,
-  chosen,
-  onChoose,
-}: {
-  settings: PilotSettings;
-  chosen: PilotEngine;
-  onChoose: (engine: PilotEngine) => void;
-}) {
-  const hint = engineHint(settings, chosen);
-  return (
-    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-      <ToggleGroup
-        aria-label="Engine for the next question"
-        variant="segmented"
-        value={[chosen]}
-        onValueChange={(next) => {
-          if (isEngine(next[0])) onChoose(next[0]);
-        }}
-      >
-        {ENGINES.map((engine) => (
-          <Toggle
-            key={engine}
-            value={engine}
-            disabled={!settings.engines[engine].available && engine !== chosen}
-          >
-            {ENGINE_LABELS[engine]}
-          </Toggle>
-        ))}
-      </ToggleGroup>
-      {hint ? (
-        <span className="min-w-0 text-xs break-words text-muted-foreground">{hint}</span>
-      ) : null}
-    </div>
-  );
+/** Codex always says it uses the person's plan; an engine that cannot run says why. */
+function engineDetail(settings: PilotSettings | null, engine: PilotEngine): string | null {
+  const state = settings?.engines[engine];
+  if (engine === "codex") {
+    if (!state) return "Uses your Codex plan";
+    return state.available
+      ? codexPlanLabel(settings.engines.codex)
+      : `Uses your Codex plan. ${state.note ?? "Not available right now."}`;
+  }
+  return state && !state.available ? (state.note ?? "Not available right now.") : null;
 }
 
-/** The default engine, in the "…" menu. */
-export function PilotEngineMenuGroup({
+/** Claude and Codex as menu choices; an engine that cannot run is disabled unless already chosen. */
+function EngineChoices({
   settings,
+  value,
+  label,
   onChoose,
 }: {
-  settings: PilotSettings;
+  settings: PilotSettings | null;
+  value: PilotEngine;
+  label: string;
   onChoose: (engine: PilotEngine) => void;
 }) {
   return (
     <MenuGroup>
-      <MenuGroupLabel>Thinks with</MenuGroupLabel>
+      <MenuGroupLabel>{label}</MenuGroupLabel>
       <MenuRadioGroup
-        value={settings.engine}
-        onValueChange={(value) => {
-          if (isEngine(value) && value !== settings.engine) onChoose(value);
+        value={value}
+        onValueChange={(next) => {
+          if (isEngine(next) && next !== value) onChoose(next);
         }}
       >
         {ENGINES.map((engine) => {
-          const state = settings.engines[engine];
-          const detail =
-            engine === "codex" && state.available
-              ? codexPlanLabel(settings.engines.codex)
-              : engine === "codex"
-                ? `Uses your Codex plan. ${state.note ?? "Not available right now."}`
-                : state.available
-                  ? null
-                  : (state.note ?? "Not available right now.");
+          const detail = engineDetail(settings, engine);
+          const available = settings?.engines[engine].available ?? true;
           return (
             <MenuRadioItem
               key={engine}
               value={engine}
               closeOnClick
-              disabled={!state.available && engine !== settings.engine}
+              disabled={!available && engine !== value}
             >
               <span className="flex items-center gap-3">
                 <span className="min-w-0 flex-1 py-0.5">
@@ -105,5 +76,67 @@ export function PilotEngineMenuGroup({
         })}
       </MenuRadioGroup>
     </MenuGroup>
+  );
+}
+
+/**
+ * The composer's engine control, "Claude ▾" beside Send. It picks the engine
+ * for the next question only; the default lives in the "…" menu. It renders
+ * from the status before Pilot reports which engines can run, so the
+ * composer never changes size.
+ */
+export function PilotEngineMenu({
+  settings,
+  chosen,
+  onChoose,
+}: {
+  settings: PilotSettings | null;
+  chosen: PilotEngine;
+  onChoose: (engine: PilotEngine) => void;
+}) {
+  return (
+    <Menu>
+      <MenuTrigger
+        render={
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            aria-label={`Engine for the next question: ${ENGINE_LABELS[chosen]}`}
+            disabled={settings === null}
+          />
+        }
+      >
+        {ENGINE_LABELS[chosen]}
+        <ChevronDownIcon aria-hidden />
+      </MenuTrigger>
+      <MenuPopup side="top" align="end" positionMethod="fixed">
+        <div className="w-60 max-w-[calc(100vw-3rem)]">
+          <EngineChoices
+            settings={settings}
+            value={chosen}
+            label="Next question"
+            onChoose={onChoose}
+          />
+        </div>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+/** The default engine, in the "…" menu. */
+export function PilotEngineMenuGroup({
+  settings,
+  onChoose,
+}: {
+  settings: PilotSettings;
+  onChoose: (engine: PilotEngine) => void;
+}) {
+  return (
+    <EngineChoices
+      settings={settings}
+      value={settings.engine}
+      label="Thinks with"
+      onChoose={onChoose}
+    />
   );
 }

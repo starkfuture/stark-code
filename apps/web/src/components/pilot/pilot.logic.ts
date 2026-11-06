@@ -43,20 +43,6 @@ export function codexPlanLabel(codex: PilotSettings["engines"]["codex"]): string
   return `Uses your Codex plan · ${left === 1 ? "1 run" : `${left} runs`} left today`;
 }
 
-/**
- * The line under the composer's engine switch: what Codex costs when it is
- * chosen, or why an engine cannot be chosen. Pilot falls back to the other
- * engine on its own and says so in its answer.
- */
-export function engineHint(settings: PilotSettings, chosen: PilotEngine): string | null {
-  const engine = settings.engines[chosen];
-  if (!engine.available)
-    return engine.note ?? `${ENGINE_LABELS[chosen]} isn't available right now.`;
-  if (chosen === "codex") return codexPlanLabel(settings.engines.codex);
-  const other = settings.engines.codex;
-  return other.available ? null : (other.note ?? "Codex isn't available right now.");
-}
-
 /** Pilot versions before the chat report no unread count and have no `chat` method. */
 export const chatSupported = (status: PilotStatus) => status.unread !== undefined;
 
@@ -171,27 +157,60 @@ function fileLabel(where: string): string {
   return where.split(/[\\/]/).findLast(Boolean) ?? where;
 }
 
-/** Where a quote comes from, in plain words: "CLAUDE.md:12", "You, in billing · fix rounding · 2h ago". */
-export function quoteSourceLabel(quote: Pick<PilotQuote, "source" | "where">): string {
+/**
+ * Where a quote comes from, as the parts of one quiet line: who said it, the
+ * file or session it is in, and how long ago. "CLAUDE.md:12"; "You", "billing ·
+ * fix rounding", "2h ago". The UI shortens `place` and keeps `time` whole.
+ */
+export function quoteSource(quote: Pick<PilotQuote, "source" | "where">): {
+  readonly who: string | null;
+  readonly place: string;
+  readonly time: string | null;
+} {
   switch (quote.source) {
     case "rule":
     case "memory":
-      return fileLabel(quote.where);
+      return { who: null, place: fileLabel(quote.where), time: null };
     case "prompt":
     case "session":
     case "nudge": {
       const { label, time } = splitWhere(quote.where);
       const who =
-        quote.source === "prompt"
-          ? "You"
-          : quote.source === "session"
-            ? "The session said"
-            : "Pilot said earlier";
-      const place = label ? `${who}, in ${label}` : who;
-      // The time ("2h ago") never breaks across lines.
-      return time ? `${place} ·\u00a0${time.replaceAll(" ", "\u00a0")}` : place;
+        quote.source === "prompt" ? "You" : quote.source === "session" ? "The session" : "Pilot";
+      return { who, place: label, time };
     }
   }
+}
+
+/** The same line as plain text, for a tooltip or a screen reader. */
+export function quoteSourceLabel(quote: Pick<PilotQuote, "source" | "where">): string {
+  const { who, place, time } = quoteSource(quote);
+  return [who, place, time].filter(Boolean).join(" · ");
+}
+
+/**
+ * Whether a nudge's first quote already names its session, so the card need
+ * not repeat it.
+ */
+export function quoteNamesSession(
+  message: Pick<PilotMessage, "evidence" | "sessionLabel">,
+): boolean {
+  const label = message.sessionLabel?.trim();
+  const first = message.evidence[0];
+  return !label || (first !== undefined && first.where.includes(label));
+}
+
+/**
+ * The nudge whose actions stay visible without hovering: the newest one the
+ * person has not acted on yet. Other nudges show their actions on hover or focus.
+ */
+export function newestOpenNudgeId(messages: readonly PilotMessage[]): number | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (message.kind === "nudge" && (message.state === "new" || message.state === "seen"))
+      return message.id;
+  }
+  return null;
 }
 
 const trimSeparators = (path: string) => path.replace(/[\\/]+$/, "");

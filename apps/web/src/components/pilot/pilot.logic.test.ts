@@ -5,7 +5,8 @@ import {
   describeEvent,
   describeRun,
   emptyThreadText,
-  engineHint,
+  newestOpenNudgeId,
+  quoteNamesSession,
   pilotWatchState,
   mergeMessages,
   pendingQuestionShown,
@@ -111,17 +112,17 @@ describe("quoteSourceLabel", () => {
   it("says who said it, in which session, and how long ago", () => {
     const where = "billing · fix the invoice rounding · 2026-11-06T09:00:00.000Z";
     expect(quoteSourceLabel({ source: "prompt", where })).toBe(
-      "You, in billing · fix the invoice rounding ·\u00a02h\u00a0ago",
+      "You · billing · fix the invoice rounding · 2h ago",
     );
     expect(quoteSourceLabel({ source: "session", where })).toBe(
-      "The session said, in billing · fix the invoice rounding ·\u00a02h\u00a0ago",
+      "The session · billing · fix the invoice rounding · 2h ago",
     );
     // A time Pilot writes another way is kept as written.
     expect(quoteSourceLabel({ source: "prompt", where: "orders · deploy it · 14:32" })).toBe(
-      "You, in orders · deploy it · 14:32",
+      "You · orders · deploy it · 14:32",
     );
     expect(quoteSourceLabel({ source: "nudge", where: "2026-11-06T10:30:00.000Z" })).toBe(
-      "Pilot said earlier ·\u00a030m\u00a0ago",
+      "Pilot · 30m ago",
     );
   });
 });
@@ -299,28 +300,36 @@ describe("labels", () => {
   });
 });
 
-describe("engines", () => {
-  const settings = (codex: { available: boolean; note: string | null; runsLeftToday: number }) => ({
-    engine: "claude" as const,
-    engines: { claude: { available: true, note: null }, codex },
-  });
-
-  it("says Codex uses the person's plan whenever it is chosen", () => {
-    const ready = settings({ available: true, note: null, runsLeftToday: 1 });
-    expect(engineHint(ready, "codex")).toBe("Uses your Codex plan · 1 run left today");
-    expect(engineHint(ready, "claude")).toBeNull();
-  });
-
-  it("explains an engine that cannot run", () => {
-    const out = settings({
-      available: false,
-      note: "Codex runs used up for today",
-      runsLeftToday: 0,
+describe("quiet cards", () => {
+  it("names the session on the card only when the first quote does not", () => {
+    const quote = (where: string) => ({
+      source: "prompt" as const,
+      where,
+      quote: "x",
+      found: true,
     });
-    expect(engineHint(out, "claude")).toBe("Codex runs used up for today");
-    expect(engineHint(out, "codex")).toBe("Codex runs used up for today");
-    expect(engineHint(settings({ available: false, note: null, runsLeftToday: 0 }), "codex")).toBe(
-      "Codex isn't available right now.",
+    const label = "shop · review PR #42";
+    expect(
+      quoteNamesSession({
+        sessionLabel: label,
+        evidence: [quote(`${label} · 2026-11-06T09:00:00Z`)],
+      }),
+    ).toBe(true);
+    expect(quoteNamesSession({ sessionLabel: label, evidence: [quote("/r/CLAUDE.md:4")] })).toBe(
+      false,
     );
+    expect(quoteNamesSession({ sessionLabel: null, evidence: [] })).toBe(true);
+  });
+
+  it("keeps actions in view on the newest nudge still waiting for the person", () => {
+    expect(
+      newestOpenNudgeId([
+        message(1, { state: "new" }),
+        message(2, { state: "seen" }),
+        message(3, { state: "sent" }),
+        message(4, { role: "you", kind: "message", state: "seen" }),
+      ]),
+    ).toBe(2);
+    expect(newestOpenNudgeId([message(1, { state: "useful" })])).toBeNull();
   });
 });

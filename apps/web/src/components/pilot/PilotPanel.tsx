@@ -13,6 +13,7 @@ import {
 } from "@starkfuture/contracts";
 import {
   ActivityIcon,
+  ArrowUpIcon,
   ChevronLeftIcon,
   FolderGit2Icon,
   InfoIcon,
@@ -44,8 +45,9 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Textarea } from "../ui/textarea";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PilotActivityView, PilotRepoList } from "./PilotActivity";
-import { PilotEngineMenuGroup, PilotEngineSwitch } from "./PilotEngine";
+import { PilotEngineMenu, PilotEngineMenuGroup } from "./PilotEngine";
 import { PilotThread, type PilotPendingQuestion } from "./PilotThread";
 import {
   WATCH_STATE_LABELS,
@@ -253,7 +255,7 @@ function Composer({
   draft: string;
   disabled: boolean;
   asking: boolean;
-  /** The engine switch, when Pilot reports its engines. */
+  /** The engine control beside Send, when Pilot thinks with more than one engine. */
   engine: ReactNode;
   onDraftChange: (value: string) => void;
   onSend: () => void;
@@ -261,14 +263,16 @@ function Composer({
   const canSend = !disabled && !asking && draft.trim().length > 0;
   return (
     <form
-      className="flex shrink-0 flex-col gap-1.5 border-t border-border p-2"
+      className="flex shrink-0 items-end gap-1 border-t border-border p-2"
       onSubmit={(event) => {
         event.preventDefault();
         if (canSend) onSend();
       }}
     >
       <Textarea
-        size="sm"
+        size="compact"
+        className="min-w-0 flex-1"
+        rows={1}
         aria-label="Ask Pilot"
         placeholder="Ask Pilot…"
         value={draft}
@@ -281,11 +285,26 @@ function Composer({
           if (canSend) onSend();
         }}
       />
-      <div className="flex items-start justify-end gap-2">
+      <div className="flex shrink-0 items-center gap-0.5 pb-0.5">
         {engine}
-        <Button type="submit" size="xs" variant="outline" disabled={!canSend}>
-          Send
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="submit"
+                size="icon-sm"
+                variant="outline"
+                aria-label="Send"
+                disabled={!canSend}
+              />
+            }
+          >
+            <ArrowUpIcon aria-hidden />
+          </TooltipTrigger>
+          <TooltipPopup side="top" positionMethod="fixed">
+            Send (Enter)
+          </TooltipPopup>
+        </Tooltip>
       </div>
     </form>
   );
@@ -365,7 +384,8 @@ export function PilotContent({
     SETTINGS_POLL_MS,
     active && chat.canChat,
   );
-  const defaultEngine = settings?.engine ?? null;
+  // The status names the default engine before Pilot reports which engines can run.
+  const defaultEngine = settings?.engine ?? (statusOk ? status.value.engine : undefined) ?? null;
   const chosenEngine = nextEngine ?? defaultEngine;
   const chooseNextEngine = (engine: PilotEngine) =>
     setNextEngine(engine === defaultEngine ? null : engine);
@@ -709,6 +729,7 @@ export function PilotContent({
           timestampFormat={timestampFormat}
           busy={busy}
           errors={nudgeErrors}
+          defaultEngine={defaultEngine ?? "claude"}
           sentMayBeUnseen={
             unread >
             messages.filter((message) => message.kind === "nudge" && message.state === "new").length
@@ -727,8 +748,8 @@ export function PilotContent({
           disabled={false}
           asking={pending !== null}
           engine={
-            settings && chosenEngine ? (
-              <PilotEngineSwitch
+            chosenEngine ? (
+              <PilotEngineMenu
                 settings={settings}
                 chosen={chosenEngine}
                 onChoose={chooseNextEngine}

@@ -211,7 +211,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("shows nudges, answers and your messages with their quotes", async () => {
+it("shows nudges, answers and your messages with quiet sources", async () => {
   await render();
   const text = container.textContent ?? "";
   expect(text).toContain("Watching");
@@ -219,13 +219,70 @@ it("shows nudges, answers and your messages with their quotes", async () => {
   expect(text).toContain("Hard to undo");
   expect(text).toContain("Waiting on you");
   expect(text).toContain("CLAUDE.md:12");
-  expect(text).toContain("Quote found");
-  expect(text).toContain("The session said, in orders · deploy ·\u00a02h\u00a0ago");
-  expect(text).toContain("Not found");
   expect(text).toContain("what's waiting on me?");
+  // A found quote carries no label; only a missing one says so.
+  expect(text).not.toContain("Quote found");
   expect(text).not.toContain("Verified");
+  // The answer's sources stay folded until asked for.
+  expect(text).toContain("Sources (1)· 1 not found");
+  expect(text).not.toContain("Should I");
+  await click("Sources (1)· 1 not found");
+  expect(container.textContent).toContain("The session·orders · deploy·2h ago");
+  expect(container.textContent).toContain("Not found");
   // Only a nudge for a known session can go to that session.
   expect(card("merge only").textContent).toContain("Send to session");
+});
+
+it("keeps a nudge to its first source and folds the rest", async () => {
+  bridge.chat.mockResolvedValue(
+    ok({
+      messages: [
+        message(9, {
+          state: "seen",
+          text: "Two places say otherwise.",
+          evidence: [
+            { source: "rule", where: "/r/CLAUDE.md:3", quote: "first rule", found: true },
+            { source: "memory", where: "/m/notes.md:8", quote: "second note", found: false },
+            {
+              source: "prompt",
+              where: "shop · plan · 2026-11-06T08:00:00Z",
+              quote: "third",
+              found: true,
+            },
+          ],
+        }),
+      ],
+      unread: 0,
+    }),
+  );
+  await render();
+  expect(card("Two places").textContent).toContain("first rule");
+  expect(card("Two places").textContent).not.toContain("second note");
+  expect(card("Two places").textContent).toContain("+2 sources· 1 not found");
+  await click("+2 sources· 1 not found");
+  expect(card("Two places").textContent).toContain("second note");
+  expect(card("Two places").textContent).toContain("third");
+  await click("Fewer sources");
+  expect(card("Two places").textContent).not.toContain("second note");
+});
+
+it("keeps the newest open nudge's actions in view and the others on hover", async () => {
+  await render();
+  const actions = (text: string) =>
+    card(text).querySelector("[data-pilot-actions]")?.getAttribute("data-pilot-actions");
+  expect(actions("A session is still waiting")).toBe("pinned");
+  expect(actions("drafts first")).toBe("hover");
+  // A nudge that was acted on shows what happened instead of actions.
+  bridge.chat.mockResolvedValue(
+    ok({
+      messages: [message(5, { text: "A session is still waiting.", state: "useful" })],
+      unread: 0,
+    }),
+  );
+  await render(false);
+  await render(true);
+  expect(card("A session is still waiting").querySelector("[data-pilot-actions]")).toBeNull();
+  expect(card("A session is still waiting").textContent).toContain("Got it");
 });
 
 it("polls the thread every five seconds for new messages, and only while open", async () => {
@@ -274,7 +331,7 @@ it("records Got it, and explains a session that ended", async () => {
   await render();
   await act(async () => {
     [...card("merge only").querySelectorAll("button")]
-      .find((item) => item.textContent === "Got it")!
+      .find((item) => item.getAttribute("aria-label") === "Got it")!
       .click();
   });
   await settle();
@@ -408,40 +465,54 @@ it("shows the install command when Pilot is missing", async () => {
   expect(bridge.status).toHaveBeenCalledTimes(2);
 });
 
-const engineToggle = (label: string) =>
-  [
-    ...container.querySelectorAll<HTMLButtonElement>(
-      '[aria-label="Engine for the next question"] button',
-    ),
-  ].find((item) => item.textContent === label)!;
+const engineTrigger = () =>
+  container.querySelector<HTMLButtonElement>('[aria-label^="Engine for the next question"]');
+const chooseEngine = async (label: string, check?: (menu: string) => void) => {
+  await act(async () => engineTrigger()!.click());
+  await settle();
+  check?.(document.body.textContent ?? "");
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
+    (candidate) => candidate.textContent?.startsWith(label),
+  );
+  if (!item) throw new Error(`Missing engine: ${label}`);
+  await act(async () => item.click());
+  await settle();
+};
 const answered = (text: string) =>
   ok({
     question: message(8, { role: "you", kind: "message", nudgeKind: null, text, engine: null }),
     answer: message(9, { kind: "answer", nudgeKind: null, text: "Done.", engine: "codex" }),
   });
 
-it("tags each Pilot message with the engine that wrote it", async () => {
+it("tags only messages from the engine that is not the default", async () => {
   await render();
-  expect(card("merge only").querySelector("[data-pilot-engine]")?.textContent).toBe("Claude");
   const tags = [...container.querySelectorAll("[data-pilot-engine]")].map((tag) => tag.textContent);
-  expect(tags).toContain("Codex");
-  // The person's own messages carry no engine.
-  expect(tags).toHaveLength(THREAD.filter((item) => item.engine).length);
+  expect(tags).toEqual(["Codex"]);
+  expect(card("merge only").querySelector("[data-pilot-engine]")).toBeNull();
+});
+
+it("shows the engine control from the first render, before Pilot reports its engines", async () => {
+  bridge.settings.mockImplementation(() => new Promise(() => {}));
+  await render();
+  expect(engineTrigger()?.textContent).toBe("Claude");
+  expect(engineTrigger()?.disabled).toBe(true);
 });
 
 it("sends one question to Codex, then returns to the default", async () => {
   bridge.ask.mockImplementation(async (input: { text: string }) => answered(input.text));
   await render();
-  expect(engineToggle("Claude").getAttribute("aria-pressed")).toBe("true");
-  await act(async () => engineToggle("Codex").click());
-  expect(container.textContent).toContain("Uses your Codex plan · 37 runs left today");
+  expect(engineTrigger()?.textContent).toBe("Claude");
+  await chooseEngine("Codex", (menu) =>
+    expect(menu).toContain("Uses your Codex plan · 37 runs left today"),
+  );
+  expect(engineTrigger()?.textContent).toBe("Codex");
   await typeQuestion("what did I ask yesterday?");
   expect(bridge.ask).toHaveBeenLastCalledWith({
     text: "what did I ask yesterday?",
     engine: "codex",
   });
   await settle();
-  expect(engineToggle("Claude").getAttribute("aria-pressed")).toBe("true");
+  expect(engineTrigger()?.textContent).toBe("Claude");
   await typeQuestion("and today?");
   expect(bridge.ask).toHaveBeenLastCalledWith({ text: "and today?" });
 });
@@ -457,11 +528,16 @@ it("disables an engine that cannot run and says why", async () => {
     }),
   );
   await render();
-  expect(engineToggle("Codex").disabled).toBe(true);
-  expect(container.textContent).toContain("Signed out of Codex");
+  await act(async () => engineTrigger()!.click());
+  await settle();
+  const codex = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+    item.textContent?.startsWith("Codex"),
+  )!;
+  expect(codex.textContent).toContain("Signed out of Codex");
+  expect(codex.getAttribute("aria-disabled")).toBe("true");
 });
 
-it("shows no engine switch for a Pilot without engine settings", async () => {
+it("keeps the engine control quiet for a Pilot without engine settings", async () => {
   bridge.settings.mockResolvedValue({
     installed: true,
     ok: false,
@@ -469,7 +545,7 @@ it("shows no engine switch for a Pilot without engine settings", async () => {
     error: 'unknown method "settings"',
   });
   await render();
-  expect(container.querySelector('[aria-label="Engine for the next question"]')).toBeNull();
+  expect(engineTrigger()?.disabled).toBe(true);
   expect(container.textContent).not.toContain('unknown method "settings"');
 });
 
@@ -483,7 +559,7 @@ it("changes the default engine from the options menu", async () => {
   await act(async () => codex!.click());
   await settle();
   expect(bridge.settings).toHaveBeenCalledWith({ engine: "codex" });
-  expect(engineToggle("Codex").getAttribute("aria-pressed")).toBe("true");
+  expect(engineTrigger()?.textContent).toBe("Codex");
 });
 
 it("marks a reminder Pilot sent on its own as seen while it still counts as unread", async () => {

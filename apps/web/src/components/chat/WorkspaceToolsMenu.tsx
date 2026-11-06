@@ -54,7 +54,7 @@ function ToolItem({
         ? MessageCircleIcon
         : action.id === "terminal"
           ? TerminalIcon
-          : action.id === "lookout"
+          : action.id === "pilot"
             ? ScanEyeIcon
             : null;
   return (

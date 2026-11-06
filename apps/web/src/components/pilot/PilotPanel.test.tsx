@@ -2,21 +2,16 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
-import type {
-  LookoutBridge,
-  LookoutMessage,
-  LookoutResponse,
-  LookoutStatus,
-} from "@starkfuture/contracts";
-import { LOOKOUT_CHAT_POLL_MS, LookoutContent } from "./LookoutPanel";
-import { useLookoutIndicator } from "./lookoutStore";
+import type { PilotBridge, PilotMessage, PilotResponse, PilotStatus } from "@starkfuture/contracts";
+import { PILOT_CHAT_POLL_MS, PilotContent } from "./PilotPanel";
+import { usePilotIndicator } from "./pilotStore";
 
-const STATUS: LookoutStatus = {
+const STATUS: PilotStatus = {
   generatedAt: "2026-11-06T09:00:00.000Z",
   daemon: { running: true, pid: 4, heartbeatAt: "2026-11-06T09:00:00.000Z" },
   paused: false,
   profiles: ["/Users/me/.claude"],
-  home: "/Users/me/.lookout",
+  home: "/Users/me/.pilot",
   mode: "local",
   claudeBin: "claude",
   delivery: "session",
@@ -28,10 +23,10 @@ const STATUS: LookoutStatus = {
   reviewWork: false,
 };
 
-const message = (id: number, overrides: Partial<LookoutMessage> = {}): LookoutMessage => ({
+const message = (id: number, overrides: Partial<PilotMessage> = {}): PilotMessage => ({
   id,
   at: "2026-11-06T08:00:00.000Z",
-  role: "lookout",
+  role: "pilot",
   kind: "nudge",
   nudgeKind: "rule",
   text: `Nudge ${id}`,
@@ -75,7 +70,7 @@ const THREAD = [
   message(5, { nudgeKind: "pending", text: "A session is still waiting on your answer." }),
 ];
 
-const ok = <T,>(value: T): LookoutResponse<T> => ({ installed: true, ok: true, value });
+const ok = <T,>(value: T): PilotResponse<T> => ({ installed: true, ok: true, value });
 
 /** Reports every observed element as on screen, like an open panel would. */
 class VisibleObserver {
@@ -92,7 +87,7 @@ class VisibleObserver {
 
 let root: Root;
 let container: HTMLDivElement;
-let bridge: { [K in keyof LookoutBridge]: ReturnType<typeof vi.fn> };
+let bridge: { [K in keyof PilotBridge]: ReturnType<typeof vi.fn> };
 
 const settle = () =>
   act(async () => {
@@ -101,8 +96,8 @@ const settle = () =>
 const render = async (active = true) => {
   await act(async () =>
     root.render(
-      <LookoutContent
-        bridge={bridge as unknown as LookoutBridge}
+      <PilotContent
+        bridge={bridge as unknown as PilotBridge}
         active={active}
         projectRoot="/work/orders/src"
         timestampFormat="24-hour"
@@ -125,7 +120,7 @@ const click = async (label: string) => {
 const card = (text: string) =>
   [...container.querySelectorAll("article")].find((item) => item.textContent?.includes(text))!;
 const typeQuestion = async (text: string) => {
-  const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Lookout"]')!;
+  const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Pilot"]')!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, text);
     field.dispatchEvent(new Event("input", { bubbles: true }));
@@ -151,7 +146,7 @@ beforeEach(() => {
     addEventListener: () => {},
     removeEventListener: () => {},
   }));
-  useLookoutIndicator.setState({ installed: null, unread: 0 });
+  usePilotIndicator.setState({ installed: null, unread: 0 });
   bridge = {
     status: vi.fn(async () => ok(STATUS)),
     chat: vi.fn(async (input: { since?: number }) =>
@@ -205,7 +200,7 @@ it("shows nudges, answers and your messages with their quotes", async () => {
 it("polls the thread every five seconds for new messages, and only while open", async () => {
   await render();
   expect(bridge.chat).toHaveBeenCalledWith({ limit: 200 });
-  await advance(LOOKOUT_CHAT_POLL_MS);
+  await advance(PILOT_CHAT_POLL_MS);
   expect(bridge.chat).toHaveBeenLastCalledWith({ since: 5 });
   expect(bridge.status).toHaveBeenCalledTimes(1);
   await advance(15_000);
@@ -224,12 +219,12 @@ it("never polls twice at once", async () => {
   let answer: (value: unknown) => void = () => {};
   await render();
   bridge.chat.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
-  await advance(LOOKOUT_CHAT_POLL_MS);
+  await advance(PILOT_CHAT_POLL_MS);
   const calls = bridge.chat.mock.calls.length;
-  await advance(LOOKOUT_CHAT_POLL_MS * 3);
+  await advance(PILOT_CHAT_POLL_MS * 3);
   expect(bridge.chat.mock.calls.length).toBe(calls);
   await act(async () => answer(ok({ messages: [], unread: 0 })));
-  await advance(LOOKOUT_CHAT_POLL_MS);
+  await advance(PILOT_CHAT_POLL_MS);
   expect(bridge.chat.mock.calls.length).toBe(calls + 1);
 });
 
@@ -239,8 +234,8 @@ it("marks nudges seen once they are on screen, each once, and clears the dot", a
     { id: 4, action: "seen" },
     { id: 5, action: "seen" },
   ]);
-  expect(useLookoutIndicator.getState().unread).toBe(0);
-  await advance(LOOKOUT_CHAT_POLL_MS);
+  expect(usePilotIndicator.getState().unread).toBe(0);
+  await advance(PILOT_CHAT_POLL_MS);
   expect(bridge.nudge).toHaveBeenCalledTimes(2);
 });
 
@@ -272,14 +267,14 @@ it("records Got it, and explains a session that ended", async () => {
   expect(card("drafts first").textContent).toContain("Send to session");
 });
 
-it("asks with Enter, shows Lookout thinking, then the answer", async () => {
+it("asks with Enter, shows Pilot thinking, then the answer", async () => {
   let answer: (value: unknown) => void = () => {};
   bridge.ask.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
   await render();
   const field = await typeQuestion("what did I ask yesterday?");
   expect(bridge.ask).toHaveBeenCalledWith({ text: "what did I ask yesterday?" });
   expect(field.value).toBe("");
-  expect(container.textContent).toContain("Lookout is thinking…");
+  expect(container.textContent).toContain("Pilot is thinking…");
   await act(async () =>
     answer(
       ok({
@@ -300,7 +295,7 @@ it("asks with Enter, shows Lookout thinking, then the answer", async () => {
     ),
   );
   await settle();
-  expect(container.textContent).not.toContain("Lookout is thinking…");
+  expect(container.textContent).not.toContain("Pilot is thinking…");
   expect(container.textContent).toContain("You asked to keep the /v1 endpoints.");
   expect(container.textContent?.match(/what did I ask yesterday\?/g)).toHaveLength(1);
 });
@@ -311,16 +306,16 @@ it("cancels a question without leaving it waiting", async () => {
   await typeQuestion("what's waiting on me?");
   await click("Cancel");
   expect(bridge.cancelAsk).toHaveBeenCalledTimes(1);
-  expect(container.textContent).not.toContain("Lookout is thinking…");
+  expect(container.textContent).not.toContain("Pilot is thinking…");
   // The question comes back to the composer and can be sent again at once.
-  const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Lookout"]')!;
+  const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Pilot"]')!;
   expect(field.value).toBe("what's waiting on me?");
   expect(button("Send").disabled).toBe(false);
   await typeQuestion("what's waiting on me?");
   expect(bridge.ask).toHaveBeenCalledTimes(2);
 });
 
-it("leaves a cancelled question in the thread when Lookout already kept it", async () => {
+it("leaves a cancelled question in the thread when Pilot already kept it", async () => {
   bridge.ask.mockImplementation(() => new Promise(() => {}));
   await render();
   await typeQuestion("what's waiting on me now?");
@@ -337,21 +332,21 @@ it("leaves a cancelled question in the thread when Lookout already kept it", asy
       unread: 0,
     }),
   );
-  await advance(LOOKOUT_CHAT_POLL_MS);
+  await advance(PILOT_CHAT_POLL_MS);
   await click("Cancel");
-  const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Lookout"]')!;
+  const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Pilot"]')!;
   expect(field.value).toBe("");
   expect(container.textContent?.match(/what's waiting on me now\?/g)).toHaveLength(1);
 });
 
-it("says plainly when Lookout is not running, without Watching", async () => {
+it("says plainly when Pilot is not running, without Watching", async () => {
   bridge.status.mockResolvedValue(
     ok({ ...STATUS, daemon: { running: false, pid: null, heartbeatAt: null } }),
   );
   bridge.chat.mockResolvedValue(ok({ messages: [], unread: 0 }));
   await render();
   expect(container.textContent).toContain("Not running");
-  expect(container.textContent).toContain("Lookout starts with your next Claude Code session.");
+  expect(container.textContent).toContain("Pilot starts with your next Claude Code session.");
   expect(container.textContent).not.toContain("Watching");
 });
 
@@ -359,24 +354,24 @@ it("shows how many sessions it watches when nothing needs saying", async () => {
   bridge.chat.mockResolvedValue(ok({ messages: [], unread: 0 }));
   await render();
   expect(container.textContent).toContain(
-    "Watching 3 sessions. Lookout speaks up when you're about to forget something.",
+    "Watching 3 sessions. Pilot speaks up when you're about to forget something.",
   );
 });
 
-it("asks an older Lookout to update instead of calling chat", async () => {
+it("asks an older Pilot to update instead of calling chat", async () => {
   const { unread: _unread, sessions: _sessions, reviewWork: _reviewWork, ...older } = STATUS;
   bridge.status.mockResolvedValue(ok(older));
   await render();
-  expect(container.textContent).toContain("Update Lookout to chat");
+  expect(container.textContent).toContain("Update Pilot to chat");
   expect(bridge.chat).not.toHaveBeenCalled();
 });
 
-it("shows the install command when Lookout is missing", async () => {
-  bridge.status.mockResolvedValue({ installed: false, launcher: "/Users/me/.lookout/bin/lookout" });
+it("shows the install command when Pilot is missing", async () => {
+  bridge.status.mockResolvedValue({ installed: false, launcher: "/Users/me/.pilot/bin/pilot" });
   await render();
-  expect(container.textContent).toContain("Lookout isn't installed");
+  expect(container.textContent).toContain("Pilot isn't installed");
   expect(container.textContent).toContain("Not installed");
-  expect(container.textContent).toContain("<path-to-lookout-checkout>/scripts/lookout install");
+  expect(container.textContent).toContain("<path-to-pilot-checkout>/scripts/pilot install");
   expect(bridge.chat).not.toHaveBeenCalled();
   await click("Check again");
   expect(bridge.status).toHaveBeenCalledTimes(2);

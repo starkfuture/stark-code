@@ -1,25 +1,23 @@
 import type {
-  LookoutActivityEvent,
-  LookoutActivityRun,
-  LookoutMessage,
-  LookoutMessageState,
-  LookoutNudgeKind,
-  LookoutQuote,
-  LookoutRepo,
-  LookoutResponse,
-  LookoutStatus,
+  PilotActivityEvent,
+  PilotActivityRun,
+  PilotMessage,
+  PilotMessageState,
+  PilotNudgeKind,
+  PilotQuote,
+  PilotRepo,
+  PilotResponse,
+  PilotStatus,
 } from "@starkfuture/contracts";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 
-export type LookoutWatchState = "watching" | "paused" | "not-running" | "not-installed" | "unknown";
+export type PilotWatchState = "watching" | "paused" | "not-running" | "not-installed" | "unknown";
 
 /**
- * One word for the status dot: is Lookout watching right now? A stopped
+ * One word for the status dot: is Pilot watching right now? A stopped
  * daemon is "not running" even when paused, so "Watching" never shows beside it.
  */
-export function lookoutWatchState(
-  response: LookoutResponse<LookoutStatus> | null,
-): LookoutWatchState {
+export function pilotWatchState(response: PilotResponse<PilotStatus> | null): PilotWatchState {
   if (response === null) return "unknown";
   if (!response.installed) return "not-installed";
   if (!response.ok) return "unknown";
@@ -27,7 +25,7 @@ export function lookoutWatchState(
   return response.value.paused ? "paused" : "watching";
 }
 
-export const WATCH_STATE_LABELS: Record<LookoutWatchState, string> = {
+export const WATCH_STATE_LABELS: Record<PilotWatchState, string> = {
   watching: "Watching",
   paused: "Paused",
   "not-running": "Not running",
@@ -35,8 +33,8 @@ export const WATCH_STATE_LABELS: Record<LookoutWatchState, string> = {
   unknown: "Checking",
 };
 
-/** Lookout versions before the chat report no unread count and have no `chat` method. */
-export const chatSupported = (status: LookoutStatus) => status.unread !== undefined;
+/** Pilot versions before the chat report no unread count and have no `chat` method. */
+export const chatSupported = (status: PilotStatus) => status.unread !== undefined;
 
 /** Dollars with cents, or whole dollars when there are none: "$1.20", "$10". */
 export function formatDollars(cents: number): string {
@@ -44,24 +42,24 @@ export function formatDollars(cents: number): string {
   return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
 }
 
-/** "$1.20 of $10 today" for Lookout's usual 24-hour window. */
-export function budgetLabel(budget: LookoutStatus["budget"]): string {
+/** "$1.20 of $10 today" for Pilot's usual 24-hour window. */
+export function budgetLabel(budget: PilotStatus["budget"]): string {
   const window = budget.windowHours === 24 ? "today" : `in the last ${budget.windowHours} h`;
   return `${formatDollars(budget.spentCents)} of ${formatDollars(budget.capCents)} ${window}`;
 }
 
-/** The empty thread's promise, which never says "Watching" unless Lookout is. */
-export function emptyThreadText(state: LookoutWatchState, sessions: number | undefined): string {
-  if (state === "not-running") return "Lookout starts with your next Claude Code session.";
-  if (state === "paused") return "Lookout is paused. Resume it to hear when you forget something.";
+/** The empty thread's promise, which never says "Watching" unless Pilot is. */
+export function emptyThreadText(state: PilotWatchState, sessions: number | undefined): string {
+  if (state === "not-running") return "Pilot starts with your next Claude Code session.";
+  if (state === "paused") return "Pilot is paused. Resume it to hear when you forget something.";
   const watching =
     sessions === undefined || sessions <= 0
       ? "Watching your Claude Code sessions."
       : `Watching ${sessions === 1 ? "1 session" : `${sessions} sessions`}.`;
-  return `${watching} Lookout speaks up when you're about to forget something.`;
+  return `${watching} Pilot speaks up when you're about to forget something.`;
 }
 
-export const NUDGE_KIND_LABELS: Record<LookoutNudgeKind, string> = {
+export const NUDGE_KIND_LABELS: Record<PilotNudgeKind, string> = {
   rule: "Your rule",
   earlier: "You said earlier",
   pending: "Waiting on you",
@@ -75,10 +73,10 @@ export const NUDGE_KIND_BADGES = {
   pending: "warning",
   missing: "secondary",
   risky: "error",
-} as const satisfies Record<LookoutNudgeKind, string>;
+} as const satisfies Record<PilotNudgeKind, string>;
 
 /** What happened to a nudge after the person acted on it, or null while it still waits. */
-export function nudgeOutcome(state: LookoutMessageState): string | null {
+export function nudgeOutcome(state: PilotMessageState): string | null {
   switch (state) {
     case "sent":
       return "Sent to the session";
@@ -93,7 +91,7 @@ export function nudgeOutcome(state: LookoutMessageState): string | null {
   }
 }
 
-/** Lookout's words for a refused nudge action, in words for the person. */
+/** Pilot's words for a refused nudge action, in words for the person. */
 export function nudgeErrorText(error: string): string {
   return /session ended/i.test(error)
     ? "That session has ended, so this can't go into its next turn."
@@ -102,24 +100,24 @@ export function nudgeErrorText(error: string): string {
 
 /** The thread in id order, with each message replaced by its newest copy. */
 export function mergeMessages(
-  current: readonly LookoutMessage[],
-  incoming: readonly LookoutMessage[],
-): LookoutMessage[] {
-  if (incoming.length === 0) return current as LookoutMessage[];
+  current: readonly PilotMessage[],
+  incoming: readonly PilotMessage[],
+): PilotMessage[] {
+  if (incoming.length === 0) return current as PilotMessage[];
   const byId = new Map(current.map((message) => [message.id, message]));
   for (const message of incoming) byId.set(message.id, message);
   return [...byId.values()].toSorted((a, b) => a.id - b.id);
 }
 
-export const newestMessageId = (messages: readonly LookoutMessage[]) =>
+export const newestMessageId = (messages: readonly PilotMessage[]) =>
   messages.length === 0 ? null : messages[messages.length - 1]!.id;
 
 /**
- * Whether the question being answered still needs its own bubble: Lookout may
+ * Whether the question being answered still needs its own bubble: Pilot may
  * store the question before it answers, and the next poll then shows it.
  */
 export function pendingQuestionShown(
-  messages: readonly LookoutMessage[],
+  messages: readonly PilotMessage[],
   pending: { readonly text: string; readonly afterId: number | null },
 ): boolean {
   const text = pending.text.trim();
@@ -150,7 +148,7 @@ function fileLabel(where: string): string {
 }
 
 /** Where a quote comes from, in plain words: "CLAUDE.md:12", "You, in billing · fix rounding · 2h ago". */
-export function quoteSourceLabel(quote: Pick<LookoutQuote, "source" | "where">): string {
+export function quoteSourceLabel(quote: Pick<PilotQuote, "source" | "where">): string {
   switch (quote.source) {
     case "rule":
     case "memory":
@@ -164,7 +162,7 @@ export function quoteSourceLabel(quote: Pick<LookoutQuote, "source" | "where">):
           ? "You"
           : quote.source === "session"
             ? "The session said"
-            : "Lookout said earlier";
+            : "Pilot said earlier";
       const place = label ? `${who}, in ${label}` : who;
       // The time ("2h ago") never breaks across lines.
       return time ? `${place} ·\u00a0${time.replaceAll(" ", "\u00a0")}` : place;
@@ -179,7 +177,7 @@ const trimSeparators = (path: string) => path.replace(/[\\/]+$/, "");
  * root when repositories nest (a worktree inside a checkout).
  */
 export function repoForPath(
-  repos: readonly Pick<LookoutRepo, "key" | "root">[],
+  repos: readonly Pick<PilotRepo, "key" | "root">[],
   projectRoot: string | null | undefined,
 ): string | null {
   if (!projectRoot) return null;
@@ -227,11 +225,11 @@ const RUN_TRIGGERS: Record<string, string> = {
   "changed-outside-edits": "after files changed outside the session",
   manual: "on request",
   escalation: "to look closer",
-  onboard: "when Lookout started watching",
+  onboard: "when Pilot started watching",
 };
 
 /**
- * A run summary without Lookout's internal markup: phase tags such as
+ * A run summary without Pilot's internal markup: phase tags such as
  * "[checkpoint]", "finding(s)", snapshot ids and pointers to the CLI.
  */
 export function plainRunSummary(summary: string): string {
@@ -241,7 +239,7 @@ export function plainRunSummary(summary: string): string {
       line
         .replace(/^\s*(\[[^\]]*\]\s*)+/, "")
         .replace(/\s*\[[A-Z][^\]]*\]/g, "")
-        .replace(/\s*\(details: lookout runs\)/gi, "")
+        .replace(/\s*\(details: pilot runs\)/gi, "")
         .replace(/\b(\d+) finding\(s\)/g, (_, count: string) =>
           count === "1" ? "1 finding" : `${count} findings`,
         )
@@ -253,13 +251,13 @@ export function plainRunSummary(summary: string): string {
   return text ? text[0]!.toUpperCase() + text.slice(1) : "";
 }
 
-/** One Lookout run in plain words; unknown kinds, statuses and triggers are left out, never shown raw. */
-export function describeRun(run: LookoutActivityRun): {
+/** One Pilot run in plain words; unknown kinds, statuses and triggers are left out, never shown raw. */
+export function describeRun(run: PilotActivityRun): {
   readonly title: string;
   readonly detail: string;
   readonly summary: string | null;
 } {
-  const kind = RUN_KINDS[run.kind] ?? "Lookout check";
+  const kind = RUN_KINDS[run.kind] ?? "Pilot check";
   const status = RUN_STATUSES[run.status];
   const trigger = run.trigger
     ?.split("+")
@@ -275,7 +273,7 @@ export function describeRun(run: LookoutActivityRun): {
 }
 
 /** One session event in plain words. */
-export function describeEvent(event: LookoutActivityEvent): string {
+export function describeEvent(event: PilotActivityEvent): string {
   const subagent = event.agentType ? " (subagent)" : "";
   switch (event.kind) {
     case "prompt":

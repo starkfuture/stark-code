@@ -329,22 +329,22 @@ Claude or Codex program in the main conversation area. **Terminal below chat**
 controls the separate bottom drawer. Chat details, including branch and working
 folder controls, are also available in Tools.
 
-## Ask Lookout what you're forgetting
+## Ask Pilot what you're forgetting
 
-Lookout runs beside Claude Code on this Mac. It reads what you ask your
+Pilot runs beside Claude Code on this Mac. It reads what you ask your
 sessions and speaks up only when it can quote what you're about to forget: a
 rule you wrote, something you said earlier, a question still waiting on you, or
 a fact that matters before something hard to undo. In the desktop app, choose
-the Lookout icon in the top bar, or **Tools → Lookout**. A dot on the icon means
-Lookout has said something you haven't seen.
+the Pilot icon in the top bar, or **Tools → Pilot**. A dot on the icon means
+Pilot has said something you haven't seen.
 
 Each reminder quotes its source. **Send to session** adds it to that session's
-next turn, **Got it** files it, and **Not useful** tells Lookout to speak up less
-often about that kind of thing. You can also ask Lookout about your own sessions,
-such as "what's waiting on me?". The **…** menu pauses Lookout and shows the
+next turn, **Got it** files it, and **Not useful** tells Pilot to speak up less
+often about that kind of thing. You can also ask Pilot about your own sessions,
+such as "what's waiting on me?". The **…** menu pauses Pilot and shows the
 repositories it watches, what it has done recently, and today's budget.
 
-Lookout is installed separately. Until it is, the panel shows the install command.
+Pilot is installed separately. Until it is, the panel shows the install command.
 
 ## View Stark Pages
 

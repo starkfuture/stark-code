@@ -13,7 +13,7 @@ import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
 import { PUBLISHED_PAGES_CHANNELS } from "./ipc/publishedPagesChannels.ts";
-import { LOOKOUT_CHANNELS } from "./ipc/lookoutChannels.ts";
+import { PILOT_CHANNELS } from "./ipc/pilotChannels.ts";
 import { mergeLegacyLocalStorage } from "./legacyLocalStorageMerge.ts";
 
 const SNAP_SHOT_EVENT_TYPES = new Set([
@@ -239,17 +239,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     read: (input) => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.read, input),
     openPage: (input) => ipcRenderer.invoke(PUBLISHED_PAGES_CHANNELS.openPage, input),
   },
-  lookout: {
-    status: () => ipcRenderer.invoke(LOOKOUT_CHANNELS.status),
-    findings: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.findings, input),
-    activity: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.activity, input),
-    decide: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.decide, input),
-    pause: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.pause, input),
-    resume: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.resume, input),
-    chat: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.chat, input),
-    ask: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.ask, input),
-    cancelAsk: () => ipcRenderer.invoke(LOOKOUT_CHANNELS.cancelAsk),
-    nudge: (input) => ipcRenderer.invoke(LOOKOUT_CHANNELS.nudge, input),
+  pilot: {
+    status: () => ipcRenderer.invoke(PILOT_CHANNELS.status),
+    findings: (input) => ipcRenderer.invoke(PILOT_CHANNELS.findings, input),
+    activity: (input) => ipcRenderer.invoke(PILOT_CHANNELS.activity, input),
+    decide: (input) => ipcRenderer.invoke(PILOT_CHANNELS.decide, input),
+    pause: (input) => ipcRenderer.invoke(PILOT_CHANNELS.pause, input),
+    resume: (input) => ipcRenderer.invoke(PILOT_CHANNELS.resume, input),
+    chat: (input) => ipcRenderer.invoke(PILOT_CHANNELS.chat, input),
+    ask: (input) => ipcRenderer.invoke(PILOT_CHANNELS.ask, input),
+    cancelAsk: () => ipcRenderer.invoke(PILOT_CHANNELS.cancelAsk),
+    nudge: (input) => ipcRenderer.invoke(PILOT_CHANNELS.nudge, input),
   },
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),

@@ -50,7 +50,7 @@ interface ChatHeaderProps {
   parentThreadLink: { threadId: ThreadId; title: string } | null;
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
-  /** One more window-level control (Lookout) sits beside Tools, so keep clear of it. */
+  /** One more window-level control (Pilot) sits beside Tools, so keep clear of it. */
   wideTitlebarControls?: boolean;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;

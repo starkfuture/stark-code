@@ -5,13 +5,13 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
-import * as Lookout from "../../lookout/Lookout.ts";
-import { ask, cancelAsk, chat, decide, findings, nudge, pause, status } from "./lookout.ts";
+import * as Pilot from "../../pilot/Pilot.ts";
+import { ask, cancelAsk, chat, decide, findings, nudge, pause, status } from "./pilot.ts";
 
 // These tests provide the Electron services; importing the package must not download a runtime.
 vi.mock("electron", () => ({}));
 
-describe("Lookout IPC", () => {
+describe("Pilot IPC", () => {
   const mainFrame = { url: "http://127.0.0.1:5733/chat" };
   const window = { webContents: { id: 7, mainFrame } };
   const trusted = { sender: { id: 7 }, senderFrame: mainFrame };
@@ -26,7 +26,7 @@ describe("Lookout IPC", () => {
         isDevelopment: true,
         devServerUrl: Option.some(new URL("http://127.0.0.1:5733/")),
       } as never),
-      Effect.provideService(Lookout.Lookout, {
+      Effect.provideService(Pilot.Pilot, {
         status: () =>
           Effect.sync(() => (calls.push("status"), { installed: false, launcher: "/x" })),
         findings: () =>
@@ -80,7 +80,7 @@ describe("Lookout IPC", () => {
               isDevelopment,
               devServerUrl: Option.none(),
             } as never),
-            Effect.provideService(Lookout.Lookout, {
+            Effect.provideService(Pilot.Pilot, {
               status: () => Effect.succeed(answer),
             } as never),
           ),
@@ -119,7 +119,7 @@ describe("Lookout IPC", () => {
   );
 });
 
-describe("Lookout chat IPC", () => {
+describe("Pilot chat IPC", () => {
   const mainFrame = { url: "starkcode://app/chat" };
   const window = { webContents: { id: 3, mainFrame } };
   const trusted = { sender: { id: 3 }, senderFrame: mainFrame };
@@ -133,7 +133,7 @@ describe("Lookout chat IPC", () => {
         isDevelopment: false,
         devServerUrl: Option.none(),
       } as never),
-      Effect.provideService(Lookout.Lookout, {
+      Effect.provideService(Pilot.Pilot, {
         chat: () =>
           Effect.sync(
             () => (

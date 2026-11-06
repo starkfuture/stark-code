@@ -1,24 +1,24 @@
 import {
-  LOOKOUT_ASK_MAX_LENGTH,
-  LOOKOUT_NOTE_MAX_LENGTH,
-  LookoutActivity,
-  LookoutAnswer,
-  LookoutChat,
-  LookoutDecision,
-  LookoutFindings,
-  LookoutNudgeResult,
-  LookoutPauseState,
-  LookoutStatus,
-  type LookoutActivityInput,
-  type LookoutAskInput,
-  type LookoutCancelAskResult,
-  type LookoutChatInput,
-  type LookoutDecideInput,
-  type LookoutFailureReason,
-  type LookoutFindingsInput,
-  type LookoutNudgeInput,
-  type LookoutPauseInput,
-  type LookoutResponse,
+  PILOT_ASK_MAX_LENGTH,
+  PILOT_NOTE_MAX_LENGTH,
+  PilotActivity,
+  PilotAnswer,
+  PilotChat,
+  PilotDecision,
+  PilotFindings,
+  PilotNudgeResult,
+  PilotPauseState,
+  PilotStatus,
+  type PilotActivityInput,
+  type PilotAskInput,
+  type PilotCancelAskResult,
+  type PilotChatInput,
+  type PilotDecideInput,
+  type PilotFailureReason,
+  type PilotFindingsInput,
+  type PilotNudgeInput,
+  type PilotPauseInput,
+  type PilotResponse,
 } from "@starkfuture/contracts";
 import * as HostProcess from "@starkfuture/shared/HostProcess";
 import * as Context from "effect/Context";
@@ -35,19 +35,19 @@ import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-// Lookout is a separate reviewer installed on this Mac. Its stable launcher
-// `$LOOKOUT_HOME/bin/lookout` answers `lookout api <method>` with one JSON
+// Pilot is a separate reviewer installed on this Mac. Its stable launcher
+// `$PILOT_HOME/bin/pilot` answers `pilot api <method>` with one JSON
 // object on stdout (API version 1). The renderer never chooses the binary or
 // its arguments; this service builds both and decodes the answer strictly.
 // Output can quote source code, so it is never logged.
 
 const API_VERSION = 1;
 const TIMEOUT_SECONDS = 10;
-/** Lookout answers a question within 60 seconds or reports its own timeout; allow for its start-up. */
+/** Pilot answers a question within 60 seconds or reports its own timeout; allow for its start-up. */
 const ASK_TIMEOUT_SECONDS = 70;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_ERROR_LENGTH = 500;
-/** Matches Lookout's `<repo>#<id>` handle; the repository part is a name, key or path. */
+/** Matches Pilot's `<repo>#<id>` handle; the repository part is a name, key or path. */
 const FINDING_REF = /^[^#\r\n]{1,200}#\d{1,9}$/;
 
 type Flags = Readonly<Record<string, string | number | boolean | undefined>>;
@@ -56,7 +56,7 @@ type Flags = Readonly<Record<string, string | number | boolean | undefined>>;
  * The argv for one API call. Values are always attached as `--name=value`, so a
  * note or repository name that starts with "-" can never be read as a flag.
  */
-const lookoutArgs = (method: string, flags: Flags = {}): string[] => {
+const pilotArgs = (method: string, flags: Flags = {}): string[] => {
   const args = ["api", method];
   for (const [name, value] of Object.entries(flags)) {
     if (value === undefined || value === false) continue;
@@ -66,23 +66,23 @@ const lookoutArgs = (method: string, flags: Flags = {}): string[] => {
 };
 
 /** Why a question cannot be sent, in words for the panel, or null when it can. */
-export const askInputError = (input: LookoutAskInput): string | null => {
+export const askInputError = (input: PilotAskInput): string | null => {
   if (input.text.trim().length === 0) return "Write a question first.";
-  if (input.text.length > LOOKOUT_ASK_MAX_LENGTH)
-    return `Keep the question under ${LOOKOUT_ASK_MAX_LENGTH} characters.`;
+  if (input.text.length > PILOT_ASK_MAX_LENGTH)
+    return `Keep the question under ${PILOT_ASK_MAX_LENGTH} characters.`;
   // A command-line argument cannot carry a NUL character.
-  if (input.text.includes("\0")) return "The question contains a character Lookout cannot read.";
+  if (input.text.includes("\0")) return "The question contains a character Pilot cannot read.";
   return null;
 };
 
 /** Why a decision cannot be sent, in words for the panel, or null when it can. */
-export const decideInputError = (input: LookoutDecideInput): string | null => {
+export const decideInputError = (input: PilotDecideInput): string | null => {
   if (!FINDING_REF.test(input.ref)) return "That finding reference is not valid.";
   const note = input.note?.trim() ?? "";
   if (input.action !== "reopen" && note.length === 0)
     return `Add a short reason to ${input.action} this finding.`;
-  if (note.length > LOOKOUT_NOTE_MAX_LENGTH)
-    return `Keep the reason under ${LOOKOUT_NOTE_MAX_LENGTH} characters.`;
+  if (note.length > PILOT_NOTE_MAX_LENGTH)
+    return `Keep the reason under ${PILOT_NOTE_MAX_LENGTH} characters.`;
   if (input.until !== undefined && Number.isNaN(Date.parse(input.until)))
     return "The defer date is not a valid date.";
   return null;
@@ -90,61 +90,60 @@ export const decideInputError = (input: LookoutDecideInput): string | null => {
 
 const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
-const fail = (reason: LookoutFailureReason, error: string) =>
+const fail = (reason: PilotFailureReason, error: string) =>
   ({ installed: true, ok: false, reason, error: error.slice(0, MAX_ERROR_LENGTH) }) as const;
 
 /**
- * Turns one finished `lookout api` run into a response. Exit 1 with
- * `{"api":1,"error":…}` is Lookout's own error; any other shape is
+ * Turns one finished `pilot api` run into a response. Exit 1 with
+ * `{"api":1,"error":…}` is Pilot's own error; any other shape is
  * reported without forwarding the raw output.
  */
-const interpretLookoutOutput = <A>(
+const interpretPilotOutput = <A>(
   decode: (value: unknown) => Option.Option<A>,
   stdout: string,
   exitCode: number,
-): LookoutResponse<A> => {
+): PilotResponse<A> => {
   // `/bin/sh` reports a missing `node` for the launcher's `exec node …` as 127.
   if (exitCode === 127)
     return fail(
       "unavailable",
-      "Lookout could not start. Check that Node.js 22.18 or newer is on your PATH.",
+      "Pilot could not start. Check that Node.js 22.18 or newer is on your PATH.",
     );
   const parsed = parseJson(stdout);
   if (Option.isNone(parsed))
     return fail(
       "failed",
       exitCode === 0
-        ? "Lookout answered with something the app could not read."
-        : `Lookout stopped with exit code ${exitCode}.`,
+        ? "Pilot answered with something the app could not read."
+        : `Pilot stopped with exit code ${exitCode}.`,
     );
   const body = parsed.value;
   if (typeof body !== "object" || body === null || Array.isArray(body))
-    return fail("failed", "Lookout answered with something the app could not read.");
+    return fail("failed", "Pilot answered with something the app could not read.");
   const { api, error } = body as { api?: unknown; error?: unknown };
   if (api !== API_VERSION)
     return fail(
       "incompatible",
-      "This Lookout version speaks a different API. Update Lookout or Stark Code.",
+      "This Pilot version speaks a different API. Update Pilot or Stark Code.",
     );
-  if (typeof error === "string")
-    return fail("failed", error.trim() || "Lookout reported an error.");
-  if (exitCode !== 0) return fail("failed", `Lookout stopped with exit code ${exitCode}.`);
+  if (typeof error === "string") return fail("failed", error.trim() || "Pilot reported an error.");
+  if (exitCode !== 0) return fail("failed", `Pilot stopped with exit code ${exitCode}.`);
   const value = decode(body);
   return Option.isSome(value)
     ? { installed: true, ok: true, value: value.value }
     : fail(
         "incompatible",
-        "Lookout sent data this version of Stark Code does not understand. Update Stark Code.",
+        "Pilot sent data this version of Stark Code does not understand. Update Stark Code.",
       );
 };
 
-/** `LOOKOUT_HOME` with a leading `~` expanded, like Lookout itself resolves it. */
-const lookoutHome = (
+/** `PILOT_HOME` with a leading `~` expanded, like Pilot itself resolves it. */
+const pilotHome = (
   configured: string | undefined,
   homeDirectory: string,
   path: Path.Path,
 ): string => {
-  const value = configured?.trim() || "~/.lookout";
+  const value = configured?.trim() || "~/.pilot";
   const expanded =
     value === "~"
       ? homeDirectory
@@ -157,39 +156,31 @@ const lookoutHome = (
 type Outcome = { readonly stdout: string; readonly exitCode: number };
 type RunError = "unavailable" | "too-large" | "failed";
 
-export class Lookout extends Context.Service<
-  Lookout,
+export class Pilot extends Context.Service<
+  Pilot,
   {
-    readonly status: () => Effect.Effect<LookoutResponse<LookoutStatus>>;
-    readonly findings: (
-      input: LookoutFindingsInput,
-    ) => Effect.Effect<LookoutResponse<LookoutFindings>>;
-    readonly activity: (
-      input: LookoutActivityInput,
-    ) => Effect.Effect<LookoutResponse<LookoutActivity>>;
-    readonly decide: (input: LookoutDecideInput) => Effect.Effect<LookoutResponse<LookoutDecision>>;
-    readonly pause: (input: LookoutPauseInput) => Effect.Effect<LookoutResponse<LookoutPauseState>>;
-    readonly resume: (
-      input: LookoutPauseInput,
-    ) => Effect.Effect<LookoutResponse<LookoutPauseState>>;
-    readonly chat: (input: LookoutChatInput) => Effect.Effect<LookoutResponse<LookoutChat>>;
+    readonly status: () => Effect.Effect<PilotResponse<PilotStatus>>;
+    readonly findings: (input: PilotFindingsInput) => Effect.Effect<PilotResponse<PilotFindings>>;
+    readonly activity: (input: PilotActivityInput) => Effect.Effect<PilotResponse<PilotActivity>>;
+    readonly decide: (input: PilotDecideInput) => Effect.Effect<PilotResponse<PilotDecision>>;
+    readonly pause: (input: PilotPauseInput) => Effect.Effect<PilotResponse<PilotPauseState>>;
+    readonly resume: (input: PilotPauseInput) => Effect.Effect<PilotResponse<PilotPauseState>>;
+    readonly chat: (input: PilotChatInput) => Effect.Effect<PilotResponse<PilotChat>>;
     /** One question at a time: a new question, or `cancelAsk`, stops the one in flight. */
-    readonly ask: (input: LookoutAskInput) => Effect.Effect<LookoutResponse<LookoutAnswer>>;
-    readonly cancelAsk: () => Effect.Effect<LookoutCancelAskResult>;
-    readonly nudge: (
-      input: LookoutNudgeInput,
-    ) => Effect.Effect<LookoutResponse<LookoutNudgeResult>>;
+    readonly ask: (input: PilotAskInput) => Effect.Effect<PilotResponse<PilotAnswer>>;
+    readonly cancelAsk: () => Effect.Effect<PilotCancelAskResult>;
+    readonly nudge: (input: PilotNudgeInput) => Effect.Effect<PilotResponse<PilotNudgeResult>>;
   }
->()("@starkfuture/desktop/lookout/Lookout") {}
+>()("@starkfuture/desktop/pilot/Pilot") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  // Decisions and pauses write Lookout's databases; send them one at a time.
+  // Decisions and pauses write Pilot's databases; send them one at a time.
   const mutations = yield* Semaphore.make(1);
-  const reads = new Map<string, Deferred.Deferred<LookoutResponse<unknown>>>();
+  const reads = new Map<string, Deferred.Deferred<PilotResponse<unknown>>>();
   // Completing it stops the question in flight; its process is killed as the run's scope closes.
   let stopCurrentAsk: Deferred.Deferred<void> | null = null;
 
@@ -216,12 +207,12 @@ export const make = Effect.gen(function* () {
     flags: Flags,
     decode: (value: unknown) => Option.Option<A>,
     timeoutSeconds = TIMEOUT_SECONDS,
-  ): Effect.Effect<LookoutResponse<A>> =>
+  ): Effect.Effect<PilotResponse<A>> =>
     Effect.gen(function* () {
       const environment = yield* HostProcess.Environment;
       const homeDirectory = yield* HostProcess.HomeDirectory;
-      const home = lookoutHome(environment.LOOKOUT_HOME, homeDirectory, path);
-      const launcher = path.join(home, "bin", "lookout");
+      const home = pilotHome(environment.PILOT_HOME, homeDirectory, path);
+      const launcher = path.join(home, "bin", "pilot");
       if (!(yield* isExecutableFile(launcher))) return { installed: false, launcher } as const;
 
       const outcome = yield* Effect.scoped(
@@ -229,16 +220,16 @@ export const make = Effect.gen(function* () {
           // No shell: the kernel runs the launcher's `#!/bin/sh` line itself.
           const handle = yield* spawner
             .spawn(
-              ChildProcess.make(launcher, lookoutArgs(method, flags), {
+              ChildProcess.make(launcher, pilotArgs(method, flags), {
                 cwd: homeDirectory,
-                env: { ...environment, LOOKOUT_HOME: home, NO_COLOR: "1" },
+                env: { ...environment, PILOT_HOME: home, NO_COLOR: "1" },
                 stdin: "ignore",
                 killSignal: "SIGTERM",
                 forceKillAfter: "2 seconds",
               }),
             )
             .pipe(Effect.mapError((): RunError => "unavailable"));
-          // Drain stderr so a chatty Lookout cannot block on a full pipe.
+          // Drain stderr so a chatty Pilot cannot block on a full pipe.
           const [stdout, , exitCode] = yield* Effect.all(
             [
               readCapped(handle.stdout),
@@ -257,27 +248,27 @@ export const make = Effect.gen(function* () {
       if (Result.isFailure(outcome)) {
         switch (outcome.failure) {
           case "unavailable":
-            return fail("unavailable", "Lookout could not start.");
+            return fail("unavailable", "Pilot could not start.");
           case "too-large":
-            return fail("failed", "Lookout's answer was too large to show.");
+            return fail("failed", "Pilot's answer was too large to show.");
           default:
-            return fail("failed", "Lookout stopped before it answered.");
+            return fail("failed", "Pilot stopped before it answered.");
         }
       }
       if (Option.isNone(outcome.success))
-        return fail("timeout", `Lookout did not answer within ${timeoutSeconds} seconds.`);
+        return fail("timeout", `Pilot did not answer within ${timeoutSeconds} seconds.`);
       const { stdout, exitCode } = outcome.success.value;
-      return interpretLookoutOutput(decode, stdout, exitCode);
-    }).pipe(Effect.withSpan("Lookout.run", { attributes: { method } }));
+      return interpretPilotOutput(decode, stdout, exitCode);
+    }).pipe(Effect.withSpan("Pilot.run", { attributes: { method } }));
 
   /** Identical reads in flight share one process. */
   const read = <A>(method: string, flags: Flags, decode: (value: unknown) => Option.Option<A>) =>
     Effect.suspend(() => {
-      const key = lookoutArgs(method, flags).join("\0");
-      const pending = reads.get(key) as Deferred.Deferred<LookoutResponse<A>> | undefined;
+      const key = pilotArgs(method, flags).join("\0");
+      const pending = reads.get(key) as Deferred.Deferred<PilotResponse<A>> | undefined;
       if (pending) return Deferred.await(pending);
-      const deferred = Deferred.makeUnsafe<LookoutResponse<A>>();
-      reads.set(key, deferred as Deferred.Deferred<LookoutResponse<unknown>>);
+      const deferred = Deferred.makeUnsafe<PilotResponse<A>>();
+      reads.set(key, deferred as Deferred.Deferred<PilotResponse<unknown>>);
       return run(method, flags, decode).pipe(
         Effect.onExit((exit) =>
           Effect.suspend(() => {
@@ -288,14 +279,14 @@ export const make = Effect.gen(function* () {
       );
     });
 
-  const decodeStatus = Schema.decodeUnknownOption(LookoutStatus);
-  const decodeFindings = Schema.decodeUnknownOption(LookoutFindings);
-  const decodeActivity = Schema.decodeUnknownOption(LookoutActivity);
-  const decodeDecision = Schema.decodeUnknownOption(LookoutDecision);
-  const decodePause = Schema.decodeUnknownOption(LookoutPauseState);
-  const decodeChat = Schema.decodeUnknownOption(LookoutChat);
-  const decodeAnswer = Schema.decodeUnknownOption(LookoutAnswer);
-  const decodeNudge = Schema.decodeUnknownOption(LookoutNudgeResult);
+  const decodeStatus = Schema.decodeUnknownOption(PilotStatus);
+  const decodeFindings = Schema.decodeUnknownOption(PilotFindings);
+  const decodeActivity = Schema.decodeUnknownOption(PilotActivity);
+  const decodeDecision = Schema.decodeUnknownOption(PilotDecision);
+  const decodePause = Schema.decodeUnknownOption(PilotPauseState);
+  const decodeChat = Schema.decodeUnknownOption(PilotChat);
+  const decodeAnswer = Schema.decodeUnknownOption(PilotAnswer);
+  const decodeNudge = Schema.decodeUnknownOption(PilotNudgeResult);
 
   const stopAsk = () => {
     const current = stopCurrentAsk;
@@ -304,10 +295,10 @@ export const make = Effect.gen(function* () {
     return current !== null;
   };
 
-  const setPaused = (method: "pause" | "resume", input: LookoutPauseInput) =>
+  const setPaused = (method: "pause" | "resume", input: PilotPauseInput) =>
     mutations.withPermit(run(method, { repo: input.repo }, decodePause));
 
-  return Lookout.of({
+  return Pilot.of({
     status: () => read("status", {}, decodeStatus),
     findings: (input) => read("findings", { repo: input.repo, all: input.all }, decodeFindings),
     activity: (input) => read("activity", { repo: input.repo, limit: input.limit }, decodeActivity),
@@ -337,7 +328,7 @@ export const make = Effect.gen(function* () {
         return run("ask", { text: input.text }, decodeAnswer, ASK_TIMEOUT_SECONDS).pipe(
           Effect.raceFirst(
             Deferred.await(stop).pipe(
-              Effect.as(fail("cancelled", "You stopped waiting for Lookout's answer.")),
+              Effect.as(fail("cancelled", "You stopped waiting for Pilot's answer.")),
             ),
           ),
           Effect.ensuring(
@@ -361,4 +352,4 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(Lookout, make);
+export const layer = Layer.effect(Pilot, make);

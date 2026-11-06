@@ -12,16 +12,16 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as TestClock from "effect/testing/TestClock";
 
-import * as Lookout from "./Lookout.ts";
+import * as Pilot from "./Pilot.ts";
 
-// Shapes captured from `lookout api` (api version 1).
+// Shapes captured from `pilot api` (api version 1).
 const STATUS = {
   api: 1,
   generatedAt: "2026-11-05T16:45:37.436Z",
   daemon: { running: true, pid: 64235, heartbeatAt: "2026-11-05T16:45:36.880Z" },
   paused: false,
   profiles: ["/Users/me/.claude"],
-  home: "/Users/me/.lookout",
+  home: "/Users/me/.pilot",
   mode: "local",
   claudeBin: "/Users/me/.local/bin/claude",
   delivery: "session",
@@ -59,10 +59,10 @@ interface Spawned {
 }
 
 /**
- * A Lookout that answers every call with `reply` and records how it was run.
+ * A Pilot that answers every call with `reply` and records how it was run.
  * With a `gate`, it exits only once the gate opens; `spawned` completes on the first run.
  */
-const fakeLookout = (
+const fakePilot = (
   reply: { stdout?: string | Uint8Array; exitCode?: number },
   gate?: Deferred.Deferred<void>,
 ) => {
@@ -100,8 +100,8 @@ const fakeLookout = (
   return { calls, interrupted, spawner, spawned };
 };
 
-// A chat message as Lookout returns it.
-const message = (id: number, role: "you" | "lookout", text: string) => ({
+// A chat message as Pilot returns it.
+const message = (id: number, role: "you" | "pilot", text: string) => ({
   id,
   at: "2026-11-06T09:13:00.000Z",
   role,
@@ -117,41 +117,41 @@ const message = (id: number, role: "you" | "lookout", text: string) => ({
 const ANSWER = {
   api: 1,
   question: message(42, "you", "what's waiting on me?"),
-  answer: message(43, "lookout", "Nothing is waiting on you."),
+  answer: message(43, "pilot", "Nothing is waiting on you."),
 };
 
-/** A temporary Lookout home, with or without its launcher, and the service reading it. */
+/** A temporary Pilot home, with or without its launcher, and the service reading it. */
 const setup = (
-  fake: ReturnType<typeof fakeLookout>,
+  fake: ReturnType<typeof fakePilot>,
   options: { installed?: boolean; executable?: boolean } = {},
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const homeDirectory = yield* fs.makeTempDirectoryScoped();
-    const home = path.join(homeDirectory, "lookout-home");
-    const launcher = path.join(home, "bin", "lookout");
+    const home = path.join(homeDirectory, "pilot-home");
+    const launcher = path.join(home, "bin", "pilot");
     if (options.installed !== false) {
       yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
       yield* fs.writeFileString(launcher, "#!/bin/sh\nexit 0\n");
       yield* fs.chmod(launcher, options.executable === false ? 0o644 : 0o755);
     }
-    const service = yield* Lookout.make.pipe(
+    const service = yield* Pilot.make.pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, fake.spawner),
     );
     const within = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       effect.pipe(
-        Effect.provideService(HostProcess.Environment, { LOOKOUT_HOME: home, PATH: "/usr/bin" }),
+        Effect.provideService(HostProcess.Environment, { PILOT_HOME: home, PATH: "/usr/bin" }),
         Effect.provideService(HostProcess.HomeDirectory, homeDirectory),
       );
     return { service, within, home, homeDirectory, launcher };
   });
 
-it.layer(NodeServices.layer)("Lookout", (it) => {
+it.layer(NodeServices.layer)("Pilot", (it) => {
   it.effect("reports a missing or non-executable launcher without running anything", () =>
     Effect.gen(function* () {
       for (const options of [{ installed: false }, { executable: false }]) {
-        const fake = fakeLookout({ stdout: JSON.stringify(STATUS) });
+        const fake = fakePilot({ stdout: JSON.stringify(STATUS) });
         const { service, within, launcher } = yield* setup(fake, options);
         expect(yield* within(service.status())).toEqual({ installed: false, launcher });
         expect(fake.calls).toHaveLength(0);
@@ -161,7 +161,7 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
 
   it.effect("runs the launcher without a shell and decodes the status", () =>
     Effect.gen(function* () {
-      const fake = fakeLookout({ stdout: `${JSON.stringify(STATUS)}\n` });
+      const fake = fakePilot({ stdout: `${JSON.stringify(STATUS)}\n` });
       const { service, within, home, homeDirectory, launcher } = yield* setup(fake);
       const response = yield* within(service.status());
       expect(response).toMatchObject({ installed: true, ok: true });
@@ -175,7 +175,7 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
           options: expect.objectContaining({
             cwd: homeDirectory,
             stdin: "ignore",
-            env: expect.objectContaining({ LOOKOUT_HOME: home, NO_COLOR: "1", PATH: "/usr/bin" }),
+            env: expect.objectContaining({ PILOT_HOME: home, NO_COLOR: "1", PATH: "/usr/bin" }),
           }),
         },
       ]);
@@ -185,7 +185,7 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
 
   it.effect("attaches every value to its flag so a leading dash stays a value", () =>
     Effect.gen(function* () {
-      const fake = fakeLookout({
+      const fake = fakePilot({
         stdout: JSON.stringify({ api: 1, error: "no finding" }),
         exitCode: 1,
       });
@@ -217,9 +217,9 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("rejects a decision before running Lookout", () =>
+  it.effect("rejects a decision before running Pilot", () =>
     Effect.gen(function* () {
-      const fake = fakeLookout({ stdout: "{}" });
+      const fake = fakePilot({ stdout: "{}" });
       const { service, within } = yield* setup(fake);
       for (const input of [
         { ref: "no-hash", action: "accept", note: "fine" },
@@ -235,11 +235,11 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
       }
       expect(fake.calls).toHaveLength(0);
       // Reopening needs no reason.
-      expect(Lookout.decideInputError({ ref: "orders#3", action: "reopen" })).toBeNull();
+      expect(Pilot.decideInputError({ ref: "orders#3", action: "reopen" })).toBeNull();
     }).pipe(Effect.scoped),
   );
 
-  it.effect("maps Lookout's own error, bad output, other versions and a missing node", () =>
+  it.effect("maps Pilot's own error, bad output, other versions and a missing node", () =>
     Effect.gen(function* () {
       const cases = [
         [
@@ -249,14 +249,14 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
         [{ stdout: "Error: something broke\n{" }, { reason: "failed" }],
         [
           { stdout: "", exitCode: 2 },
-          { reason: "failed", error: "Lookout stopped with exit code 2." },
+          { reason: "failed", error: "Pilot stopped with exit code 2." },
         ],
         [{ stdout: JSON.stringify({ ...STATUS, api: 2 }) }, { reason: "incompatible" }],
         [{ stdout: JSON.stringify({ ...STATUS, mode: "cloud" }) }, { reason: "incompatible" }],
         [{ stdout: "", exitCode: 127 }, { reason: "unavailable" }],
       ] as const;
       for (const [reply, expected] of cases) {
-        const { service, within } = yield* setup(fakeLookout(reply));
+        const { service, within } = yield* setup(fakePilot(reply));
         expect(yield* within(service.status())).toMatchObject({
           installed: true,
           ok: false,
@@ -269,12 +269,12 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
   it.effect("refuses output larger than the cap", () =>
     Effect.gen(function* () {
       const { service, within } = yield* setup(
-        fakeLookout({ stdout: new Uint8Array(8 * 1024 * 1024 + 1) }),
+        fakePilot({ stdout: new Uint8Array(8 * 1024 * 1024 + 1) }),
       );
       expect(yield* within(service.status())).toMatchObject({
         ok: false,
         reason: "failed",
-        error: "Lookout's answer was too large to show.",
+        error: "Pilot's answer was too large to show.",
       });
     }).pipe(Effect.scoped),
   );
@@ -282,7 +282,7 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
   it.effect("shares one process between identical reads in flight", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
-      const fake = fakeLookout({ stdout: JSON.stringify(STATUS) }, gate);
+      const fake = fakePilot({ stdout: JSON.stringify(STATUS) }, gate);
       const { service, within } = yield* setup(fake);
       const first = yield* within(service.status()).pipe(
         Effect.forkChild({ startImmediately: true }),
@@ -301,7 +301,7 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
 
   it.effect("passes chat, question and nudge values as attached flags", () =>
     Effect.gen(function* () {
-      const fake = fakeLookout({ stdout: JSON.stringify({ api: 1, error: "nope" }), exitCode: 1 });
+      const fake = fakePilot({ stdout: JSON.stringify({ api: 1, error: "nope" }), exitCode: 1 });
       const { service, within } = yield* setup(fake);
       yield* within(service.chat({ since: 40, limit: 200 }));
       yield* within(service.chat({}));
@@ -318,9 +318,9 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("rejects a blank question before running Lookout", () =>
+  it.effect("rejects a blank question before running Pilot", () =>
     Effect.gen(function* () {
-      const fake = fakeLookout({ stdout: JSON.stringify(ANSWER) });
+      const fake = fakePilot({ stdout: JSON.stringify(ANSWER) });
       const { service, within } = yield* setup(fake);
       for (const text of ["   ", "a\0b", "x".repeat(4001)])
         expect(yield* within(service.ask({ text }))).toMatchObject({
@@ -338,7 +338,7 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
   it.effect("waits seventy seconds for an answer, not ten", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
-      const fake = fakeLookout({ stdout: "" }, gate);
+      const fake = fakePilot({ stdout: "" }, gate);
       const { service, within } = yield* setup(fake);
       const call = yield* within(service.ask({ text: "what's waiting on me?" })).pipe(
         Effect.forkChild({ startImmediately: true }),
@@ -350,7 +350,7 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
       expect(yield* Fiber.join(call)).toMatchObject({
         ok: false,
         reason: "timeout",
-        error: "Lookout did not answer within 70 seconds.",
+        error: "Pilot did not answer within 70 seconds.",
       });
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
@@ -358,7 +358,7 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
   it.effect("stops a cancelled question and leaves nothing in flight", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
-      const fake = fakeLookout({ stdout: JSON.stringify(ANSWER) }, gate);
+      const fake = fakePilot({ stdout: JSON.stringify(ANSWER) }, gate);
       const { service, within } = yield* setup(fake);
       expect(yield* service.cancelAsk()).toEqual({ cancelled: false });
       const first = yield* within(service.ask({ text: "first" })).pipe(
@@ -387,7 +387,7 @@ it.layer(NodeServices.layer)("Lookout", (it) => {
   it.effect("gives up after ten seconds", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
-      const fake = fakeLookout({ stdout: "" }, gate);
+      const fake = fakePilot({ stdout: "" }, gate);
       const { service, within } = yield* setup(fake);
       const call = yield* within(service.status()).pipe(
         Effect.forkChild({ startImmediately: true }),

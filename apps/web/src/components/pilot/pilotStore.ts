@@ -1,34 +1,34 @@
-import type { LookoutBridge, LookoutResponse, LookoutStatus } from "@starkfuture/contracts";
+import type { PilotBridge, PilotResponse, PilotStatus } from "@starkfuture/contracts";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { create } from "zustand";
 
 /** The top bar's status check while the panel is closed; the open panel checks the thread instead. */
-export const LOOKOUT_STATUS_POLL_MS = 15_000;
+export const PILOT_STATUS_POLL_MS = 15_000;
 
 /**
- * What the top bar shows for Lookout: whether it is installed, and how many
+ * What the top bar shows for Pilot: whether it is installed, and how many
  * nudges the person has not seen. The panel and the closed-panel check both
- * write it, so the dot follows whichever spoke to Lookout last.
+ * write it, so the dot follows whichever spoke to Pilot last.
  */
-export const useLookoutIndicator = create<{
+export const usePilotIndicator = create<{
   readonly installed: boolean | null;
   readonly unread: number;
 }>(() => ({ installed: null, unread: 0 }));
 
-export function noteLookoutStatus(response: LookoutResponse<LookoutStatus>) {
-  if (!response.installed) useLookoutIndicator.setState({ installed: false, unread: 0 });
+export function notePilotStatus(response: PilotResponse<PilotStatus>) {
+  if (!response.installed) usePilotIndicator.setState({ installed: false, unread: 0 });
   // A failed check keeps the last known count rather than hiding unread nudges.
   else if (response.ok)
-    useLookoutIndicator.setState({ installed: true, unread: response.value.unread ?? 0 });
+    usePilotIndicator.setState({ installed: true, unread: response.value.unread ?? 0 });
 }
 
-export function noteLookoutUnread(unread: number) {
-  useLookoutIndicator.setState({ installed: true, unread: Math.max(0, unread) });
+export function notePilotUnread(unread: number) {
+  usePilotIndicator.setState({ installed: true, unread: Math.max(0, unread) });
 }
 
 /** The person just saw `count` nudges; the next check confirms the real count. */
-export function noteLookoutSeen(count: number) {
-  useLookoutIndicator.setState((state) => ({ unread: Math.max(0, state.unread - count) }));
+export function notePilotSeen(count: number) {
+  usePilotIndicator.setState((state) => ({ unread: Math.max(0, state.unread - count) }));
 }
 
 /**
@@ -95,15 +95,15 @@ export function usePoll(
   return runNow;
 }
 
-/** Keeps the top bar's dot current while the Lookout panel is closed. */
-export function useLookoutStatusWhileClosed(bridge: LookoutBridge | undefined, closed: boolean) {
+/** Keeps the top bar's dot current while the Pilot panel is closed. */
+export function usePilotStatusWhileClosed(bridge: PilotBridge | undefined, closed: boolean) {
   usePoll(
     async (isCurrent) => {
       if (!bridge) return;
       const response = await bridge.status();
-      if (isCurrent()) noteLookoutStatus(response);
+      if (isCurrent()) notePilotStatus(response);
     },
-    LOOKOUT_STATUS_POLL_MS,
+    PILOT_STATUS_POLL_MS,
     bridge !== undefined && closed,
   );
 }

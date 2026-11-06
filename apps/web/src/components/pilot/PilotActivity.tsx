@@ -1,4 +1,4 @@
-import type { LookoutActivity, LookoutRepo } from "@starkfuture/contracts";
+import type { PilotActivity, PilotRepo } from "@starkfuture/contracts";
 import { PauseIcon, PlayIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -6,7 +6,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { Spinner } from "../ui/spinner";
-import { describeEvent, describeRun, formatDollars, withKeys } from "./lookout.logic";
+import { describeEvent, describeRun, formatDollars, withKeys } from "./pilot.logic";
 
 function Heading({ children }: { children: ReactNode }) {
   return <h3 className="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">{children}</h3>;
@@ -16,13 +16,13 @@ function Quiet({ children }: { children: ReactNode }) {
   return <p className="px-3 py-1 text-xs text-muted-foreground">{children}</p>;
 }
 
-/** What Lookout checked and what happened in the sessions it watches, newest first, in plain words. */
-export function LookoutActivityView({ activity }: { activity: LookoutActivity | null }) {
+/** What Pilot checked and what happened in the sessions it watches, newest first, in plain words. */
+export function PilotActivityView({ activity }: { activity: PilotActivity | null }) {
   if (!activity) return <Quiet>Loading recent activity…</Quiet>;
   return (
     <div className="flex flex-col pb-3">
       <section>
-        <Heading>Lookout's checks</Heading>
+        <Heading>Pilot's checks</Heading>
         {activity.runs.length === 0 ? (
           <Quiet>No checks yet.</Quiet>
         ) : (
@@ -89,28 +89,28 @@ export function LookoutActivityView({ activity }: { activity: LookoutActivity | 
   );
 }
 
-export function LookoutRepoList({
+export function PilotRepoList({
   repos,
   preferredRepoKey,
   pendingRepo,
   onSetPaused,
 }: {
-  repos: readonly LookoutRepo[];
+  repos: readonly PilotRepo[];
   preferredRepoKey: string | null;
   pendingRepo: string | null;
-  onSetPaused: (repo: LookoutRepo, paused: boolean) => void;
+  onSetPaused: (repo: PilotRepo, paused: boolean) => void;
 }) {
   if (repos.length === 0)
     return (
       <Quiet>
-        No repositories yet. Lookout starts watching a repository the first time a Claude Code
-        session works in it.
+        No repositories yet. Pilot starts watching a repository the first time a Claude Code session
+        works in it.
       </Quiet>
     );
   return (
     <ul className="flex flex-col py-1" aria-label="Watched repositories">
       {repos.map((repo) => {
-        // Lookout reports a repository with no events yet as the epoch.
+        // Pilot reports a repository with no events yet as the epoch.
         const lastActivity =
           Date.parse(repo.lastEventAt) > 0 ? formatRelativeTimeLabel(repo.lastEventAt) : "";
         return (
@@ -150,7 +150,7 @@ export function LookoutRepoList({
                 size="xs"
                 variant="ghost"
                 disabled={pendingRepo === repo.key}
-                aria-label={`${repo.paused ? "Resume" : "Pause"} Lookout in ${repo.name}`}
+                aria-label={`${repo.paused ? "Resume" : "Pause"} Pilot in ${repo.name}`}
                 onClick={() => onSetPaused(repo, !repo.paused)}
               >
                 {pendingRepo === repo.key ? (

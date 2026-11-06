@@ -132,19 +132,19 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanel(state.byThreadKey, refA)).toBe("files");
   });
 
-  it("docks Lookout like the other auxiliary panels and hands the dock back on close", () => {
+  it("docks Pilot like the other auxiliary panels and hands the dock back on close", () => {
     const store = useRightPanelStore.getState();
     store.open(refA, "files");
-    store.openAuxiliary(refA, "lookout");
+    store.openAuxiliary(refA, "pilot");
     let state = useRightPanelStore.getState();
-    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("lookout");
+    expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("pilot");
     expect(selectActiveRightPanel(state.byThreadKey, refA)).toBeNull();
 
     store.openAuxiliary(refA, "pages");
     state = useRightPanelStore.getState();
     expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBe("pages");
 
-    store.openAuxiliary(refA, "lookout");
+    store.openAuxiliary(refA, "pilot");
     store.close(refA);
     state = useRightPanelStore.getState();
     expect(selectAuxiliaryPanel(state.auxiliaryPanelByThreadKey, refA)).toBeNull();

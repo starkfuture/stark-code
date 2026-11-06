@@ -73,7 +73,7 @@ import * as AppActivationIpc from "./methods/appActivation.ts";
 import * as WebLinksIpc from "./methods/webLinks.ts";
 import * as StarkPagesIpc from "./methods/starkPages.ts";
 import * as PublishedPagesIpc from "./methods/publishedPages.ts";
-import * as LookoutIpc from "./methods/lookout.ts";
+import * as PilotIpc from "./methods/pilot.ts";
 import * as DictationIpc from "./methods/dictation.ts";
 import {
   completeLegacyLocalStorage,
@@ -161,16 +161,16 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(PublishedPagesIpc.listTools);
   yield* ipc.handle(PublishedPagesIpc.read);
   yield* ipc.handle(PublishedPagesIpc.openPage);
-  yield* ipc.handle(LookoutIpc.status);
-  yield* ipc.handle(LookoutIpc.findings);
-  yield* ipc.handle(LookoutIpc.activity);
-  yield* ipc.handle(LookoutIpc.decide);
-  yield* ipc.handle(LookoutIpc.pause);
-  yield* ipc.handle(LookoutIpc.resume);
-  yield* ipc.handle(LookoutIpc.chat);
-  yield* ipc.handle(LookoutIpc.ask);
-  yield* ipc.handle(LookoutIpc.cancelAsk);
-  yield* ipc.handle(LookoutIpc.nudge);
+  yield* ipc.handle(PilotIpc.status);
+  yield* ipc.handle(PilotIpc.findings);
+  yield* ipc.handle(PilotIpc.activity);
+  yield* ipc.handle(PilotIpc.decide);
+  yield* ipc.handle(PilotIpc.pause);
+  yield* ipc.handle(PilotIpc.resume);
+  yield* ipc.handle(PilotIpc.chat);
+  yield* ipc.handle(PilotIpc.ask);
+  yield* ipc.handle(PilotIpc.cancelAsk);
+  yield* ipc.handle(PilotIpc.nudge);
   yield* ipc.handle(StarkPagesIpc.ensureMirror);
   yield* ipc.handle(StarkPagesIpc.openFollow);
   yield* ipc.handle(StarkPagesIpc.openLink);

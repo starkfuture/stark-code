@@ -9,9 +9,9 @@ import { useNeedsYouSelection } from "../needsYouSelection";
 import { requestConfirmDialog } from "../confirmDialog";
 import { NativeAgentShell, nativeAgentTerminalId } from "./NativeAgentShell";
 import { StarkPagesPanel } from "./StarkPagesPanel";
-import { LookoutPanel } from "./lookout/LookoutPanel";
-import { LookoutTopBarToggle } from "./lookout/LookoutTopBarToggle";
-import { useLookoutIndicator, useLookoutStatusWhileClosed } from "./lookout/lookoutStore";
+import { PilotPanel } from "./pilot/PilotPanel";
+import { PilotTopBarToggle } from "./pilot/PilotTopBarToggle";
+import { usePilotIndicator, usePilotStatusWhileClosed } from "./pilot/pilotStore";
 import { StarkPageTabContent } from "./StarkPageTabContent";
 import { ConversationPageTabs, conversationPageTabElementId } from "./ConversationPageTabs";
 import { selectStarkPageTabs, useStarkPageTabs, type StarkPageTarget } from "../starkPageTabs";
@@ -2332,7 +2332,7 @@ export default function ChatView(props: ChatViewProps) {
     threadKey: activeThreadKey,
     pages: auxiliaryPanel === "pages",
     sideWork: sideWorkOpen,
-    lookout: auxiliaryPanel === "lookout",
+    pilot: auxiliaryPanel === "pilot",
   });
   // Keep drafts and readers mounted while changing tools, but never reuse them
   // for another conversation.
@@ -2341,18 +2341,18 @@ export default function ChatView(props: ChatViewProps) {
       threadKey: activeThreadKey,
       pages: auxiliaryPanel === "pages",
       sideWork: sideWorkOpen,
-      lookout: auxiliaryPanel === "lookout",
+      pilot: auxiliaryPanel === "pilot",
     });
   } else if (
     (auxiliaryPanel === "pages" && !visitedPanels.pages) ||
     (sideWorkOpen && !visitedPanels.sideWork) ||
-    (auxiliaryPanel === "lookout" && !visitedPanels.lookout)
+    (auxiliaryPanel === "pilot" && !visitedPanels.pilot)
   ) {
     setVisitedPanels({
       ...visitedPanels,
       pages: visitedPanels.pages || auxiliaryPanel === "pages",
       sideWork: visitedPanels.sideWork || sideWorkOpen,
-      lookout: visitedPanels.lookout || auxiliaryPanel === "lookout",
+      pilot: visitedPanels.pilot || auxiliaryPanel === "pilot",
     });
   }
   const closeAuxiliaryPanel = useCallback(() => {
@@ -2800,18 +2800,15 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [hasPagesWorkspace, pagesTarget]);
   const pagesOpen = pagesAvailable && auxiliaryPanel === "pages";
-  // Lookout watches Claude Code sessions on this computer, so it needs the desktop
+  // Pilot watches Claude Code sessions on this computer, so it needs the desktop
   // bridge. Watched repos mark this conversation's folder only when it is local.
-  const lookoutAvailable = isElectron && window.desktopBridge?.lookout !== undefined;
-  const lookoutOpen = lookoutAvailable && auxiliaryPanel === "lookout";
-  // The top bar's dot needs Lookout's unread count while its panel is closed.
-  useLookoutStatusWhileClosed(
-    lookoutAvailable ? window.desktopBridge?.lookout : undefined,
-    !lookoutOpen,
-  );
-  const lookoutToggleShown =
-    useLookoutIndicator((state) => state.installed === true || lookoutOpen) &&
-    lookoutAvailable &&
+  const pilotAvailable = isElectron && window.desktopBridge?.pilot !== undefined;
+  const pilotOpen = pilotAvailable && auxiliaryPanel === "pilot";
+  // The top bar's dot needs Pilot's unread count while its panel is closed.
+  usePilotStatusWhileClosed(pilotAvailable ? window.desktopBridge?.pilot : undefined, !pilotOpen);
+  const pilotToggleShown =
+    usePilotIndicator((state) => state.installed === true || pilotOpen) &&
+    pilotAvailable &&
     activeThreadRef !== null;
   const pageWorkspaceKey =
     activeThreadKey && activeProject
@@ -2917,7 +2914,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [pageWorkspaceKey, rightPanelOpen, auxiliaryPanel]);
   const pagesInline = !shouldUsePlanSidebarSheet;
   const sideWorkInline = !shouldUsePlanSidebarSheet;
-  const lookoutInline = !shouldUsePlanSidebarSheet;
+  const pilotInline = !shouldUsePlanSidebarSheet;
   const openBookmarkedTurn = useCallback(
     (entryId: string) => {
       if (!activeThreadKey) return;
@@ -12121,16 +12118,16 @@ export default function ChatView(props: ChatViewProps) {
           },
         },
         {
-          id: "lookout",
-          label: "Lookout",
-          disabled: !lookoutAvailable || !activeThreadRef,
-          description: lookoutAvailable
+          id: "pilot",
+          label: "Pilot",
+          disabled: !pilotAvailable || !activeThreadRef,
+          description: pilotAvailable
             ? "Reminds you what you're about to forget"
-            : "Lookout runs in the Stark Code desktop app",
-          active: lookoutOpen,
+            : "Pilot runs in the Stark Code desktop app",
+          active: pilotOpen,
           onSelect: () => {
-            if (activeThreadRef && lookoutAvailable)
-              useRightPanelStore.getState().openAuxiliary(activeThreadRef, "lookout");
+            if (activeThreadRef && pilotAvailable)
+              useRightPanelStore.getState().openAuxiliary(activeThreadRef, "pilot");
           },
         },
         {
@@ -12280,13 +12277,13 @@ export default function ChatView(props: ChatViewProps) {
   // Window-level controls beside the chat or in a docked tool's header.
   const panelToggleControls = (
     <>
-      {lookoutToggleShown ? (
-        <LookoutTopBarToggle
-          open={lookoutOpen}
+      {pilotToggleShown ? (
+        <PilotTopBarToggle
+          open={pilotOpen}
           onToggle={() => {
-            if (lookoutOpen) closeAuxiliaryPanel();
+            if (pilotOpen) closeAuxiliaryPanel();
             else if (activeThreadRef)
-              useRightPanelStore.getState().openAuxiliary(activeThreadRef, "lookout");
+              useRightPanelStore.getState().openAuxiliary(activeThreadRef, "pilot");
           }}
         />
       ) : null}
@@ -12313,7 +12310,7 @@ export default function ChatView(props: ChatViewProps) {
     </Tooltip>
   );
   const panelLayoutControls =
-    pagesOpen || sideWorkOpen || lookoutOpen ? null : (
+    pagesOpen || sideWorkOpen || pilotOpen ? null : (
       <div
         className="fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center gap-1 [-webkit-app-region:no-drag]"
         data-workspace-titlebar-controls
@@ -12404,7 +12401,7 @@ export default function ChatView(props: ChatViewProps) {
             parentThreadLink={parentThreadLink}
             onOpenThread={onOpenRelatedThread}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
-            wideTitlebarControls={lookoutToggleShown}
+            wideTitlebarControls={pilotToggleShown}
             onNewThreadInProject={handleNewThreadInActiveProject}
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
@@ -13222,12 +13219,10 @@ export default function ChatView(props: ChatViewProps) {
               onClose={closeAuxiliaryPanel}
             />
           ) : null}
-          {visitedPanels.threadKey === activeThreadKey &&
-          visitedPanels.lookout &&
-          lookoutAvailable ? (
-            <LookoutPanel
-              active={lookoutOpen}
-              inline={lookoutInline}
+          {visitedPanels.threadKey === activeThreadKey && visitedPanels.pilot && pilotAvailable ? (
+            <PilotPanel
+              active={pilotOpen}
+              inline={pilotInline}
               tools={panelToggleControls}
               projectRoot={
                 pagesAvailable && activeProject
@@ -13269,7 +13264,7 @@ export default function ChatView(props: ChatViewProps) {
         >
           <RightPanelTabs
             mode="inline"
-            titlebarControlsWidth={lookoutToggleShown ? 180 : 148}
+            titlebarControlsWidth={pilotToggleShown ? 180 : 148}
             open={rightPanelOpen}
             keybindings={keybindings}
             getShortcutContext={getShortcutContext}

@@ -1,12 +1,12 @@
 import {
-  LOOKOUT_ASK_MAX_LENGTH,
-  type LookoutActivity,
-  type LookoutBridge,
-  type LookoutMessage,
-  type LookoutNudgeAction,
-  type LookoutRepo,
-  type LookoutResponse,
-  type LookoutStatus,
+  PILOT_ASK_MAX_LENGTH,
+  type PilotActivity,
+  type PilotBridge,
+  type PilotMessage,
+  type PilotNudgeAction,
+  type PilotRepo,
+  type PilotResponse,
+  type PilotStatus,
   type TimestampFormat,
 } from "@starkfuture/contracts";
 import {
@@ -42,38 +42,38 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Textarea } from "../ui/textarea";
-import { LookoutActivityView, LookoutRepoList } from "./LookoutActivity";
-import { LookoutThread, type LookoutPendingQuestion } from "./LookoutThread";
+import { PilotActivityView, PilotRepoList } from "./PilotActivity";
+import { PilotThread, type PilotPendingQuestion } from "./PilotThread";
 import {
   WATCH_STATE_LABELS,
   budgetLabel,
   chatSupported,
   emptyThreadText,
-  lookoutWatchState,
+  pilotWatchState,
   mergeMessages,
   newestMessageId,
   nudgeErrorText,
   pendingQuestionShown,
   repoForPath,
-  type LookoutWatchState,
-} from "./lookout.logic";
+  type PilotWatchState,
+} from "./pilot.logic";
 import {
-  LOOKOUT_STATUS_POLL_MS,
-  noteLookoutSeen,
-  noteLookoutStatus,
-  noteLookoutUnread,
+  PILOT_STATUS_POLL_MS,
+  notePilotSeen,
+  notePilotStatus,
+  notePilotUnread,
   usePoll,
-} from "./lookoutStore";
+} from "./pilotStore";
 
 /** The thread refreshes this often while the panel is open; the status as often as the top bar's. */
-export const LOOKOUT_CHAT_POLL_MS = 5000;
+export const PILOT_CHAT_POLL_MS = 5000;
 /** How many messages the panel loads when it opens. */
 const THREAD_LIMIT = 200;
-const UNREACHABLE = "Could not reach Lookout. Try again.";
+const UNREACHABLE = "Could not reach Pilot. Try again.";
 
-type LookoutView = "chat" | "activity" | "repos";
+type PilotView = "chat" | "activity" | "repos";
 
-const DOT_CLASS: Record<LookoutWatchState, string> = {
+const DOT_CLASS: Record<PilotWatchState, string> = {
   watching: "bg-success",
   paused: "bg-warning",
   "not-running": "bg-muted-foreground",
@@ -81,11 +81,11 @@ const DOT_CLASS: Record<LookoutWatchState, string> = {
   unknown: "bg-muted-foreground/50",
 };
 
-/** Lookout's status and thread while the panel is open, with every way to act on them. */
-function useLookoutChat(bridge: LookoutBridge, active: boolean) {
-  const [status, setStatus] = useState<LookoutResponse<LookoutStatus> | null>(null);
+/** Pilot's status and thread while the panel is open, with every way to act on them. */
+function usePilotChat(bridge: PilotBridge, active: boolean) {
+  const [status, setStatus] = useState<PilotResponse<PilotStatus> | null>(null);
   const [unreachable, setUnreachable] = useState(false);
-  const [messages, setMessages] = useState<readonly LookoutMessage[]>([]);
+  const [messages, setMessages] = useState<readonly PilotMessage[]>([]);
   const [threadError, setThreadError] = useState<string | null>(null);
   // The newest message the last thread check returned. Answers and nudge replies never move it,
   // so a nudge stored between two checks is still fetched.
@@ -98,12 +98,12 @@ function useLookoutChat(bridge: LookoutBridge, active: boolean) {
         if (!isCurrent()) return;
         setStatus(next);
         setUnreachable(false);
-        noteLookoutStatus(next);
+        notePilotStatus(next);
       } catch {
         if (isCurrent()) setUnreachable(true);
       }
     },
-    LOOKOUT_STATUS_POLL_MS,
+    PILOT_STATUS_POLL_MS,
     active,
   );
 
@@ -121,7 +121,7 @@ function useLookoutChat(bridge: LookoutBridge, active: boolean) {
         const next = await bridge.chat(after === null ? { limit: THREAD_LIMIT } : { since: after });
         if (!isCurrent()) return;
         if (!next.installed) {
-          setThreadError("Lookout is no longer installed.");
+          setThreadError("Pilot is no longer installed.");
           return;
         }
         if (!next.ok) {
@@ -132,16 +132,16 @@ function useLookoutChat(bridge: LookoutBridge, active: boolean) {
         setMessages((current) => mergeMessages(after === null ? [] : current, next.value.messages));
         const newest = Math.max(after ?? 0, ...next.value.messages.map((message) => message.id));
         since.current = newest;
-        noteLookoutUnread(next.value.unread);
+        notePilotUnread(next.value.unread);
       } catch {
         if (isCurrent()) setThreadError(UNREACHABLE);
       }
     },
-    LOOKOUT_CHAT_POLL_MS,
+    PILOT_CHAT_POLL_MS,
     chatEnabled,
   );
 
-  const applyMessages = useCallback((incoming: readonly LookoutMessage[]) => {
+  const applyMessages = useCallback((incoming: readonly PilotMessage[]) => {
     setMessages((current) => mergeMessages(current, incoming));
   }, []);
 
@@ -157,7 +157,7 @@ function useLookoutChat(bridge: LookoutBridge, active: boolean) {
   };
 }
 
-function StatusWord({ state }: { state: LookoutWatchState }) {
+function StatusWord({ state }: { state: PilotWatchState }) {
   return (
     <span className="flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
       <span aria-hidden className={cn("size-2 shrink-0 rounded-full", DOT_CLASS[state])} />
@@ -178,17 +178,17 @@ function NotInstalled({ launcher, onCheck }: { launcher: string; onCheck: () => 
           <EmptyMedia variant="icon">
             <ScanEyeIcon aria-hidden />
           </EmptyMedia>
-          <EmptyTitle>Lookout isn't installed</EmptyTitle>
+          <EmptyTitle>Pilot isn't installed</EmptyTitle>
           <EmptyDescription>
-            Lookout reads what you ask your Claude Code sessions and speaks up when you're about to
-            forget something. Install it once from a Lookout checkout:
+            Pilot reads what you ask your Claude Code sessions and speaks up when you're about to
+            forget something. Install it once from a Pilot checkout:
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <code className="w-full rounded-md bg-muted px-2 py-1.5 text-left font-mono text-xs break-words select-all">
-            &lt;path-to-lookout-checkout&gt;
+            &lt;path-to-pilot-checkout&gt;
             <wbr />
-            /scripts/lookout install
+            /scripts/pilot install
           </code>
           <p className="text-xs break-all text-muted-foreground">Stark Code looks for {launcher}</p>
           <Button size="xs" variant="outline" onClick={onCheck}>
@@ -200,7 +200,7 @@ function NotInstalled({ launcher, onCheck }: { launcher: string; onCheck: () => 
   );
 }
 
-/** One quiet line above the thread: why Lookout may stay silent, or what just failed. */
+/** One quiet line above the thread: why Pilot may stay silent, or what just failed. */
 function ThreadNotice({
   tone = "muted",
   children,
@@ -235,7 +235,7 @@ function Notice({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** Enter sends, Shift+Enter adds a line; the field stays editable while Lookout answers. */
+/** Enter sends, Shift+Enter adds a line; the field stays editable while Pilot answers. */
 function Composer({
   draft,
   disabled,
@@ -260,10 +260,10 @@ function Composer({
     >
       <Textarea
         size="sm"
-        aria-label="Ask Lookout"
-        placeholder="Ask Lookout…"
+        aria-label="Ask Pilot"
+        placeholder="Ask Pilot…"
         value={draft}
-        maxLength={LOOKOUT_ASK_MAX_LENGTH}
+        maxLength={PILOT_ASK_MAX_LENGTH}
         disabled={disabled}
         onChange={(event) => onDraftChange(event.target.value)}
         onKeyDown={(event) => {
@@ -290,46 +290,46 @@ const stacked = (heading: ReactNode, body: ReactNode) => (
 );
 
 /**
- * Lookout as a chat: its nudges and answers, newest at the bottom, a composer
+ * Pilot as a chat: its nudges and answers, newest at the bottom, a composer
  * to ask about your own sessions, and the watched repositories and activity
  * behind the "…" menu. `frame` places the heading controls and the body; by
  * default they render one after the other.
  */
-export function LookoutContent({
+export function PilotContent({
   bridge,
   active,
   projectRoot,
   timestampFormat,
   frame = stacked,
 }: {
-  bridge: LookoutBridge;
+  bridge: PilotBridge;
   active: boolean;
   /** The conversation's folder; its repository is marked in Watched repos. */
   projectRoot: string | null;
   timestampFormat: TimestampFormat;
   frame?: (heading: ReactNode, body: ReactNode) => ReactNode;
 }) {
-  const chat = useLookoutChat(bridge, active);
+  const chat = usePilotChat(bridge, active);
   const { status, messages, refreshStatus, refreshThread, applyMessages } = chat;
-  const [view, setView] = useState<LookoutView>("chat");
-  const [activity, setActivity] = useState<LookoutResponse<LookoutActivity> | null>(null);
+  const [view, setView] = useState<PilotView>("chat");
+  const [activity, setActivity] = useState<PilotResponse<PilotActivity> | null>(null);
   const [pendingRepo, setPendingRepo] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [pending, setPending] = useState<LookoutPendingQuestion | null>(null);
+  const [pending, setPending] = useState<PilotPendingQuestion | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
   const askToken = useRef(0);
-  const [busy, setBusy] = useState<ReadonlyMap<number, LookoutNudgeAction>>(new Map());
+  const [busy, setBusy] = useState<ReadonlyMap<number, PilotNudgeAction>>(new Map());
   const [nudgeErrors, setNudgeErrors] = useState<ReadonlyMap<number, string>>(new Map());
   const seenAsked = useRef(new Set<number>());
   const seenQueue = useRef<number[]>([]);
   const seenRunning = useRef(false);
   // Nudges already taken off the top bar's count, so seeing and acting on one counts once.
   const counted = useRef(new Set<number>());
-  const countSeen = (message: Pick<LookoutMessage, "id" | "state">) => {
+  const countSeen = (message: Pick<PilotMessage, "id" | "state">) => {
     if (message.state !== "new" || counted.current.has(message.id)) return;
     counted.current.add(message.id);
-    noteLookoutSeen(1);
+    notePilotSeen(1);
   };
   const latestMessages = useRef(messages);
   useLayoutEffect(() => {
@@ -347,17 +347,17 @@ export function LookoutContent({
           setActivity({ installed: true, ok: false, reason: "failed", error: UNREACHABLE });
       }
     },
-    LOOKOUT_STATUS_POLL_MS,
+    PILOT_STATUS_POLL_MS,
     active && statusOk && view === "activity",
   );
 
-  /** Runs one change to Lookout, shows its refusal, then refreshes the status. */
-  const change = async (key: string, call: () => Promise<LookoutResponse<unknown>>) => {
+  /** Runs one change to Pilot, shows its refusal, then refreshes the status. */
+  const change = async (key: string, call: () => Promise<PilotResponse<unknown>>) => {
     setPendingRepo(key);
     setActionError(null);
     try {
       const result = await call();
-      if (!result.installed) setActionError("Lookout is no longer installed.");
+      if (!result.installed) setActionError("Pilot is no longer installed.");
       else if (!result.ok) setActionError(result.error);
     } catch {
       setActionError(UNREACHABLE);
@@ -374,12 +374,12 @@ export function LookoutContent({
     return next;
   };
 
-  const actOnNudge = async (message: LookoutMessage, action: LookoutNudgeAction) => {
+  const actOnNudge = async (message: PilotMessage, action: PilotNudgeAction) => {
     setBusy((current) => withEntry(current, message.id, action));
     setNudgeErrors((current) => withEntry(current, message.id, undefined));
     try {
       const result = await bridge.nudge({ id: message.id, action });
-      if (!result.installed) throw new Error("Lookout is no longer installed.");
+      if (!result.installed) throw new Error("Pilot is no longer installed.");
       if (!result.ok) throw new Error(nudgeErrorText(result.error));
       applyMessages([result.value.message ?? { ...message, state: stateAfter(action) }]);
       countSeen(message);
@@ -436,11 +436,11 @@ export function LookoutContent({
       const result = await bridge.ask({ text });
       if (askToken.current !== token) return;
       if (!result.installed) {
-        setAskError("Lookout is no longer installed.");
+        setAskError("Pilot is no longer installed.");
         restore();
       } else if (!result.ok) {
         if (result.reason !== "cancelled") {
-          setAskError(`Lookout did not answer: ${result.error}`);
+          setAskError(`Pilot did not answer: ${result.error}`);
           restore();
         }
       } else {
@@ -463,7 +463,7 @@ export function LookoutContent({
     if (!pending) return;
     askToken.current++;
     const { text } = pending;
-    // Lookout may already have kept the question in the thread; otherwise it goes back to the composer.
+    // Pilot may already have kept the question in the thread; otherwise it goes back to the composer.
     const kept = !pendingQuestionShown(messages, pending);
     setPending(null);
     if (!kept) setDraft((current) => (current.trim() ? current : text));
@@ -471,7 +471,7 @@ export function LookoutContent({
     refreshThread();
   };
 
-  const watch = lookoutWatchState(status);
+  const watch = pilotWatchState(status);
   const state = statusOk ? status.value : null;
 
   const heading = (
@@ -484,7 +484,7 @@ export function LookoutContent({
       {state ? (
         <Menu>
           <MenuTrigger
-            render={<Button size="icon-sm" variant="ghost" aria-label="Lookout options" />}
+            render={<Button size="icon-sm" variant="ghost" aria-label="Pilot options" />}
           >
             <MoreHorizontalIcon aria-hidden />
           </MenuTrigger>
@@ -497,7 +497,7 @@ export function LookoutContent({
                 }
               >
                 {state.paused ? <PlayIcon aria-hidden /> : <PauseIcon aria-hidden />}
-                {state.paused ? "Resume Lookout" : "Pause Lookout"}
+                {state.paused ? "Resume Pilot" : "Pause Pilot"}
               </MenuItem>
               <MenuItem onClick={() => setView("repos")}>
                 <FolderGit2Icon aria-hidden />
@@ -523,9 +523,9 @@ export function LookoutContent({
       return (
         <CenteredState>
           {chat.unreachable ? (
-            <Notice title="Lookout did not answer">{UNREACHABLE}</Notice>
+            <Notice title="Pilot did not answer">{UNREACHABLE}</Notice>
           ) : (
-            <Notice title="Checking Lookout">One moment.</Notice>
+            <Notice title="Checking Pilot">One moment.</Notice>
           )}
         </CenteredState>
       );
@@ -536,7 +536,7 @@ export function LookoutContent({
       return (
         <div className="p-3">
           <Alert variant="error">
-            <AlertTitle>Lookout did not answer</AlertTitle>
+            <AlertTitle>Pilot did not answer</AlertTitle>
             <AlertDescription>{status.error}</AlertDescription>
             <AlertAction>
               <Button size="xs" variant="outline" onClick={() => refreshStatus()}>
@@ -578,14 +578,14 @@ export function LookoutContent({
                   </Alert>
                 </div>
               ) : (
-                <LookoutActivityView activity={activityValue} />
+                <PilotActivityView activity={activityValue} />
               )
             ) : (
-              <LookoutRepoList
+              <PilotRepoList
                 repos={value.repos}
                 preferredRepoKey={repoForPath(value.repos, projectRoot)}
                 pendingRepo={pendingRepo}
-                onSetPaused={(repo: LookoutRepo, paused) =>
+                onSetPaused={(repo: PilotRepo, paused) =>
                   void change(repo.key, () =>
                     (paused ? bridge.pause : bridge.resume)({ repo: repo.key }),
                   )
@@ -599,9 +599,9 @@ export function LookoutContent({
     if (!chat.canChat) {
       return (
         <CenteredState>
-          <Notice title="Update Lookout to chat">
-            This version of Lookout has no chat. Run its install command again from an updated
-            Lookout checkout.
+          <Notice title="Update Pilot to chat">
+            This version of Pilot has no chat. Run its install command again from an updated Pilot
+            checkout.
           </Notice>
         </CenteredState>
       );
@@ -609,17 +609,17 @@ export function LookoutContent({
     const notices = [
       watch === "not-running" ? (
         <ThreadNotice key="not-running">
-          Lookout isn't running. It starts with your next Claude Code session.
+          Pilot isn't running. It starts with your next Claude Code session.
         </ThreadNotice>
       ) : null,
       !value.selftest.ok ? (
         <ThreadNotice key="selftest" tone="warning">
-          Lookout is on hold: its safety check failed ({value.selftest.reason}).
+          Pilot is on hold: its safety check failed ({value.selftest.reason}).
         </ThreadNotice>
       ) : null,
       value.budget.availableCents <= 0 ? (
         <ThreadNotice key="budget">
-          Today's budget is used up. Lookout speaks up again when budget frees.
+          Today's budget is used up. Pilot speaks up again when budget frees.
         </ThreadNotice>
       ) : null,
       actionError || chat.unreachable || chat.threadError ? (
@@ -633,7 +633,7 @@ export function LookoutContent({
         {notices.length > 0 ? (
           <div className="flex shrink-0 flex-col border-b border-border">{notices}</div>
         ) : null}
-        <LookoutThread
+        <PilotThread
           messages={messages}
           pending={pending}
           askError={askError}
@@ -664,7 +664,7 @@ export function LookoutContent({
   return frame(heading, body);
 }
 
-const stateAfter = (action: LookoutNudgeAction): LookoutMessage["state"] =>
+const stateAfter = (action: PilotNudgeAction): PilotMessage["state"] =>
   action === "send"
     ? "sent"
     : action === "dismiss"
@@ -675,8 +675,8 @@ const stateAfter = (action: LookoutNudgeAction): LookoutMessage["state"] =>
           ? "not_useful"
           : "seen";
 
-/** Lookout in the docked tool frame beside the chat, like Pages and Conversation tools. */
-export function LookoutPanel({
+/** Pilot in the docked tool frame beside the chat, like Pages and Conversation tools. */
+export function PilotPanel({
   active,
   inline,
   onClose,
@@ -690,23 +690,23 @@ export function LookoutPanel({
   readonly projectRoot: string | null;
   readonly timestampFormat: TimestampFormat;
 }) {
-  const bridge = window.desktopBridge?.lookout;
+  const bridge = window.desktopBridge?.pilot;
   const panel = (heading: ReactNode, body: ReactNode) => (
     <ConversationToolsPanel
       active={active}
       inline={inline}
       onClose={onClose}
       tools={tools}
-      title="Lookout"
-      name="Lookout"
-      widthStorageKey="starkcode:lookout-panel-width"
+      title="Pilot"
+      name="Pilot"
+      widthStorageKey="starkcode:pilot-panel-width"
       heading={heading}
     >
       {body}
     </ConversationToolsPanel>
   );
   return bridge ? (
-    <LookoutContent bridge={bridge} active={active} frame={panel} {...content} />
+    <PilotContent bridge={bridge} active={active} frame={panel} {...content} />
   ) : (
     panel(null, null)
   );

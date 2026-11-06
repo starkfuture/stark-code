@@ -1,18 +1,18 @@
-import type { LookoutActivityRun, LookoutMessage } from "@starkfuture/contracts";
+import type { PilotActivityRun, PilotMessage } from "@starkfuture/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   budgetLabel,
   describeEvent,
   describeRun,
   emptyThreadText,
-  lookoutWatchState,
+  pilotWatchState,
   mergeMessages,
   pendingQuestionShown,
   plainRunSummary,
   quoteSourceLabel,
   repoForPath,
   withKeys,
-} from "./lookout.logic";
+} from "./pilot.logic";
 
 const status = (overrides: { running?: boolean; paused?: boolean } = {}) =>
   ({
@@ -24,10 +24,10 @@ const status = (overrides: { running?: boolean; paused?: boolean } = {}) =>
     },
   }) as never;
 
-const message = (id: number, overrides: Partial<LookoutMessage> = {}): LookoutMessage => ({
+const message = (id: number, overrides: Partial<PilotMessage> = {}): PilotMessage => ({
   id,
   at: "2026-11-06T09:00:00.000Z",
-  role: "lookout",
+  role: "pilot",
   kind: "nudge",
   nudgeKind: "rule",
   text: `message ${id}`,
@@ -39,26 +39,26 @@ const message = (id: number, overrides: Partial<LookoutMessage> = {}): LookoutMe
   ...overrides,
 });
 
-describe("lookoutWatchState", () => {
-  it("never says Watching for a stopped or paused Lookout", () => {
-    expect(lookoutWatchState(null)).toBe("unknown");
-    expect(lookoutWatchState({ installed: false, launcher: "/x" })).toBe("not-installed");
-    expect(
-      lookoutWatchState({ installed: true, ok: false, reason: "timeout", error: "slow" }),
-    ).toBe("unknown");
-    expect(lookoutWatchState(status())).toBe("watching");
-    expect(lookoutWatchState(status({ paused: true }))).toBe("paused");
-    expect(lookoutWatchState(status({ running: false, paused: true }))).toBe("not-running");
+describe("pilotWatchState", () => {
+  it("never says Watching for a stopped or paused Pilot", () => {
+    expect(pilotWatchState(null)).toBe("unknown");
+    expect(pilotWatchState({ installed: false, launcher: "/x" })).toBe("not-installed");
+    expect(pilotWatchState({ installed: true, ok: false, reason: "timeout", error: "slow" })).toBe(
+      "unknown",
+    );
+    expect(pilotWatchState(status())).toBe("watching");
+    expect(pilotWatchState(status({ paused: true }))).toBe("paused");
+    expect(pilotWatchState(status({ running: false, paused: true }))).toBe("not-running");
   });
 
   it("keeps the empty thread's promise in line with the status word", () => {
     expect(emptyThreadText("watching", 3)).toBe(
-      "Watching 3 sessions. Lookout speaks up when you're about to forget something.",
+      "Watching 3 sessions. Pilot speaks up when you're about to forget something.",
     );
     expect(emptyThreadText("watching", 1)).toMatch(/^Watching 1 session\./);
     expect(emptyThreadText("watching", 0)).toMatch(/^Watching your Claude Code sessions\./);
     expect(emptyThreadText("not-running", 3)).toBe(
-      "Lookout starts with your next Claude Code session.",
+      "Pilot starts with your next Claude Code session.",
     );
     expect(emptyThreadText("not-running", 3)).not.toContain("Watching");
     expect(emptyThreadText("paused", 3)).not.toContain("Watching");
@@ -77,7 +77,7 @@ describe("the thread", () => {
     expect(mergeMessages(current, [])).toBe(current);
   });
 
-  it("drops the waiting question's bubble once Lookout has stored it", () => {
+  it("drops the waiting question's bubble once Pilot has stored it", () => {
     const pending = { text: "what's waiting on me?", afterId: 3 };
     const thread = [message(3), message(1, { role: "you", kind: "message", text: pending.text })];
     // The same words asked before do not count.
@@ -115,18 +115,18 @@ describe("quoteSourceLabel", () => {
     expect(quoteSourceLabel({ source: "session", where })).toBe(
       "The session said, in billing · fix the invoice rounding ·\u00a02h\u00a0ago",
     );
-    // A time Lookout writes another way is kept as written.
+    // A time Pilot writes another way is kept as written.
     expect(quoteSourceLabel({ source: "prompt", where: "orders · deploy it · 14:32" })).toBe(
       "You, in orders · deploy it · 14:32",
     );
     expect(quoteSourceLabel({ source: "nudge", where: "2026-11-06T10:30:00.000Z" })).toBe(
-      "Lookout said earlier ·\u00a030m\u00a0ago",
+      "Pilot said earlier ·\u00a030m\u00a0ago",
     );
   });
 });
 
 describe("activity in plain words", () => {
-  const run = (overrides: Partial<LookoutActivityRun>): LookoutActivityRun => ({
+  const run = (overrides: Partial<PilotActivityRun>): PilotActivityRun => ({
     id: 1,
     kind: "checkpoint",
     status: "done",
@@ -139,7 +139,7 @@ describe("activity in plain words", () => {
     ...overrides,
   });
 
-  it("never shows Lookout's internal words", () => {
+  it("never shows Pilot's internal words", () => {
     const failed = describeRun(
       run({
         status: "timed_out",
@@ -153,7 +153,7 @@ describe("activity in plain words", () => {
       summary: null,
     });
     const strange = describeRun(run({ kind: "probe_v2", status: "zombie", trigger: "x+y" }));
-    expect(strange).toEqual({ title: "Lookout check in billing", detail: "", summary: null });
+    expect(strange).toEqual({ title: "Pilot check in billing", detail: "", summary: null });
     for (const value of [failed, strange])
       expect(JSON.stringify(value)).not.toMatch(/timed_out|changed-outside-edits|\[checkpoint\]/);
   });
@@ -165,7 +165,7 @@ describe("activity in plain words", () => {
     expect(plainRunSummary("no change since last assessment (snap-4f9c)")).toBe(
       "No change since the last check",
     );
-    expect(plainRunSummary("waiting (details: lookout runs)")).toBe("Waiting");
+    expect(plainRunSummary("waiting (details: pilot runs)")).toBe("Waiting");
     expect(describeRun(run({ trigger: "stop+test", summary: "[intent] nothing new" }))).toEqual({
       title: "Reviewed changes in billing",
       detail: "Done, when a turn ended",

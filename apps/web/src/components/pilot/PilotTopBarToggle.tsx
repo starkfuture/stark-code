@@ -1,22 +1,22 @@
 import { ScanEyeIcon } from "lucide-react";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { useLookoutIndicator } from "./lookoutStore";
+import { usePilotIndicator } from "./pilotStore";
 
 /**
- * Lookout's window-level button beside Tools: it opens and closes the Lookout
- * chat, and a dot marks nudges the person has not seen. Hidden until Lookout
- * is installed; Tools → Lookout still explains how to install it.
+ * Pilot's window-level button beside Tools: it opens and closes the Pilot
+ * chat, and a dot marks nudges the person has not seen. Hidden until Pilot
+ * is installed; Tools → Pilot still explains how to install it.
  */
-export function LookoutTopBarToggle({
+export function PilotTopBarToggle({
   open,
   onToggle,
 }: {
   readonly open: boolean;
   readonly onToggle: () => void;
 }) {
-  const installed = useLookoutIndicator((state) => state.installed);
-  const unread = useLookoutIndicator((state) => state.unread);
+  const installed = usePilotIndicator((state) => state.installed);
+  const unread = usePilotIndicator((state) => state.unread);
   if (installed !== true && !open) return null;
   const hasUnread = unread > 0;
   return (
@@ -28,13 +28,11 @@ export function LookoutTopBarToggle({
             pressed={open}
             onPressedChange={onToggle}
             aria-label={
-              hasUnread
-                ? `Lookout, ${unread} unread ${unread === 1 ? "nudge" : "nudges"}`
-                : "Lookout"
+              hasUnread ? `Pilot, ${unread} unread ${unread === 1 ? "nudge" : "nudges"}` : "Pilot"
             }
             variant="ghost"
             size="sm"
-            data-lookout-unread={hasUnread ? unread : undefined}
+            data-pilot-unread={hasUnread ? unread : undefined}
           >
             <span className="relative grid size-4 place-items-center">
               <ScanEyeIcon className="size-4" />
@@ -48,7 +46,7 @@ export function LookoutTopBarToggle({
           </Toggle>
         }
       />
-      <TooltipPopup side="bottom">Lookout</TooltipPopup>
+      <TooltipPopup side="bottom">Pilot</TooltipPopup>
     </Tooltip>
   );
 }

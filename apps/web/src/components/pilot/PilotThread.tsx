@@ -1,7 +1,7 @@
 import type {
-  LookoutMessage,
-  LookoutNudgeAction,
-  LookoutQuote,
+  PilotMessage,
+  PilotNudgeAction,
+  PilotQuote,
   TimestampFormat,
 } from "@starkfuture/contracts";
 import { CheckIcon, CircleAlertIcon } from "lucide-react";
@@ -19,21 +19,21 @@ import {
   pendingQuestionShown,
   quoteSourceLabel,
   withKeys,
-} from "./lookout.logic";
+} from "./pilot.logic";
 
-/** The question waiting for Lookout's answer, shown until the thread has it. */
-export interface LookoutPendingQuestion {
+/** The question waiting for Pilot's answer, shown until the thread has it. */
+export interface PilotPendingQuestion {
   readonly text: string;
-  /** The newest message id when it was asked; Lookout stores the question after it. */
+  /** The newest message id when it was asked; Pilot stores the question after it. */
   readonly afterId: number | null;
 }
 
-export type LookoutNudgeAct = (message: LookoutMessage, action: LookoutNudgeAction) => void;
+export type PilotNudgeAct = (message: PilotMessage, action: PilotNudgeAction) => void;
 
 const NEAR_BOTTOM_PX = 48;
 
 /** A file source shows its full path on hover; session sources already read in full. */
-function SourceLabel({ quote }: { quote: LookoutQuote }) {
+function SourceLabel({ quote }: { quote: PilotQuote }) {
   const label = quoteSourceLabel(quote);
   if ((quote.source !== "rule" && quote.source !== "memory") || label === quote.where)
     return <span className="min-w-0 break-words">{label}</span>;
@@ -47,7 +47,7 @@ function SourceLabel({ quote }: { quote: LookoutQuote }) {
   );
 }
 
-function Quotes({ evidence }: { evidence: readonly LookoutQuote[] }) {
+function Quotes({ evidence }: { evidence: readonly PilotQuote[] }) {
   if (evidence.length === 0) return null;
   return (
     <ul className="flex flex-col gap-2" aria-label="Quotes">
@@ -102,15 +102,15 @@ function NudgeCard({
   timestampFormat,
   onAct,
 }: {
-  message: LookoutMessage;
-  busy: LookoutNudgeAction | null;
+  message: PilotMessage;
+  busy: PilotNudgeAction | null;
   error: string | null;
   timestampFormat: TimestampFormat;
-  onAct: LookoutNudgeAct;
+  onAct: PilotNudgeAct;
 }) {
   const kind = message.nudgeKind;
   const outcome = nudgeOutcome(message.state);
-  const action = (name: LookoutNudgeAction, label: string, variant: "outline" | "ghost") => (
+  const action = (name: PilotNudgeAction, label: string, variant: "outline" | "ghost") => (
     <Button
       size="xs"
       variant={variant}
@@ -123,7 +123,7 @@ function NudgeCard({
   );
   return (
     <article
-      aria-label={kind ? NUDGE_KIND_LABELS[kind] : "Lookout"}
+      aria-label={kind ? NUDGE_KIND_LABELS[kind] : "Pilot"}
       data-unseen-nudge={message.state === "new" ? message.id : undefined}
       className="flex min-w-0 flex-col gap-2 rounded-lg border border-border p-3"
     >
@@ -163,7 +163,7 @@ function NudgeCard({
   );
 }
 
-function MessageRow({ message }: { message: LookoutMessage }) {
+function MessageRow({ message }: { message: PilotMessage }) {
   if (message.role === "you") {
     return (
       <div className="flex justify-end">
@@ -187,11 +187,11 @@ function MessageRow({ message }: { message: LookoutMessage }) {
 }
 
 /**
- * The Lookout thread, newest at the bottom. It follows new messages while the
+ * The Pilot thread, newest at the bottom. It follows new messages while the
  * person is at the bottom, and reports nudges the person has not seen once
  * they are on screen.
  */
-export function LookoutThread({
+export function PilotThread({
   messages,
   pending,
   askError,
@@ -204,16 +204,16 @@ export function LookoutThread({
   onCancelAsk,
   onSeen,
 }: {
-  messages: readonly LookoutMessage[];
-  pending: LookoutPendingQuestion | null;
+  messages: readonly PilotMessage[];
+  pending: PilotPendingQuestion | null;
   askError: string | null;
   active: boolean;
   timestampFormat: TimestampFormat;
   /** The action running for each nudge id. */
-  busy: ReadonlyMap<number, LookoutNudgeAction>;
+  busy: ReadonlyMap<number, PilotNudgeAction>;
   errors: ReadonlyMap<number, string>;
   empty: ReactNode;
-  onAct: LookoutNudgeAct;
+  onAct: PilotNudgeAct;
   onCancelAsk: () => void;
   onSeen: (ids: readonly number[]) => void;
 }) {
@@ -277,10 +277,10 @@ export function LookoutThread({
         {messages.length === 0 && !pending ? (
           empty
         ) : (
-          <ol className="flex min-w-0 flex-col gap-3 p-3" aria-label="Lookout conversation">
+          <ol className="flex min-w-0 flex-col gap-3 p-3" aria-label="Pilot conversation">
             {messages.map((message) => (
               <li key={message.id} className="min-w-0">
-                {message.kind === "nudge" && message.role === "lookout" ? (
+                {message.kind === "nudge" && message.role !== "you" ? (
                   <NudgeCard
                     message={message}
                     busy={busy.get(message.id) ?? null}
@@ -303,7 +303,7 @@ export function LookoutThread({
             {pending ? (
               <li className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
                 <Spinner size="xs" aria-hidden />
-                <span>Lookout is thinking…</span>
+                <span>Pilot is thinking…</span>
                 <Button size="xs" variant="ghost" onClick={onCancelAsk}>
                   Cancel
                 </Button>

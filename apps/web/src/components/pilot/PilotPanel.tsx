@@ -308,11 +308,6 @@ function InstallRow({ install }: { install: PilotInstall }) {
         <InstallButton install={install} label={action} />
       </div>
       {blocker ? <p className="break-words text-warning-foreground">{blocker}</p> : null}
-      {install.error ? (
-        <p role="alert" className="break-words text-destructive-foreground">
-          {install.error}
-        </p>
-      ) : null}
       <InstallDetails status={install.status} />
     </div>
   );
@@ -980,9 +975,11 @@ export function PilotContent({
     }
     // At most one action row and one status line, by priority.
     const line = pilotStatusLine({
-      error: actionError ?? chat.threadError ?? (chat.unreachable ? UNREACHABLE : null),
+      error:
+        install.error ?? actionError ?? chat.threadError ?? (chat.unreachable ? UNREACHABLE : null),
       status: value,
       watch,
+      pluginInstalled: install.status?.state !== "not-installed",
       installedVersion: installAction(install.status) ? null : install.installed,
       selftest: selftestRun,
     });

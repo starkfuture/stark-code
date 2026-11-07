@@ -431,6 +431,7 @@ describe("pilotStatusLine", () => {
       error: null,
       status: ok,
       watch: "watching",
+      pluginInstalled: true,
       installedVersion: null,
       selftest: "idle",
       ...overrides,

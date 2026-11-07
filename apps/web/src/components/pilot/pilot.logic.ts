@@ -117,10 +117,12 @@ export function pilotStatusLine(input: {
   readonly error: string | null;
   readonly status: Pick<PilotStatus, "selftest" | "budget">;
   readonly watch: PilotWatchState;
+  readonly pluginInstalled: boolean;
   readonly installedVersion: string | null;
   readonly selftest: "idle" | "running" | "failed";
 }): PilotStatusLine | null {
   if (input.error) return { kind: "error", text: input.error };
+  if (!input.pluginInstalled) return null;
   if (!input.status.selftest.ok)
     return {
       kind: "on-hold",

@@ -600,6 +600,14 @@ it("shows one status line, on hold first, and runs the self-test from it", async
 });
 
 it("uninstalls from the options menu after one confirming line, and offers Install again", async () => {
+  bridge.status.mockResolvedValue(
+    ok({
+      ...STATUS,
+      daemon: { running: false, pid: null, heartbeatAt: null },
+      selftest: { ok: false, reason: "No self-test recorded" },
+    }),
+  );
+  bridge.selftest = vi.fn();
   bridge.installStatus = vi.fn(async () => ({ ok: true, value: INSTALLED }));
   bridge.install = vi.fn();
   bridge.uninstall = vi.fn(async () => ({ ok: true, value: PLUGIN }));
@@ -627,6 +635,36 @@ it("uninstalls from the options menu after one confirming line, and offers Insta
   expect(bridge.uninstall).toHaveBeenCalledTimes(1);
   expect(container.textContent).toContain("Pilot isn't installed in Claude Code.");
   expect(button("Install").disabled).toBe(false);
+  expect(container.textContent).not.toContain("Pilot is on hold");
+  expect(container.textContent).not.toContain("Run self-test");
+  expect(bridge.selftest).not.toHaveBeenCalled();
+});
+
+it("shows an uninstall failure and allows another attempt", async () => {
+  bridge.installStatus = vi.fn(async () => ({ ok: true, value: INSTALLED }));
+  bridge.uninstall = vi.fn(async () => ({
+    ok: false,
+    reason: "failed",
+    error: "Claude Code could not remove pilot@pilot.",
+  }));
+  await render();
+  const uninstallFromMenu = async () => {
+    await click("Pilot options");
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (candidate) => candidate.textContent?.includes("Uninstall Pilot"),
+    );
+    await act(async () => item!.click());
+    await settle();
+    await click("Uninstall");
+  };
+  await uninstallFromMenu();
+  expect(bridge.uninstall).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toContain("Claude Code could not remove pilot@pilot.");
+  bridge.uninstall.mockResolvedValue({ ok: true, value: PLUGIN });
+  await uninstallFromMenu();
+  expect(bridge.uninstall).toHaveBeenCalledTimes(2);
+  expect(container.textContent).toContain("Pilot isn't installed in Claude Code.");
+  expect(container.textContent).not.toContain("Claude Code could not remove pilot@pilot.");
 });
 
 const engineTrigger = () =>

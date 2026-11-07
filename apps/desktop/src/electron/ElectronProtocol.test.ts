@@ -23,7 +23,7 @@ vi.mock("electron", () => ({
 }));
 
 import * as ElectronProtocol from "./ElectronProtocol.ts";
-import { encodeUiBundle, UI_POLICY_FILE } from "../updates/DesktopUiBundle.ts";
+import { encodeUiBundle, UI_POLICY_FILE } from "@starkfuture/shared/desktopUiBundle";
 
 const layerProtocol = ElectronProtocol.layer.pipe(Layer.provide(NodeServices.layer));
 

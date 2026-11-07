@@ -329,13 +329,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual(latestConfig, {
         provider: "github",
         owner: "example",
-        repo: "starkcode",
+        repo: "stark-code",
         releaseType: "release",
       });
       assert.deepStrictEqual(nightlyConfig, {
         provider: "github",
         owner: "example",
-        repo: "starkcode",
+        repo: "stark-code",
         releaseType: "prerelease",
         channel: "nightly",
       });
@@ -379,7 +379,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         {
           provider: "github",
           owner: "example",
-          repo: "starkcode",
+          repo: "stark-code",
           releaseType: "release",
         },
       ]);
@@ -2218,6 +2218,33 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
+  it.effect("ad hoc signs interface update builds without Developer ID credentials", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3-preview.1",
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        "arm64",
+        "/tmp/entitlements.ui.plist",
+      );
+      const mac = config.mac as Record<string, unknown>;
+      assert.equal(mac.identity, "-");
+      assert.equal(mac.notarize, false);
+      assert.equal(mac.timestamp, "none");
+      assert.equal(mac.hardenedRuntime, true);
+      assert.equal(mac.entitlements, "/tmp/entitlements.ui.plist");
+      assert.equal(mac.entitlementsInherit, "/tmp/entitlements.ui.plist");
+      assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
+      assert.notProperty(mac, "provisioningProfile");
+      assert.notProperty(config, "publish");
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
   it.effect("uses the nightly DMG background for nightly macOS builds", () =>
     Effect.gen(function* () {
       const config = yield* createBuildConfig(
@@ -2312,7 +2339,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("parses Windows bsdtar member listings with CRLF line endings", () => {
     assert.deepStrictEqual(
       parseWslRuntimeArchiveMembers(
-        "./stark-1.2.3-linux-x64/stark\r\nt3-1.2.3-linux-x64/client/\r\n",
+        "./stark-1.2.3-linux-x64/stark-code\r\nstark-1.2.3-linux-x64/client/\r\n",
       ),
       ["stark-1.2.3-linux-x64/stark-code", "stark-1.2.3-linux-x64/client"],
     );

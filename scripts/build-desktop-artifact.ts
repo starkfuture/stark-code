@@ -26,10 +26,7 @@ import desktopPackageJson from "../apps/desktop/package.json" with { type: "json
 import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 import pilotPackageJson from "../packages/pilot/package.json" with { type: "json" };
-import {
-  decodeUiUpdatePolicy,
-  UI_POLICY_FILE,
-} from "../apps/desktop/src/updates/DesktopUiBundle.ts";
+import { decodeUiUpdatePolicy, UI_POLICY_FILE } from "@starkfuture/shared/desktopUiBundle";
 
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
 import { prepareStarkWorkbench } from "./prepare-stark-workbench.mjs";
@@ -66,6 +63,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 const DESKTOP_APP_ID = BRAND.bundleId;
+const UiUpdatePolicyJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown));
+const decodeUiUpdatePolicyJson = Schema.decodeUnknownEffect(UiUpdatePolicyJson);
+const encodeUiUpdatePolicyJson = Schema.encodeEffect(UiUpdatePolicyJson);
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 class StarkWorkbenchBundlePreparationError extends Schema.TaggedError<StarkWorkbenchBundlePreparationError>()(
@@ -3794,10 +3794,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   );
   const uiPolicy = Option.isSome(uiPolicyPath)
     ? yield* fs.readFileString(path.resolve(repoRoot, uiPolicyPath.value)).pipe(
+        Effect.flatMap(decodeUiUpdatePolicyJson),
         Effect.flatMap((raw) =>
           Effect.try(() => {
             const policy = decodeUiUpdatePolicy(
-              { ...JSON.parse(raw), target: appVersion + ":" + commitHash },
+              { ...raw, target: appVersion + ":" + commitHash },
               BRAND.updateFeedOrigins,
             );
             const preview = /-(?:preview|pr)\./.test(appVersion);
@@ -3969,7 +3970,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     const stagedUiPolicy = path.join(stagedServerDist, UI_POLICY_FILE);
     yield* fs.remove(stagedUiPolicy, { force: true });
     if (uiPolicy !== undefined) {
-      yield* fs.writeFileString(stagedUiPolicy, JSON.stringify(uiPolicy));
+      yield* fs.writeFileString(stagedUiPolicy, yield* encodeUiUpdatePolicyJson(uiPolicy));
       yield* Effect.log("[desktop-artifact] Interface update target " + uiPolicy.target);
     }
   }

@@ -11,7 +11,7 @@ import {
   encodeUiBundle,
   openUiBundle,
   readUiBundleAsset,
-} from "./DesktopUiBundle.ts";
+} from "@starkfuture/shared/desktopUiBundle";
 import { checkForUiUpdate } from "./DesktopUiUpdate.ts";
 
 const keys = NodeCrypto.generateKeyPairSync("ed25519");

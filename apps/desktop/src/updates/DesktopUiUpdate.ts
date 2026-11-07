@@ -16,7 +16,7 @@ import {
   openUiBundle,
   UI_POLICY_FILE,
   type UiUpdatePolicy,
-} from "./DesktopUiBundle.ts";
+} from "@starkfuture/shared/desktopUiBundle";
 
 class UiUpdateError extends Data.TaggedError("UiUpdateError")<{
   readonly message: string;
@@ -87,7 +87,7 @@ async function stageVerifiedBundle(
   return bundle.revision;
 }
 
-/** Stage a complete signed release for the next server start. */
+/** Stage a complete signed release for the next desktop launch. */
 export const checkForUiUpdate = Effect.fn("DesktopUiUpdate.check")(
   function* (directory: string, policy: UiUpdatePolicy, etag?: string) {
     const response = yield* HttpClient.get(policy.url, {

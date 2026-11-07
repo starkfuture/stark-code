@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./desktopUiBundle": {
+      "types": "./src/desktopUiBundle.ts",
+      "import": "./src/desktopUiBundle.ts"
+    },
     "./selectedTextQuotes": {
       "types": "./src/selectedTextQuotes.ts",
       "import": "./src/selectedTextQuotes.ts"

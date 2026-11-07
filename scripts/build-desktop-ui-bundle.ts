@@ -1,12 +1,10 @@
 #!/usr/bin/env node
+// @effect-diagnostics nodeBuiltinImport:off - The archive signer uses Node key objects and file handles.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
-import {
-  encodeUiBundle,
-  MAX_UI_BUNDLE_BYTES,
-} from "../apps/desktop/src/updates/DesktopUiBundle.ts";
+import { encodeUiBundle, MAX_UI_BUNDLE_BYTES } from "@starkfuture/shared/desktopUiBundle";
 
 async function main() {
   const { values } = NodeUtil.parseArgs({
@@ -55,10 +53,14 @@ async function main() {
     privateKey: NodeCrypto.createPrivateKey(await NodeFSP.readFile(values["key-file"])),
   });
   await NodeFSP.writeFile(values.output, bundle, { flag: "wx" });
-  console.log("Wrote signed interface revision " + revision + " (" + bundle.byteLength + " bytes)");
+  process.stdout.write(
+    "Wrote signed interface revision " + revision + " (" + bundle.byteLength + " bytes)\n",
+  );
 }
 
 await main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "Could not build UI bundle");
+  process.stderr.write(
+    (error instanceof Error ? error.message : "Could not build UI bundle") + "\n",
+  );
   process.exitCode = 1;
 });

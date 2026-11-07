@@ -11,7 +11,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
-import { readUiBundleAsset, type OpenUiBundle } from "../updates/DesktopUiBundle.ts";
+import { readUiBundleAsset, type OpenUiBundle } from "@starkfuture/shared/desktopUiBundle";
 import * as DesktopUiUpdate from "../updates/DesktopUiUpdate.ts";
 
 export const DESKTOP_HOST = "app";
